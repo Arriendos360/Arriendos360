@@ -19,6 +19,7 @@ const {
     MODO_REMOTO,
     TABLA_RUTAS,
     describirEnrutamiento,
+    lineasEnrutamiento,
     modoDe,
     resolverPrefijo,
     urlDestino
@@ -58,6 +59,7 @@ module.exports = {
     TABLA_RUTAS,
     crearEnrutadorGateway,
     describirEnrutamiento,
+    lineasEnrutamiento,
     modoDe,
     resolverPrefijo,
     urlDestino

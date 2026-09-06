@@ -71,23 +71,67 @@ const resolverPrefijo = (ruta) =>
         (entrada) => ruta === entrada.prefijo || ruta.startsWith(`${entrada.prefijo}/`)
     ) || null;
 
+/** Ancho del prefijo mas largo, para alinear el listado de arranque. */
+const ANCHO_PREFIJO = TABLA_RUTAS.reduce(
+    (maximo, entrada) => Math.max(maximo, entrada.prefijo.length),
+    0
+);
+
 /**
- * Resumen legible del enrutamiento vigente, para registrar al arrancar.
+ * Una linea por prefijo, con su modo resuelto y, si es remoto, la URL de destino.
  *
- * Ejemplo: `/api/auth=local /api/inmuebles=remoto(ms-inmuebles)`
+ * En modo local dice ademas por que: si el prefijo tiene variable de entorno,
+ * nombra cual falta por definir; si no la tiene, que es local por diseno. Esa
+ * pista ahorra el rato de depuracion clasico de "puse la URL y sigue yendo al
+ * monolito" cuando en realidad la variable estaba mal escrita.
  */
-const describirEnrutamiento = (entorno = process.env) =>
+const lineasEnrutamiento = (entorno = process.env) =>
     TABLA_RUTAS.map((entrada) => {
-        const modo = modoDe(entrada, entorno);
-        const detalle = modo === MODO_REMOTO ? `${modo}(${entrada.servicio})` : modo;
-        return `${entrada.prefijo}=${detalle}`;
-    }).join(' ');
+        const prefijo = entrada.prefijo.padEnd(ANCHO_PREFIJO);
+        const destino = urlDestino(entrada, entorno);
+
+        if (destino !== null) {
+            return `${prefijo}  remoto  ->  ${destino}  (${entrada.servicio})`;
+        }
+
+        const motivo =
+            entrada.variableEntorno === null
+                ? 'siempre local, no tiene servicio propio'
+                : `${entrada.variableEntorno} sin definir`;
+
+        return `${prefijo}  local   (${motivo})`;
+    });
+
+/**
+ * Resumen multilinea del enrutamiento vigente, para registrar al arrancar.
+ *
+ * Ejemplo:
+ * ```
+ * Enrutamiento del gateway (6 prefijos):
+ *    /api/auth       local   (MS_IDENTIDAD_URL sin definir)
+ *    /api/inmuebles  remoto  ->  http://ms-inmuebles:3012  (ms-inmuebles)
+ *    /api/dashboard  local   (siempre local, no tiene servicio propio)
+ * ```
+ */
+const describirEnrutamiento = (entorno = process.env) => {
+    const remotos = TABLA_RUTAS.filter(
+        (entrada) => modoDe(entrada, entorno) === MODO_REMOTO
+    ).length;
+    const encabezado =
+        `Enrutamiento del gateway (${TABLA_RUTAS.length} prefijos, ` +
+        `${remotos} remoto${remotos === 1 ? '' : 's'}):`;
+
+    return [encabezado, ...lineasEnrutamiento(entorno).map((linea) => `   ${linea}`)].join(
+        '\n'
+    );
+};
 
 module.exports = {
     MODO_LOCAL,
     MODO_REMOTO,
     TABLA_RUTAS,
     describirEnrutamiento,
+    lineasEnrutamiento,
     modoDe,
     resolverPrefijo,
     urlDestino

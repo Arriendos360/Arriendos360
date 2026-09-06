@@ -72,7 +72,7 @@ if (process.env.NODE_ENV !== 'test') {
             // Iniciar Motor Financiero (Background Tasks)
             iniciarMotorFinanciero();
 
-            console.log(`🔀 Enrutamiento: ${describirEnrutamiento()}`);
+            console.log(`🔀 ${describirEnrutamiento()}`);
 
             app.listen(PORT, () => {
                 console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
