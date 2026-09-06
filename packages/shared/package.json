@@ -1,0 +1,6 @@
+{
+  "name": "arriendos360-shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Utilidades compartidas entre servicios: verificacion de JWT, errores, logger, cliente HTTP. Pendiente de implementar: ver CLAUDE.md."
+}
