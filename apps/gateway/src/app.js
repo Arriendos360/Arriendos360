@@ -13,12 +13,20 @@ const pagoRoutes = require('./routes/pago.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const adminRoutes = require('./routes/admin.routes');
 const { iniciarMotorFinanciero } = require('./services/financialEngine');
+const { crearEnrutadorGateway, describirEnrutamiento } = require('./routing');
 
 // Crear aplicación Express
 const app = express();
 
 // Middlewares
 app.use(cors());
+
+// Costura de enrutamiento: reenvía al microservicio los prefijos que ya se
+// extrajeron y deja pasar el resto al código local de abajo. Va antes de
+// express.json() a propósito, para que el cuerpo llegue sin parsear al reenvío
+// y multipart/form-data (anexos) funcione. Hoy todos los prefijos son locales.
+app.use(crearEnrutadorGateway());
+
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
@@ -63,7 +71,9 @@ if (process.env.NODE_ENV !== 'test') {
 
             // Iniciar Motor Financiero (Background Tasks)
             iniciarMotorFinanciero();
-            
+
+            console.log(`🔀 Enrutamiento: ${describirEnrutamiento()}`);
+
             app.listen(PORT, () => {
                 console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
             });
