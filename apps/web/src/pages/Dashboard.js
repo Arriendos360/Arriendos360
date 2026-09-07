@@ -8,7 +8,7 @@ import {
 import api from '../services/api';
 import {
     TrendingUp, Home, AlertCircle, FileText,
-    MapPin, ArrowRight, Zap, Calendar,
+    MapPin, ArrowRight, Calendar,
     CheckCircle, Clock
 } from 'lucide-react';
 
@@ -19,8 +19,6 @@ const Dashboard = () => {
     const [resumen, setResumen]       = useState(null);
     const [pagos, setPagos]           = useState([]);
     const [loading, setLoading]       = useState(true);
-    const [ejecutando, setEjecutando] = useState(false);
-    const [motorMsg, setMotorMsg]     = useState('');
 
     const fetchData = async () => {
         try {
@@ -38,20 +36,6 @@ const Dashboard = () => {
     };
 
     useEffect(() => { fetchData(); }, []);
-
-    const ejecutarMotor = async () => {
-        setEjecutando(true);
-        setMotorMsg('');
-        try {
-            const res = await api.post('/admin/ejecutar-motor');
-            setMotorMsg('✅ ' + res.data.mensaje);
-            await fetchData();
-        } catch {
-            setMotorMsg('❌ Error al ejecutar motor');
-        } finally {
-            setEjecutando(false);
-        }
-    };
 
     const formatDate = (dateString, options = { month: 'long', year: 'numeric' }) => {
         if (!dateString) return 'N/A';
@@ -117,13 +101,6 @@ const Dashboard = () => {
                 <div>
                     <h2 style={{ fontSize: '1.875rem', fontWeight: '800', color: '#0f172a', letterSpacing: '-0.02em' }}>Dashboard</h2>
                     <p style={{ color: '#64748b', marginTop: '0.25rem' }}>Resumen de tus arrendamientos en tiempo real.</p>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
-                    <button onClick={ejecutarMotor} disabled={ejecutando} className="btn btn-primary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Zap size={16} /> {ejecutando ? 'Ejecutando...' : 'Motor Financiero'}
-                    </button>
-                    {motorMsg && <span style={{ fontSize: '0.78rem', color: motorMsg.startsWith('✅') ? '#16a34a' : '#ef4444' }}>{motorMsg}</span>}
                 </div>
             </div>
 

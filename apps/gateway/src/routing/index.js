@@ -9,11 +9,23 @@
  * routers de Express. Esta costura no cambia nada observable todavia; existe
  * para que el paso 3 solo tenga que poner una URL en el entorno.
  *
- * Orden de montaje (importa): va DESPUES de `cors()` y ANTES de
- * `express.json()`. Ver el comentario de `proxy.js` sobre streaming del cuerpo.
+ * Orden de montaje (importa): va DESPUES de `cors()` y del control de acceso, y
+ * ANTES de `express.json()`. Que el RBAC vaya primero no es un detalle: una
+ * peticion denegada no debe llegar a la red interna. Ver el comentario de
+ * `proxy.js` sobre streaming del cuerpo.
  */
 
 const { reenviar } = require('./proxy');
+const {
+    AUTENTICADO,
+    MATRIZ,
+    PUBLICO,
+    describirMatriz,
+    esRutaDeApi,
+    lineasMatriz,
+    resolverPolitica
+} = require('./matriz');
+const { MENSAJE_NO_DECLARADA, crearControlDeAcceso } = require('./rbac');
 const {
     MODO_LOCAL,
     MODO_REMOTO,
@@ -54,10 +66,19 @@ const crearEnrutadorGateway = (opciones = {}) => {
 };
 
 module.exports = {
+    AUTENTICADO,
+    MATRIZ,
+    MENSAJE_NO_DECLARADA,
     MODO_LOCAL,
     MODO_REMOTO,
+    PUBLICO,
     TABLA_RUTAS,
+    crearControlDeAcceso,
     crearEnrutadorGateway,
+    describirMatriz,
+    esRutaDeApi,
+    lineasMatriz,
+    resolverPolitica,
     describirEnrutamiento,
     lineasEnrutamiento,
     modoDe,

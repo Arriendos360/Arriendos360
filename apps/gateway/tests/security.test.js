@@ -82,10 +82,15 @@ describe('Seguridad de Inmuebles', () => {
         expect(response.statusCode).toBe(404);
     });
 
-    test('Un inquilino no ve los inmuebles de nadie en el listado', async () => {
-        // ABAC de pertenencia (regla dura 8). El código anterior sólo filtraba
-        // cuando el rol era propietario y devolvía TODOS los inmuebles a
-        // cualquier otro usuario autenticado.
+    test('Un inquilino ni siquiera llega al listado: lo corta la matriz RBAC', async () => {
+        // Autorización en dos niveles (regla dura 8). Este es el primero: la
+        // matriz del gateway declara todo /api/inmuebles como PROPIETARIO, así
+        // que la petición se deniega antes de tocar el controlador.
+        //
+        // Antes de la matriz esta prueba esperaba 200 con lista vacía, porque la
+        // única defensa era el filtro del controlador (ver docs/adr/0005). Ese
+        // filtro sigue ahí y sigue haciendo falta: es el segundo nivel, y es el
+        // que separa a un propietario de otro. Lo comprueba la prueba siguiente.
         const login = await request(app)
             .post('/api/auth/login')
             .send({ email: 'inq@test.com', contrasena: 'pass123' });
@@ -93,6 +98,17 @@ describe('Seguridad de Inmuebles', () => {
         const response = await request(app)
             .get('/api/inmuebles')
             .set(...conToken(login.body.token));
+
+        expect(response.statusCode).toBe(403);
+    });
+
+    test('Un propietario sin inmuebles recibe lista vacía, no los de otros', async () => {
+        // El segundo nivel: ABAC de pertenencia en el controlador. Owner 2 pasa
+        // la matriz porque su rol es el correcto; lo que lo detiene es que los
+        // inmuebles no son suyos.
+        const response = await request(app)
+            .get('/api/inmuebles')
+            .set(...conToken(tokenOwner2));
 
         expect(response.statusCode).toBe(200);
         expect(response.body).toEqual([]);

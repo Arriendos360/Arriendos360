@@ -10,7 +10,7 @@
  * poner su URL en el entorno, sin tocar codigo ni redesplegar el gateway con
  * otra bandera.
  *
- * Hoy las cuatro variables estan vacias, de modo que los siete prefijos resuelven
+ * Hoy las cuatro variables estan vacias, de modo que los seis prefijos resuelven
  * en LOCAL y el comportamiento es identico al de antes de esta costura.
  *
  * `/api/auth` y `/api/usuarios` comparten variable: los dos son ms-identidad, y
@@ -26,8 +26,11 @@ const MODO_REMOTO = 'remoto';
  *
  * - `/api/dashboard` vive en el gateway por diseno (regla dura 5): no tiene
  *   tablas propias, solo agrega respuestas de Contratos y Financiero.
- * - `/api/admin` son utilidades de operacion del monolito, fuera del catalogo
- *   de servicios del Capitulo 2.
+ *
+ * `/api/admin` estuvo aqui hasta que se elimino el router que disparaba el motor
+ * financiero por HTTP. Ahora el motor se lanza con `npm run motor` desde la
+ * terminal, y cualquier peticion a ese prefijo la deniega la matriz RBAC por no
+ * estar declarada.
  */
 const TABLA_RUTAS = [
     { prefijo: '/api/auth', servicio: 'ms-identidad', variableEntorno: 'MS_IDENTIDAD_URL' },
@@ -35,8 +38,7 @@ const TABLA_RUTAS = [
     { prefijo: '/api/inmuebles', servicio: 'ms-inmuebles', variableEntorno: 'MS_INMUEBLES_URL' },
     { prefijo: '/api/contratos', servicio: 'ms-contratos', variableEntorno: 'MS_CONTRATOS_URL' },
     { prefijo: '/api/pagos', servicio: 'ms-financiero', variableEntorno: 'MS_FINANCIERO_URL' },
-    { prefijo: '/api/dashboard', servicio: null, variableEntorno: null },
-    { prefijo: '/api/admin', servicio: null, variableEntorno: null }
+    { prefijo: '/api/dashboard', servicio: null, variableEntorno: null }
 ];
 
 /**

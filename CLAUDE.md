@@ -36,8 +36,10 @@ modular funcionando**, ahora dentro de una estructura de monorepo y con el model
 identidad del Capítulo 2 ya implementado:
 
 - `apps/gateway/` — el antiguo `backend/`. Express + Sequelize + PostgreSQL en
-  JavaScript (CommonJS). Incluye la costura de enrutamiento: cada prefijo se resuelve
-  local o remoto según haya o no valor en su variable `MS_*_URL`. Hoy todos locales.
+  JavaScript (CommonJS). Incluye la costura de enrutamiento (cada prefijo se resuelve
+  local o remoto según haya o no valor en su variable `MS_*_URL`; hoy todos locales) y
+  la **matriz RBAC**, que se evalúa antes de la costura para que una petición denegada
+  no llegue a la red interna.
 - `apps/web/` — el antiguo `frontend/`. React 18 con CRA. **Sin Tailwind**, aunque el
   PMP lo declara.
 - `packages/contracts/` — DTOs en TypeScript de los endpoints documentados.
@@ -51,8 +53,8 @@ identidad del Capítulo 2 ya implementado:
 Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
 claims nuevos (`sub`/`email`/`roles`/`jti`), `logout` con `TokensRevocados`, token en
-memoria en la SPA y descargas por blob. Falta el 3b: extraer `ms-identidad` y montar
-la matriz RBAC.
+memoria en la SPA y descargas por blob. Después llegaron el build en contexto raíz y la
+matriz RBAC. Falta el 3b: extraer `ms-identidad`.
 
 El 3a se apartó de la línea base en dos puntos, ambos con ADR: el alta de inquilinos
 por `POST /api/usuarios/inquilinos` (`docs/adr/0004`, **pendiente de incorporar al
@@ -336,8 +338,13 @@ remoto lo ya extraído.
    - ~~**Contexto de build.** Mover el build de Docker al contexto raíz.~~ **Hecho.**
      Los Dockerfiles construyen desde la raíz con `npm ci --workspace=...`, `database/`
      entra por `COPY` y el gateway consume `packages/shared`.
-   - **3b.** Extraer físicamente `ms-identidad` y montar la matriz RBAC en el gateway.
-     Se lleva `database/identidad/`.
+   - ~~**Matriz RBAC.** Políticas declarativas en el gateway, denegar por defecto.~~
+     **Hecho.** Se adelantó a la extracción: no depende de ella y vale igual cuando
+     `/api/auth` pase a remoto.
+   - **3b.** Extraer físicamente `ms-identidad`. Se lleva `database/identidad/` y
+     obliga a resolver la caché de revocados del gateway, la composición por HTTP de
+     los datos de usuario que hoy viajan embebidos, y la infraestructura de pruebas:
+     7 de las 9 suites fabrican sus datos llamando a `/api/auth` y `/api/usuarios`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
    validación ABAC de pertenencia.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
@@ -437,10 +444,6 @@ extraer cada uno se parte en `database/inmuebles/`, `database/contratos/` y
 
 **Comprobantes.** El frontend tiene una pantalla que no aparece entre las cinco del
 documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
-
-**`admin.routes.js`.** Dispara el motor financiero a mano. Importa `esPropietario` pero
-no lo aplica: cualquier usuario autenticado puede ejecutarlo. Pertenece a
-`ms-financiero`, no al gateway. Corregir al llegar al paso 6.
 
 ---
 

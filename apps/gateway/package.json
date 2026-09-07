@@ -8,7 +8,8 @@
     "dev": "nodemon -L src/app.js",
     "test": "cross-env NODE_ENV=test jest --detectOpenHandles --forceExit --runInBand",
     "seed": "node src/database/seed.js",
-    "migrate": "node -e \"const{sequelize}=require('./src/config/database');require('./src/database/migraciones').aplicarMigraciones(sequelize).then(a=>{console.log(a.length?a.join(', '):'sin migraciones pendientes');return sequelize.close()})\""
+    "migrate": "node -e \"const{sequelize}=require('./src/config/database');require('./src/database/migraciones').aplicarMigraciones(sequelize).then(a=>{console.log(a.length?a.join(', '):'sin migraciones pendientes');return sequelize.close()})\"",
+    "motor": "node src/scripts/motor.js"
   },
   "dependencies": {
     "arriendos360-shared": "*",
