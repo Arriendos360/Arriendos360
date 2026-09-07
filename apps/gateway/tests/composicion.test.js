@@ -6,6 +6,11 @@
  * que el cliente hable bien por red y que degrade cuando el otro extremo no está.
  */
 
+// Esta suite no carga `src/app.js`, que es quien normalmente llama a dotenv, así
+// que el .env se carga aquí: el cliente necesita SERVICIO_JWT_SECRET para firmar
+// las llamadas a /interno, y el doble la misma clave para verificarlas.
+require('dotenv').config();
+
 const {
     adjuntarInquilino,
     adjuntarInquilinos,

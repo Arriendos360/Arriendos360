@@ -12,6 +12,7 @@ import request from 'supertest';
 import {
   app,
   cerrarBase,
+  conServicio,
   conToken,
   crearInquilino,
   iniciarSesion,
@@ -240,7 +241,7 @@ describe('GET /interno/revocados', () => {
     const vencido = '33333333-3333-4333-8333-333333333333';
     await TokenRevocado.create({ jti: vencido, expira_en: new Date(Date.now() - 60_000) });
 
-    const respuesta = await request(app).get('/interno/revocados');
+    const respuesta = await request(app).get('/interno/revocados').set(...conServicio());
 
     expect(respuesta.status).toBe(200);
     const jtis = (respuesta.body.revocados as Array<{ jti: string }>).map((r) => r.jti);

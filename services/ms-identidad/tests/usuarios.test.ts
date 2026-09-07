@@ -12,6 +12,7 @@ import request from 'supertest';
 import {
   app,
   cerrarBase,
+  conServicio,
   conToken,
   crearInquilino,
   recrearBase,
@@ -169,16 +170,21 @@ describe('Registro de consultas', () => {
   test('no se expone por ninguna ruta de la API', async () => {
     // La tabla es operativa: se consulta con SQL cuando haya que investigar,
     // no por HTTP.
-    for (const ruta of ['/api/usuarios/consultas', '/api/consultas', '/interno/consultas']) {
+    for (const ruta of ['/api/usuarios/consultas', '/api/consultas']) {
       const respuesta = await request(app).get(ruta).set(...conToken(propietario.token));
       expect(respuesta.status).toBe(404);
     }
+
+    // En `/interno` se comprueba CON credencial válida: sin ella saldría 401 y
+    // eso no probaría que el endpoint no existe, sólo que está protegido.
+    const interna = await request(app).get('/interno/consultas').set(...conServicio());
+    expect(interna.status).toBe(404);
   });
 });
 
 describe('GET /interno/usuarios (lote para el gateway)', () => {
   test('devuelve los datos que el gateway necesita para componer', async () => {
-    const respuesta = await request(app).get(`/interno/usuarios?ids=${inquilinoId}`);
+    const respuesta = await request(app).get(`/interno/usuarios?ids=${inquilinoId}`).set(...conServicio());
 
     expect(respuesta.status).toBe(200);
     const usuario = respuesta.body.usuarios[0];
@@ -194,7 +200,7 @@ describe('GET /interno/usuarios (lote para el gateway)', () => {
   test('resuelve varios de una vez: es lo que evita el N+1 por red', async () => {
     const respuesta = await request(app).get(
       `/interno/usuarios?ids=${inquilinoId},${propietario.id}`,
-    );
+    ).set(...conServicio());
 
     expect(respuesta.body.usuarios).toHaveLength(2);
     const ids = respuesta.body.usuarios.map((u: { id: string }) => u.id).sort();
@@ -202,30 +208,30 @@ describe('GET /interno/usuarios (lote para el gateway)', () => {
   });
 
   test('ignora identificadores que no son UUID en vez de reventar', async () => {
-    const respuesta = await request(app).get(`/interno/usuarios?ids=${inquilinoId},no-es-uuid,123`);
+    const respuesta = await request(app).get(`/interno/usuarios?ids=${inquilinoId},no-es-uuid,123`).set(...conServicio());
 
     expect(respuesta.status).toBe(200);
     expect(respuesta.body.usuarios).toHaveLength(1);
   });
 
   test('sin ids devuelve lista vacía, no un volcado de la tabla', async () => {
-    const respuesta = await request(app).get('/interno/usuarios');
+    const respuesta = await request(app).get('/interno/usuarios').set(...conServicio());
 
     expect(respuesta.status).toBe(200);
     expect(respuesta.body.usuarios).toEqual([]);
   });
 
   test('un id inexistente simplemente no aparece', async () => {
-    const respuesta = await request(app).get(
-      '/interno/usuarios?ids=00000000-0000-4000-8000-000000000000',
-    );
+    const respuesta = await request(app)
+      .get('/interno/usuarios?ids=00000000-0000-4000-8000-000000000000')
+      .set(...conServicio());
 
     expect(respuesta.body.usuarios).toEqual([]);
   });
 
   test('rechaza lotes desmedidos', async () => {
     const muchos = Array.from({ length: 201 }, () => '00000000-0000-4000-8000-000000000000').join(',');
-    const respuesta = await request(app).get(`/interno/usuarios?ids=${muchos}`);
+    const respuesta = await request(app).get(`/interno/usuarios?ids=${muchos}`).set(...conServicio());
 
     expect(respuesta.status).toBe(400);
   });
@@ -234,8 +240,60 @@ describe('GET /interno/usuarios (lote para el gateway)', () => {
     // El registro existe para vigilar quién husmea cédulas. El gateway
     // componiendo una respuesta no es eso, y meterlo ahí ahogaría la señal.
     await ConsultaDocumento.destroy({ where: {} });
-    await request(app).get(`/interno/usuarios?ids=${inquilinoId}`);
+    await request(app).get(`/interno/usuarios?ids=${inquilinoId}`).set(...conServicio());
 
     expect(await ConsultaDocumento.count()).toBe(0);
+  });
+});
+
+describe('Autenticación entre servicios', () => {
+  // Los /interno no los llama una persona sino otro servicio. Que vengan de la
+  // red interna no los hace confiables (regla dura 7), y menos cuando el puerto
+  // está publicado al host. Ver docs/adr/0009.
+
+  test('SIN credencial de servicio responde 401', async () => {
+    for (const ruta of [`/interno/usuarios?ids=${inquilinoId}`, '/interno/revocados']) {
+      const respuesta = await request(app).get(ruta);
+      expect(respuesta.status).toBe(401);
+      expect(respuesta.body.mensaje).toContain('servicio');
+    }
+  });
+
+  test('CON credencial válida pasa', async () => {
+    for (const ruta of [`/interno/usuarios?ids=${inquilinoId}`, '/interno/revocados']) {
+      const respuesta = await request(app).get(ruta).set(...conServicio());
+      expect(respuesta.status).toBe(200);
+    }
+  });
+
+  test('un token de USUARIO no sirve, aunque sea válido', async () => {
+    // Es lo que obliga a que los dos secretos sean distintos: si compartieran
+    // clave, cualquier inquilino podría leerse la tabla de usuarios entera.
+    const respuesta = await request(app)
+      .get(`/interno/usuarios?ids=${inquilinoId}`)
+      .set(...conToken(propietario.token));
+
+    expect(respuesta.status).toBe(401);
+  });
+
+  test('una credencial dirigida a OTRO servicio no sirve', async () => {
+    const { cabeceraDeServicio } = await import('arriendos360-shared');
+    const ajena = cabeceraDeServicio({
+      emisor: 'gateway',
+      destinatario: 'ms-financiero',
+      secreto: process.env['SERVICIO_JWT_SECRET'],
+    });
+
+    const respuesta = await request(app)
+      .get('/interno/revocados')
+      .set('Authorization', ajena['Authorization'] as string);
+
+    expect(respuesta.status).toBe(401);
+  });
+
+  test('la protección cubre cualquier ruta bajo /interno, incluidas las que no existen', async () => {
+    // Va como `router.use`, así que un endpoint nuevo nace protegido.
+    const respuesta = await request(app).get('/interno/lo-que-sea');
+    expect(respuesta.status).toBe(401);
   });
 });

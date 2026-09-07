@@ -8,6 +8,8 @@
  * - `jwt`: verificacion local del token y de la lista de revocados, replicando
  *   `auth.middleware.js`.
  * - `http`: cliente minimo para llamadas entre servicios.
+ * - `servicio`: autenticacion ENTRE servicios para los endpoints `/interno`,
+ *   con las dos mitades: firmar la llamada y verificarla.
  *
  * Nadie lo consume todavia: el Dockerfile del gateway construye con contexto
  * `apps/gateway`, asi que `packages/` no entra en la imagen y declarar la
@@ -48,6 +50,26 @@ export type {
   FuenteToken,
   ResultadoVerificacion,
 } from './jwt';
+
+export {
+  ESQUEMA_SERVICIO,
+  MENSAJE_SERVICIO_NO_AUTENTICADO,
+  TOLERANCIA_RELOJ_SEGUNDOS,
+  VIGENCIA_POR_DEFECTO_SEGUNDOS,
+  cabeceraDeServicio,
+  exigirServicio,
+  extraerTokenDeServicio,
+  firmarTokenDeServicio,
+  verificarTokenDeServicio,
+} from './servicio';
+export type {
+  ClaimsServicio,
+  FuenteTokenServicio,
+  OpcionesFirma,
+  OpcionesVerificacion,
+  ResolverClave,
+  ResultadoServicio,
+} from './servicio';
 
 export {
   TIMEOUT_POR_DEFECTO_MS,

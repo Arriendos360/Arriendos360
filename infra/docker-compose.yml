@@ -50,6 +50,11 @@ services:
       - DB_NAME_TEST=arriendos360_test
       # Identico al del gateway: los dos verifican la misma firma.
       - JWT_SECRET=${JWT_SECRET}
+      # Autenticacion entre servicios para /interno. Clave DISTINTA de
+      # JWT_SECRET a proposito: si fueran la misma, el token de cualquier
+      # usuario serviria para llamar a /interno.
+      - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
+      - SERVICIO_NOMBRE=ms-identidad
     depends_on:
       db:
         condition: service_healthy
@@ -75,6 +80,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=arriendos360_db
       - JWT_SECRET=${JWT_SECRET}
+      - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
+      - SERVICIO_NOMBRE=gateway
       # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
       # aqui hace que el gateway reenvie ese prefijo al microservicio.
       # Cableado: los dos prefijos de identidad pasan a remotos por la costura.

@@ -7,6 +7,7 @@
  */
 
 import request from 'supertest';
+import { cabeceraDeServicio } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
 import { sequelize } from '../../src/config/database';
@@ -79,3 +80,19 @@ export const iniciarSesion = (
 
 /** Cabecera de autorización lista para `.set(...)`. */
 export const conToken = (token: string): [string, string] => ['Authorization', `Bearer ${token}`];
+
+/**
+ * Credencial de servicio, para los endpoints `/interno`.
+ *
+ * Los llama otro servicio, no una persona, así que no llevan token de usuario
+ * sino uno de servicio firmado con `SERVICIO_JWT_SECRET`.
+ */
+export const conServicio = (emisor = 'gateway'): [string, string] => {
+  const cabecera = cabeceraDeServicio({
+    emisor,
+    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-identidad',
+    secreto: process.env['SERVICIO_JWT_SECRET'],
+  });
+
+  return ['Authorization', cabecera['Authorization'] as string];
+};

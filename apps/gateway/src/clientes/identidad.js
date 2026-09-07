@@ -27,7 +27,12 @@
  * la que ya sabían manejar.
  */
 
+const { cabeceraDeServicio } = require('arriendos360-shared');
+
 const TIEMPO_LIMITE_MS = Number(process.env.MS_IDENTIDAD_TIMEOUT_MS || 3000);
+
+/** Nombre del servicio al que apunta este cliente, para el `aud` del token. */
+const DESTINATARIO = 'ms-identidad';
 
 /** URL base del servicio, o null si todavía no está configurado. */
 const urlBase = (entorno = process.env) => {
@@ -40,9 +45,20 @@ const urlBase = (entorno = process.env) => {
     return limpio === '' ? null : limpio.replace(/\/+$/, '');
 };
 
-/** Petición GET con tiempo límite, devolviendo el JSON o lanzando. */
+/**
+ * Petición GET a un endpoint `/interno`, firmada y con tiempo límite.
+ *
+ * La credencial se firma en cada llamada en vez de reutilizarla: el token dura
+ * un minuto, así que cachearlo ahorraría una firma HMAC —microsegundos— a cambio
+ * de tener que gestionar su caducidad. No compensa.
+ */
 const pedirJson = async (url) => {
     const respuesta = await fetch(url, {
+        headers: cabeceraDeServicio({
+            emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+            destinatario: DESTINATARIO,
+            secreto: process.env.SERVICIO_JWT_SECRET
+        }),
         signal: AbortSignal.timeout(TIEMPO_LIMITE_MS)
     });
 

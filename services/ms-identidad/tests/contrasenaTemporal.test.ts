@@ -13,6 +13,7 @@ import request from 'supertest';
 import {
   app,
   cerrarBase,
+  conServicio,
   conToken,
   crearInquilino,
   iniciarSesion,
@@ -116,7 +117,7 @@ describe('Alta de inquilino', () => {
       .set(...conToken(propietario.token));
     expect(JSON.stringify(busqueda.body)).not.toContain(temporal);
 
-    const interna = await request(app).get(`/interno/usuarios?ids=${idInquilino}`);
+    const interna = await request(app).get(`/interno/usuarios?ids=${idInquilino}`).set(...conServicio());
     expect(JSON.stringify(interna.body)).not.toContain(temporal);
     expect(interna.body.usuarios[0].contrasena).toBeUndefined();
     expect(interna.body.usuarios[0].contrasena_temporal).toBeUndefined();

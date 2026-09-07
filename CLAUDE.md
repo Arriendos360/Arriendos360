@@ -75,6 +75,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0006` | Registrar un abono es exclusivo del propietario; el documento no marca ese componente como tal. |
 | `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. |
 | `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
+| `0009` | Autenticación entre servicios para `/interno`. Resuelve una decisión abierta; el documento no la contempla pero tampoco la contradice. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -396,6 +397,44 @@ remoto lo ya extraído.
 
 ---
 
+## Llamadas entre servicios
+
+**Todo endpoint bajo `/interno` exige credencial de servicio.** Sin excepción, y desde el
+primer commit en que existe: no hay un momento en que sea aceptable dejarlo abierto «por
+ahora».
+
+Los `/interno` los llama otro servicio, no una persona. No llevan token de usuario, no
+pasan por la matriz RBAC y la costura no los reenvía, porque sólo reenvía `/api/*`. Nada
+de eso los protege — el puerto está publicado al host en desarrollo, y la regla dura 7
+dice que venir de la red interna no hace confiable a nadie.
+
+Se aplica en las dos puntas, con lo que ya trae `packages/shared`:
+
+```js
+// El que recibe: una línea, al montar el router.
+router.use(exigirServicio({
+    destinatario: process.env.SERVICIO_NOMBRE,
+    secreto: process.env.SERVICIO_JWT_SECRET
+}));
+
+// El que llama: la cabecera en cada petición.
+fetch(url, { headers: cabeceraDeServicio({
+    emisor: process.env.SERVICIO_NOMBRE,
+    destinatario: 'ms-identidad',
+    secreto: process.env.SERVICIO_JWT_SECRET
+}) });
+```
+
+Ningún servicio reimplementa esto. Va con `router.use` y no ruta por ruta a propósito:
+así un endpoint nuevo nace protegido.
+
+`SERVICIO_JWT_SECRET` **no es** `JWT_SECRET`. Si fueran la misma clave, el token de
+cualquier inquilino serviría para llamar a `/interno`. Ver `docs/adr/0009`.
+
+**Y el doble de pruebas también la exige.** Cuando un servicio se extrae y el gateway
+gana un doble suyo, ese doble verifica la credencial igual que el real: si no, las suites
+pasarían aunque el llamante olvidara mandarla.
+
 ## Cómo se prueba
 
 Convención para los pasos 4 al 7, fijada al extraer el primer servicio:
@@ -483,6 +522,12 @@ tiene tantos inmuebles que la lista no cabe en una query string.
 en una sola carpeta de migraciones porque todavía no hay servicios que las separen. Al
 extraer cada uno se parte en `database/inmuebles/`, `database/contratos/` y
 `database/financiero/`, y cada carpeta se va con su servicio. Ver `docs/adr/0003`.
+
+**Clave por servicio para las llamadas internas.** Hoy todos comparten
+`SERVICIO_JWT_SECRET`, así que comprometer un servicio permite suplantar a los demás. El
+arreglo son claves asimétricas por servicio; el verificador ya resuelve la clave por
+emisor, así que es cambiar configuración y no rediseñar. Reconsiderar en el paso 8, donde
+la identidad administrada de Azure puede hacerlo innecesario. Ver `docs/adr/0009`.
 
 **Reemisión de la contraseña temporal.** `docs/adr/0007` la devuelve una sola vez. Si el
 propietario la pierde antes de entregarla, no hay forma de generar otra. Hace falta un
