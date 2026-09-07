@@ -42,6 +42,8 @@ const crearIdentidadFalsa = async (opciones = {}) => {
     const usuarios = new Map();
     /** @type {Set<string>} jti revocados */
     const revocados = new Set();
+    /** @type {Map<string, number>} sub -> ms desde los que sus tokens no valen */
+    const sesionesInvalidadas = new Map();
     /** Peticiones recibidas, para que una prueba pueda afirmar sobre ellas. */
     const llamadas = [];
 
@@ -205,7 +207,35 @@ const crearIdentidadFalsa = async (opciones = {}) => {
                 jti,
                 expira_en: new Date(Date.now() + VIGENCIA_SEGUNDOS * 1000).toISOString()
             })),
+            // Invalidación en bloque: usuarios cuyas sesiones anteriores a
+            // esa marca dejaron de valer.
+            sesiones: [...sesionesInvalidadas.entries()].map(([sub, desde]) => ({
+                sub,
+                desde: new Date(desde).toISOString()
+            })),
             generado_en: new Date().toISOString()
+        });
+    });
+
+    app.post('/interno/usuarios/:id/contrasena-temporal', (req, res) => {
+        // `solicitado_por` llega en el cuerpo: es la persona que pidió la
+        // reemisión, para la auditoría del otro lado.
+        const usuario = usuarios.get(req.params.id);
+        if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+
+        const temporal = crypto.randomBytes(6).toString('hex');
+        usuario.contrasena = temporal;
+        sesionesInvalidadas.set(usuario.id, Date.now());
+
+        return res.json({
+            mensaje: 'Contraseña temporal regenerada',
+            contrasena_temporal: temporal,
+            usuario: {
+                id: usuario.id,
+                nombres: usuario.nombres,
+                apellidos: usuario.apellidos,
+                debe_cambiar_contrasena: true
+            }
         });
     });
 
@@ -219,6 +249,7 @@ const crearIdentidadFalsa = async (opciones = {}) => {
         agregarRol: (id, rol) => usuarios.get(id)?.roles.push(rol),
         usuarios,
         revocados,
+        sesionesInvalidadas,
         llamadas,
         /** Olvida las llamadas registradas, para afirmar sobre un tramo concreto. */
         limpiarLlamadas: () => llamadas.splice(0, llamadas.length),

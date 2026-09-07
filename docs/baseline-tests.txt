@@ -4,9 +4,9 @@
 
 
 Test Suites: 10 passed, 10 total
-Tests:       154 passed, 154 total
+Tests:       163 passed, 163 total
 Snapshots:   0 total
-Time:        2.991 s, estimated 3 s
+Time:        3.172 s
 Ran all test suites.
 
 > arriendos360-frontend@0.1.0 test
@@ -18,10 +18,10 @@ No tests found, exiting with code 0
 > cross-env NODE_ENV=test jest --runInBand --forceExit --detectOpenHandles
 
 
-Test Suites: 3 passed, 3 total
-Tests:       63 passed, 63 total
+Test Suites: 4 passed, 4 total
+Tests:       83 passed, 83 total
 Snapshots:   0 total
-Time:        3.822 s, estimated 4 s
+Time:        5.515 s, estimated 6 s
 Ran all test suites.
 
 > arriendos360-shared@0.0.0 test
@@ -30,5 +30,5 @@ Ran all test suites.
 Test Suites: 1 passed, 1 total
 Tests:       18 passed, 18 total
 Snapshots:   0 total
-Time:        0.486 s, estimated 1 s
+Time:        0.484 s, estimated 1 s
 Ran all test suites.

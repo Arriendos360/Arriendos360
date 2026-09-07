@@ -5,6 +5,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import CambiarContrasena from "./pages/CambiarContrasena";
+import RecuperarContrasena from "./pages/RecuperarContrasena";
+import RestablecerContrasena from "./pages/RestablecerContrasena";
 import Inmuebles from "./pages/Inmuebles";
 import Contratos from "./pages/Contratos";
 import Pagos from "./pages/Pagos";
@@ -15,6 +17,9 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        {/* Publicas por necesidad: quien las usa no puede entrar. */}
+        <Route path="/recuperar" element={<RecuperarContrasena />} />
+        <Route path="/restablecer" element={<RestablecerContrasena />} />
         {/* Unica ruta accesible con la contrasena temporal sin cambiar. Sin
             Layout: la barra lateral llevaria a sitios que la API deniega. */}
         <Route

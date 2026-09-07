@@ -58,7 +58,7 @@ beforeAll(() => {
     app.use(
         crearControlDeAcceso({
             secreto: SECRETO,
-            estaRevocado: async () => false
+            tokenInvalidado: async () => false
         })
     );
     // Todo lo que sobreviva a la matriz llega aquí.
@@ -110,6 +110,11 @@ describe('Rutas públicas', () => {
     test('POST /api/auth/login no exige token', async () => {
         const respuesta = await pedir('POST', '/api/auth/login');
         expect(respuesta.status).toBe(200);
+    });
+
+    test('la recuperación de contraseña es pública: quien la usa no puede entrar', async () => {
+        expect((await pedir('POST', '/api/auth/recuperar')).status).toBe(200);
+        expect((await pedir('POST', '/api/auth/restablecer')).status).toBe(200);
     });
 
     test('GET sobre una ruta pública de POST no está declarado: 403', async () => {
@@ -165,6 +170,7 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
         ['GET', '/api/contratos', INQUILINO, SIN_ROLES],
         ['POST', '/api/contratos', PROPIETARIO, INQUILINO],
         ['PUT', '/api/contratos/abc/finalizar', PROPIETARIO, INQUILINO],
+        ['POST', '/api/contratos/abc/contrasena-inquilino', PROPIETARIO, INQUILINO],
         // Sin cobertura hasta esta consolidación.
         ['DELETE', '/api/contratos/abc', PROPIETARIO, INQUILINO],
 
@@ -209,7 +215,9 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
             'POST /api/auth/registro',
             'POST /api/auth/login',
             'POST /api/auth/logout',
-            'POST /api/auth/cambiar-contrasena'
+            'POST /api/auth/cambiar-contrasena',
+            'POST /api/auth/recuperar',
+            'POST /api/auth/restablecer'
         ]);
 
         const sinCubrir = MATRIZ.map((p) => `${p.metodo} ${p.patron}`).filter(

@@ -22,6 +22,12 @@ export class Usuario extends Model {
   declare documento: string;
   /** Marca a quien no eligio su propia contrasena. Ver docs/adr/0007. */
   declare debe_cambiar_contrasena: boolean;
+  /**
+   * Cuando cambio la contrasena por ultima vez. Todo token emitido ANTES deja
+   * de valer: es como se tiran todas las sesiones de golpe al restablecerla.
+   * Ver docs/adr/0010.
+   */
+  declare contrasena_cambiada_en: Date | null;
   declare creado_por: string;
   declare actualizado_por: string;
 }
@@ -40,6 +46,7 @@ Usuario.init(
       allowNull: false,
       defaultValue: false,
     },
+    contrasena_cambiada_en: { type: DataTypes.DATE },
     ...columnasAuditoria,
   },
   { sequelize, tableName: 'usuarios', ...opcionesAuditoria },

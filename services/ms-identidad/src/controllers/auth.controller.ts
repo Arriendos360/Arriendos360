@@ -17,10 +17,18 @@ import { Rol } from '../models/Rol';
 import { RolUsuario } from '../models/RolUsuario';
 import { Usuario } from '../models/Usuario';
 import { generarContrasenaTemporal } from '../services/contrasenaTemporal';
+import { notificador } from '../services/notificador';
+import {
+  buscarTokenVigente,
+  emitirTokenDeRecuperacion,
+  marcarUsado,
+  VIGENCIA_MINUTOS,
+} from '../services/recuperacion';
 import {
   emitirToken,
   estaRevocado,
   fechaDeExpiracion,
+  marcaDeCambio,
   revocarToken,
   rolPrincipal,
 } from '../services/tokenService';
@@ -288,10 +296,16 @@ export const cambiarContrasena = async (req: Request, res: Response): Promise<Re
       return res.status(401).json(crearError('Contraseña incorrecta'));
     }
 
+    // Tira todas las sesiones del usuario, incluida la que hizo esta peticion.
+    // El token que se emite abajo se ancla a esta misma marca para no caer con
+    // las demas.
+    const marca = marcaDeCambio();
+
     await usuario.update(
       {
         contrasena: await bcrypt.hash(contrasena_nueva, 10),
         debe_cambiar_contrasena: false,
+        contrasena_cambiada_en: marca,
       },
       { usuarioAuditor: usuario.id_usuario } as never,
     );
@@ -303,7 +317,7 @@ export const cambiarContrasena = async (req: Request, res: Response): Promise<Re
     }
 
     const roles = await rolesDe(usuario.id_usuario);
-    const { token, tipo_token, expiracion } = emitirToken(usuario, roles);
+    const { token, tipo_token, expiracion } = emitirToken(usuario, roles, { noAntesDe: marca });
 
     return res.json({
       mensaje: 'Contraseña actualizada',
@@ -324,5 +338,116 @@ export const cambiarContrasena = async (req: Request, res: Response): Promise<Re
     // Nunca se registra el cuerpo: llevaria las dos contrasenas en claro.
     console.error('Error al cambiar la contraseña:', (error as Error).message);
     return res.status(500).json(crearError('Error al cambiar la contraseña'));
+  }
+};
+
+/**
+ * POST /api/auth/recuperar — ruta publica.
+ *
+ * RESPONDE SIEMPRE LO MISMO, exista o no la cuenta. Es el requisito central de
+ * este endpoint: si la respuesta cambiara, la API seria un verificador de
+ * cuentas registradas —se prueban correos y se apunta cuales existen— y eso es
+ * un dato personal que no hay motivo para regalar.
+ *
+ * Por la misma razon no se responde 404 con un email desconocido ni 429 con uno
+ * conocido: cualquier diferencia observable sirve de oraculo.
+ */
+export const recuperar = async (req: Request, res: Response): Promise<Response> => {
+  const respuestaUnica = {
+    mensaje:
+      'Si el correo corresponde a una cuenta, recibirás un enlace para restablecer tu contraseña.',
+  };
+
+  try {
+    const { email } = req.body ?? {};
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json(crearError('El email es obligatorio'));
+    }
+
+    const usuario = await Usuario.findOne({ where: { email } });
+
+    if (usuario) {
+      const token = await emitirTokenDeRecuperacion(usuario.id_usuario);
+      const enlace = `${process.env['URL_APP'] ?? 'http://localhost:3000'}/restablecer?token=${token}`;
+
+      await notificador().notificar({
+        para: usuario.email,
+        asunto: 'Restablece tu contraseña de Arriendos360',
+        cuerpoHtml: `
+          <p>Hola ${usuario.nombres},</p>
+          <p>Pediste restablecer tu contraseña. El enlace vale una sola vez y
+             caduca en ${VIGENCIA_MINUTOS} minutos:</p>
+          <p><a href="${enlace}">Restablecer mi contraseña</a></p>
+          <p>Si no fuiste tú, ignora este correo: tu contraseña no ha cambiado.</p>
+        `,
+      });
+    }
+
+    return res.json(respuestaUnica);
+  } catch (error) {
+    // Ni siquiera un fallo interno cambia la respuesta: un 500 con un email y un
+    // 200 con otro tambien serviria de oraculo.
+    console.error('Error en recuperación:', (error as Error).message);
+    return res.json(respuestaUnica);
+  }
+};
+
+/**
+ * POST /api/auth/restablecer — ruta publica.
+ *
+ * Recibe el token del enlace y la contrasena nueva. Al tener exito marca el
+ * token como usado y deja la marca de cambio, con lo que TODAS las sesiones
+ * abiertas del usuario dejan de valer. Es el punto del endpoint: quien
+ * restablece su contrasena normalmente lo hace porque sospecha que alguien mas
+ * esta dentro, y no sabe cuantas sesiones hay ni cuales.
+ */
+export const restablecer = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { token, contrasena_nueva } = req.body ?? {};
+
+    if (!token || !contrasena_nueva) {
+      return res.status(400).json(crearError('El token y la contraseña nueva son obligatorios'));
+    }
+
+    if (String(contrasena_nueva).length < LONGITUD_MINIMA_CONTRASENA) {
+      return res
+        .status(400)
+        .json(
+          crearError(
+            `La contraseña nueva debe tener al menos ${LONGITUD_MINIMA_CONTRASENA} caracteres`,
+          ),
+        );
+    }
+
+    const registro = await buscarTokenVigente(token);
+    if (!registro) {
+      // Un mismo 400 para inexistente, vencido y ya usado.
+      return res.status(400).json(crearError('El enlace no es válido o ya expiró'));
+    }
+
+    const usuario = await Usuario.findByPk(registro.id_usuario);
+    if (!usuario) {
+      return res.status(400).json(crearError('El enlace no es válido o ya expiró'));
+    }
+
+    await usuario.update(
+      {
+        contrasena: await bcrypt.hash(contrasena_nueva, 10),
+        // Quien restablece elige su clave, asi que no queda nada por cambiar.
+        debe_cambiar_contrasena: false,
+        contrasena_cambiada_en: marcaDeCambio(),
+      },
+      { usuarioAuditor: usuario.id_usuario } as never,
+    );
+
+    await marcarUsado(registro);
+
+    // No se devuelve token: quien restablece vuelve a entrar por el login. Darle
+    // sesion aqui convertiria el enlace del correo en un acceso directo.
+    return res.json({ mensaje: 'Contraseña restablecida. Ya puedes iniciar sesión.' });
+  } catch (error) {
+    console.error('Error al restablecer la contraseña:', (error as Error).message);
+    return res.status(500).json(crearError('Error al restablecer la contraseña'));
   }
 };

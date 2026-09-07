@@ -2,6 +2,7 @@
  * Consulta y alta de usuarios por parte de un propietario.
  */
 
+import bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
 
@@ -9,6 +10,8 @@ import { ConsultaDocumento } from '../models/ConsultaDocumento';
 import { ROL_INQUILINO } from '../models/constantes';
 import { Rol } from '../models/Rol';
 import { Usuario } from '../models/Usuario';
+import { generarContrasenaTemporal } from '../services/contrasenaTemporal';
+import { marcaDeCambio } from '../services/tokenService';
 import { CAMPOS_SIN_CONTRASENA, campoFaltante, crearUsuarioConRol } from './auth.controller';
 
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -181,5 +184,67 @@ export const usuariosPorIds = async (req: Request, res: Response): Promise<Respo
   } catch (error) {
     console.error('Error al listar usuarios por id:', error);
     return res.status(500).json(crearError('Error al listar usuarios'));
+  }
+};
+
+/**
+ * POST /interno/usuarios/:id/contrasena-temporal
+ *
+ * Regenera la contrasena temporal de un usuario y la devuelve UNA vez, con las
+ * mismas garantias que el alta: no se guarda en claro, no se registra y ninguna
+ * consulta posterior la incluye.
+ *
+ * NO comprueba si quien pide tiene derecho: eso ya lo hizo el gateway antes de
+ * llamar. Y no podria comprobarlo aunque quisiera —la regla es «que el inquilino
+ * tenga contrato en un inmueble del propietario» y los contratos son de otro
+ * servicio. Ms-identidad es subdominio de Soporte; depender de Contratos
+ * invertiria la direccion de las dependencias. Por eso el endpoint es `/interno`
+ * y su unica autenticacion es la credencial de servicio. Ver docs/adr/0010.
+ */
+export const reemitirContrasenaTemporal = async (
+  req: Request,
+  res: Response,
+): Promise<Response> => {
+  try {
+    const { id } = req.params;
+    const solicitadoPor =
+      typeof req.body?.solicitado_por === 'string' ? req.body.solicitado_por : null;
+
+    const usuario = id ? await Usuario.findByPk(id) : null;
+    if (!usuario) {
+      return res.status(404).json(crearError('Usuario no encontrado'));
+    }
+
+    const temporal = generarContrasenaTemporal();
+
+    await usuario.update(
+      {
+        contrasena: await bcrypt.hash(temporal, 10),
+        // Vuelve a quedar obligado a elegir una propia.
+        debe_cambiar_contrasena: true,
+        // Y caen sus sesiones abiertas: si la temporal se reemite es porque la
+        // anterior se perdio o se filtro.
+        contrasena_cambiada_en: marcaDeCambio(),
+      },
+      // Quien lo PIDIO, no quien lo transmitio: el gateway manda el `sub` del
+      // propietario. `iss` seria el nombre del servicio, que no es un UUID y
+      // ademas perderia el dato que importa auditar en una reemision de
+      // credencial: que persona la provoco.
+      { usuarioAuditor: solicitadoPor ?? usuario.id_usuario } as never,
+    );
+
+    return res.json({
+      mensaje: 'Contraseña temporal regenerada',
+      contrasena_temporal: temporal,
+      usuario: {
+        id: usuario.id_usuario,
+        nombres: usuario.nombres,
+        apellidos: usuario.apellidos,
+        debe_cambiar_contrasena: true,
+      },
+    });
+  } catch (error) {
+    console.error('Error al reemitir la contraseña temporal:', (error as Error).message);
+    return res.status(500).json(crearError('Error al reemitir la contraseña temporal'));
   }
 };

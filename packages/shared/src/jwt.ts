@@ -176,15 +176,22 @@ export function verificarToken(
 }
 
 /**
- * Consulta si un `jti` esta revocado.
+ * Consulta si un token dejo de valer, por el motivo que sea.
+ *
+ * Recibe los claims completos y no solo el `jti` porque hay DOS formas de
+ * invalidar un token y las dos tienen que caber aqui:
+ *
+ * - **Revocacion individual**, por `jti`: es lo que hace el logout.
+ * - **Invalidacion en bloque**, comparando `iat` con la marca de cuando el
+ *   usuario cambio su contrasena: al restablecerla caen TODAS sus sesiones de
+ *   golpe, sin tener que revocar cada `jti` uno por uno. Es mas barato y cubre
+ *   las sesiones que nadie sabia que estaban abiertas, que es justo el caso que
+ *   motiva restablecer una contrasena.
  *
  * Se inyecta en vez de implementarse aqui porque cada servicio la resuelve
- * distinto: el gateway consulta `tokens_revocados` directamente, y un servicio
- * ya extraido preguntara a MS-Identidad o leera su copia en memoria. Lo unico
- * que este paquete fija es que la consulta filtre por `expira_en > NOW()`, de
- * modo que una fila vencida deje de tener efecto sin necesidad de barrido.
+ * distinto: ms-identidad consulta su base, y el gateway lee su copia en memoria.
  */
-export type ConsultaRevocacion = (jti: string) => Promise<boolean>;
+export type TokenInvalidado = (claims: ClaimsUsuario) => Promise<boolean>;
 
 /**
  * Verificacion completa: firma, forma y revocacion.
@@ -195,7 +202,7 @@ export type ConsultaRevocacion = (jti: string) => Promise<boolean>;
 export async function verificarTokenConRevocacion(
   fuente: FuenteToken,
   secreto: string | undefined,
-  estaRevocado: ConsultaRevocacion,
+  tokenInvalidado: TokenInvalidado,
 ): Promise<ResultadoVerificacion> {
   const resultado = verificarToken(fuente, secreto);
 
@@ -203,7 +210,7 @@ export async function verificarTokenConRevocacion(
     return resultado;
   }
 
-  if (await estaRevocado(resultado.claims.jti)) {
+  if (await tokenInvalidado(resultado.claims)) {
     return {
       valido: false,
       estado: ESTADO_SIN_TOKEN,

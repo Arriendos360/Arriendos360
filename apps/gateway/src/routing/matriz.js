@@ -46,6 +46,11 @@ const MATRIZ = [
     { metodo: 'POST', patron: '/api/auth/login', acceso: PUBLICO },
     { metodo: 'POST', patron: '/api/auth/logout', acceso: AUTENTICADO },
     { metodo: 'POST', patron: '/api/auth/cambiar-contrasena', acceso: AUTENTICADO },
+    // Recuperacion: publicas por necesidad — quien las usa no puede entrar.
+    // `/recuperar` responde siempre lo mismo y `/restablecer` exige un token de
+    // un solo uso que llega por correo. Ver docs/adr/0010.
+    { metodo: 'POST', patron: '/api/auth/recuperar', acceso: PUBLICO },
+    { metodo: 'POST', patron: '/api/auth/restablecer', acceso: PUBLICO },
 
     // Buscar personas por documento y dar de alta inquilinos son operaciones de
     // un propietario en curso de firmar un contrato.
@@ -63,6 +68,9 @@ const MATRIZ = [
     // ── Contratos ──────────────────────────────────────────────────────────
     // El inquilino lee su contrato; sólo el propietario lo escribe.
     { metodo: 'GET', patron: '/api/contratos/**', acceso: AMBOS },
+    // Se declara aparte del comodin de POST que la cubriria igual: reemitir una
+    // credencial merece verse en el listado de arranque sin tener que deducirla.
+    { metodo: 'POST', patron: '/api/contratos/:id/contrasena-inquilino', acceso: SOLO_PROPIETARIO },
     { metodo: 'POST', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },
     { metodo: 'PUT', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },
     { metodo: 'DELETE', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },

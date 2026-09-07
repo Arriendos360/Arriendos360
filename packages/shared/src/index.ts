@@ -46,7 +46,7 @@ export {
 } from './jwt';
 export type {
   ClaimsUsuario,
-  ConsultaRevocacion,
+  TokenInvalidado,
   FuenteToken,
   ResultadoVerificacion,
 } from './jwt';

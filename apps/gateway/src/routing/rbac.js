@@ -77,14 +77,14 @@ const mensajeDeRol = (acceso) =>
 /**
  * Construye el middleware de control de acceso.
  *
- * @param {{ estaRevocado?: (jti: string) => Promise<boolean>, secreto?: string }} [opciones]
+ * @param {{ tokenInvalidado?: (claims: object) => Promise<boolean>, secreto?: string }} [opciones]
  */
 const crearControlDeAcceso = (opciones = {}) => {
-    const consultarRevocacion =
-        opciones.estaRevocado ||
+    const consultarInvalidacion =
+        opciones.tokenInvalidado ||
         (() => {
             throw new Error(
-                'crearControlDeAcceso() necesita `estaRevocado`: sin él no se puede saber si un token fue revocado.'
+                'crearControlDeAcceso() necesita `tokenInvalidado`: sin él no se puede saber si un token dejó de valer.'
             );
         });
 
@@ -110,7 +110,7 @@ const crearControlDeAcceso = (opciones = {}) => {
         const resultado = await verificarTokenConRevocacion(
             { authorization: req.headers['authorization'] },
             secreto,
-            consultarRevocacion
+            consultarInvalidacion
         );
 
         if (!resultado.valido) {

@@ -19,7 +19,7 @@ import {
   verificarTokenConRevocacion,
 } from 'arriendos360-shared';
 
-import { estaRevocado } from '../services/tokenService';
+import { tokenInvalidado } from '../services/tokenService';
 
 export const verificarToken = async (
   req: Request,
@@ -29,7 +29,7 @@ export const verificarToken = async (
   const resultado = await verificarTokenConRevocacion(
     { authorization: req.headers['authorization'] },
     process.env['JWT_SECRET'],
-    estaRevocado,
+    tokenInvalidado,
   );
 
   if (!resultado.valido) {

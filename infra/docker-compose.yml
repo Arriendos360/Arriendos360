@@ -55,6 +55,13 @@ services:
       # usuario serviria para llamar a /interno.
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-identidad
+      # Base publica de la SPA, para el enlace del correo de recuperacion.
+      - URL_APP=${URL_APP:-http://localhost:3000}
+      # Correo. Sin EMAIL_USER apunta a un buzon de pruebas y no llega a nadie.
+      - EMAIL_HOST=${EMAIL_HOST:-smtp.ethereal.email}
+      - EMAIL_PORT=${EMAIL_PORT:-587}
+      - EMAIL_USER=${EMAIL_USER:-}
+      - EMAIL_PASS=${EMAIL_PASS:-}
     depends_on:
       db:
         condition: service_healthy
