@@ -44,6 +44,14 @@ export interface ClaimsUsuario {
   roles: string[];
   /** UUID unico de este token. */
   jti: string;
+  /**
+   * `true` mientras el usuario no haya elegido su propia contrasena.
+   *
+   * Lo llevan los usuarios creados por un tercero, que entran con una temporal
+   * generada por el servicio. Viaja en el token para que el gateway pueda
+   * bloquear la API sin preguntar en cada peticion. Ver docs/adr/0007.
+   */
+  debe_cambiar?: boolean;
   /** Emitido en, en segundos desde epoch. Lo agrega `jsonwebtoken`. */
   iat?: number;
   /** Expira en, en segundos desde epoch. Lo agrega `jsonwebtoken`. */

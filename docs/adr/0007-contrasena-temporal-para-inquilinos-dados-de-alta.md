@@ -1,6 +1,6 @@
 # ADR 0007 — Contraseña temporal para inquilinos dados de alta por su propietario
 
-- Estado: Aceptada — **pendiente de implementar en el paso 3b**
+- Estado: Aceptada e **implementada** (paso 3c, 2026-09-07)
 - Fecha: 2026-09-06
 - Paso de la migración: 3b (extracción de `ms-identidad`)
 
@@ -36,8 +36,9 @@ Esto tiene tres problemas, en orden de gravedad:
    convierte un dato de identificación en un dato de autenticación, que es exactamente
    lo que no debe hacerse.
 2. **Es adivinable.** Un atacante que conozca el documento de alguien tiene su
-   contraseña, y el documento aparece en la propia respuesta de
-   `GET /api/usuarios/buscar`.
+   contraseña. Cuando se escribió este ADR el documento venía además en la respuesta de
+   la búsqueda; el paso 3b la recortó a `id`, `nombres` y `apellidos`, pero eso no
+   arregla el problema de fondo: la cédula circula en contratos, recibos y formularios.
 3. **Nadie se lo dice al inquilino.** No hay correo de bienvenida ni pantalla que se lo
    comunique. El usuario existe y puede entrar, pero no sabe que puede ni cómo. En la
    práctica queda creado sin forma de entrar.
@@ -53,7 +54,9 @@ Es un vacío, no una contradicción.
 `POST /api/usuarios/inquilinos` deja de aceptar `contrasena`. El servicio genera una
 **contraseña temporal aleatoria**:
 
-- Origen criptográfico (`crypto.randomBytes`), nunca `Math.random()`.
+- Origen criptográfico, nunca `Math.random()`. Se usa `crypto.randomInt`, que además
+  de ser criptográfico no tiene sesgo de módulo — tomar `randomBytes % 57` favorecería
+  ligeramente a los primeros caracteres del alfabeto.
 - Alfabeto sin caracteres ambiguos: fuera `0`/`O`, `1`/`l`/`I`. El propietario va a
   leerla en voz alta o a copiarla a mano, y una `l` confundida con un `1` produce un
   bloqueo que parece un fallo del sistema.
@@ -195,16 +198,31 @@ Las dos **deben incorporarse al Capítulo 2 en su próxima revisión**, por el p
 la sección 13.3.2 del PMP, junto con el endpoint `POST /api/auth/cambiar-contrasena`.
 Hasta entonces manda el documento.
 
-## Alcance de implementación (paso 3b)
+## Implementación
 
-Lo que este ADR compromete, para que no se pierda al escribir el servicio:
+Todo lo que este ADR comprometía está en el código:
 
-- `ms-identidad`: generación de la temporal, columna e indicador en claims, endpoint de
-  cambio, revocación del `jti` al cambiar.
-- Migración que añade `debe_cambiar_contrasena` a `usuarios`.
-- Gateway: comprobación transversal en el control de acceso, con su lista de rutas
-  permitidas y el código `CAMBIO_CONTRASENA_REQUERIDO`.
-- SPA: el modal de alta deja de enviar `contrasena` y muestra la temporal devuelta;
-  pantalla de cambio obligatorio; redirección al recibir el código.
-- Pruebas: que la temporal no aparezca en ninguna consulta posterior, que el indicador
-  bloquee el resto de la API, que el cambio lo levante y revoque el token anterior.
+| Compromiso | Dónde |
+|---|---|
+| Generación con alfabeto sin ambigüedades | `services/ms-identidad/src/services/contrasenaTemporal.ts` |
+| Columna `debe_cambiar_contrasena` | `database/identidad/004_cambio_contrasena_obligatorio.sql` |
+| Devuelta una sola vez | `contrasena_temporal` en la respuesta de `POST /api/usuarios/inquilinos` |
+| Indicador en los claims | `debe_cambiar` en `tokenService.emitirToken` |
+| Bloqueo transversal | `apps/gateway/src/routing/rbac.js`, con `RUTAS_CON_CAMBIO_PENDIENTE` en `matriz.js` |
+| Endpoint de cambio | `POST /api/auth/cambiar-contrasena`, con su fila en la matriz |
+| Revocación del token al cambiar | `auth.controller.cambiarContrasena` |
+| Pantalla de cambio obligatorio | `apps/web/src/pages/CambiarContrasena.js` |
+
+Dos detalles que se decidieron al implementar y no estaban en el texto original:
+
+- **`POST /api/usuarios/inquilinos` ignora la contraseña si el cliente la manda.** No
+  basta con dejar de pedirla: mientras el campo se aceptara, un cliente viejo seguiría
+  fijando la credencial de otra persona sin que nadie se enterara. Hay una prueba de que
+  la contraseña enviada no sirve para entrar.
+- **El cambio rechaza repetir la misma contraseña.** Sin esa comprobación, un usuario
+  marcado podría «cambiarla» por la temporal que ya tiene y quitarse el indicador sin
+  haber cambiado nada.
+
+Pruebas: `services/ms-identidad/tests/contrasenaTemporal.test.ts` (generador, alta,
+cambio, revocación, y que la temporal no aparezca en ninguna consulta posterior) y el
+bloque «Cambio de contraseña pendiente» de `apps/gateway/tests/rbac.test.js`.

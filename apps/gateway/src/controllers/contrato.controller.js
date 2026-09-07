@@ -1,24 +1,18 @@
 const { Op } = require('sequelize');
 
+const { adjuntarInquilino, adjuntarInquilinos } = require('../clientes/composicion');
+const { usuarioPorId } = require('../clientes/identidad');
 const { sequelize } = require('../config/database');
 const Contrato = require('../models/Contrato');
 const Inmueble = require('../models/Inmueble');
-const RolUsuario = require('../models/RolUsuario');
-const Usuario = require('../models/Usuario');
-const { ROLES } = require('../models/constantes');
+const { ROL_INQUILINO } = require('../models/constantes');
 const { esUuid } = require('../models/uuid');
 
 /**
- * Datos del inquilino que se devuelven junto al contrato. Salen de `usuarios`
- * con alias `Inquilino`, así que la forma de la respuesta cambia: donde antes
- * había `Inquilino.Usuario.nombres` ahora hay `Inquilino.nombres`, y la cédula
- * dejó de ser `Inquilino.id_inquilino` para ser `Inquilino.documento`.
+ * `Inquilino` ya no llega por `include`: lo compone el gateway pidiéndoselo a
+ * ms-identidad. La forma de la respuesta es la misma que producía Sequelize, así
+ * que el frontend no se entera. Ver `clientes/composicion.js`.
  */
-const conInquilino = {
-    model: Usuario,
-    as: 'Inquilino',
-    attributes: ['id_usuario', 'nombres', 'apellidos', 'documento', 'telefono', 'email']
-};
 
 /**
  * Un contrato es visible para el dueño del inmueble O para su inquilino.
@@ -40,9 +34,11 @@ const obtenerTodos = async (req, res) => {
 
         const contratos = await Contrato.findAll({
             where: visiblePara(sub),
-            include: [{ model: Inmueble, required: true }, conInquilino]
+            include: [{ model: Inmueble, required: true }]
         });
-        res.json(contratos);
+
+        // Una sola petición a ms-identidad para toda la lista, no una por fila.
+        res.json(await adjuntarInquilinos(contratos));
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener contratos', error: error.message });
     }
@@ -55,7 +51,7 @@ const obtenerPorId = async (req, res) => {
         const { sub } = req.usuario;
 
         const contrato = esUuid(id)
-            ? await Contrato.findByPk(id, { include: [{ model: Inmueble }, conInquilino] })
+            ? await Contrato.findByPk(id, { include: [{ model: Inmueble }] })
             : null;
 
         if (!contrato) {
@@ -69,7 +65,7 @@ const obtenerPorId = async (req, res) => {
             return res.status(403).json({ mensaje: 'No tienes permisos para ver este contrato' });
         }
 
-        res.json(contrato);
+        res.json(await adjuntarInquilino(contrato));
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener contrato', error: error.message });
     }
@@ -109,17 +105,17 @@ const crear = async (req, res) => {
         }
 
         // 2. Verificar que el inquilino existe y que efectivamente es inquilino.
-        //    `id_inquilino` ya no es una cédula sino el UUID del usuario; la SPA
-        //    lo obtiene de GET /api/usuarios/buscar?documento=... El código de
-        //    error se conserva porque el frontend lo usa para abrir el modal de
-        //    alta cuando la persona todavía no está registrada.
-        const inquilino = esUuid(id_inquilino)
-            ? await RolUsuario.findOne({
-                where: { id_usuario: id_inquilino, id_rol: ROLES.INQUILINO }
-            })
-            : null;
+        //    Antes era un SELECT sobre `roles_usuario`; ahora esa tabla es de
+        //    ms-identidad y hay que preguntárselo. El código de error se conserva
+        //    porque el frontend lo usa para abrir el modal de alta cuando la
+        //    persona todavía no está registrada.
+        //
+        //    Un fallo de ms-identidad se traduce en «inquilino no encontrado», que
+        //    es lo prudente: ante la duda no se firma un contrato contra un
+        //    usuario que quizá no exista o quizá no sea inquilino.
+        const inquilino = esUuid(id_inquilino) ? await usuarioPorId(id_inquilino) : null;
 
-        if (!inquilino) {
+        if (!inquilino || !(inquilino.roles || []).includes(ROL_INQUILINO)) {
             await t.rollback();
             return res.status(404).json({
                 mensaje: 'Inquilino no encontrado',

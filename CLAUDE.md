@@ -48,7 +48,16 @@ identidad del Capítulo 2 ya implementado:
   adaptador de Express sobre este paquete, no una segunda implementación.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
+- `services/ms-identidad/` — primer microservicio real y **ya en producción de la
+  demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
+  Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
+
+El gateway ya no tiene tablas ni modelos de identidad. Lo que necesita de un usuario
+—el nombre del inquilino en un contrato, el arrendatario de un recibo, el correo al que
+avisa el motor— lo pide por HTTP a `/interno/usuarios` y lo compone
+(`apps/gateway/src/clientes/`). La revocación la resuelve una copia en memoria que
+refresca cada 15 s; ver `docs/adr/0008`.
 
 Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
@@ -64,7 +73,8 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0004` | Alta de inquilinos por `POST /api/usuarios/inquilinos`, que el documento no contempla. |
 | `0005` | El filtro de pertenencia de Inmuebles se aplica siempre. Cambio de comportamiento observable. |
 | `0006` | Registrar un abono es exclusivo del propietario; el documento no marca ese componente como tal. |
-| `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. Pendiente de implementar en el 3b. |
+| `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. |
+| `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -346,13 +356,10 @@ remoto lo ya extraído.
    - ~~**Matriz RBAC.** Políticas declarativas en el gateway, denegar por defecto.~~
      **Hecho.** Se adelantó a la extracción: no depende de ella y vale igual cuando
      `/api/auth` pase a remoto.
-   - **3b.** Extraer físicamente `ms-identidad`. Se lleva `database/identidad/` y
-     obliga a resolver la caché de revocados del gateway, la composición por HTTP de
-     los datos de usuario que hoy viajan embebidos, y la infraestructura de pruebas:
-     7 de las 9 suites fabrican sus datos llamando a `/api/auth` y `/api/usuarios`.
-     Incluye además la contraseña temporal de `docs/adr/0007`: generación en el
-     servicio, indicador de cambio obligatorio, bloqueo de todo salvo el cambio, y
-     endpoint `POST /api/auth/cambiar-contrasena`.
+   - ~~**3b.** Extraer físicamente `ms-identidad`.~~ **Hecho.** Se llevó
+     `database/identidad/`, el gateway pasó a componer por HTTP y a cachear los
+     revocados, y las pruebas se reestructuraron sobre dobles.
+   - ~~**3c.** Contraseña temporal del inquilino.~~ **Hecho.** Ver `docs/adr/0007`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
    validación ABAC de pertenencia.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
@@ -389,13 +396,40 @@ remoto lo ya extraído.
 
 ---
 
+## Cómo se prueba
+
+Convención para los pasos 4 al 7, fijada al extraer el primer servicio:
+
+**Cada servicio prueba su lógica contra dobles.** Nada de levantar el stack para una
+suite. El gateway no arranca `ms-identidad`: monta un doble HTTP con usuarios en memoria
+(`apps/gateway/tests/dobles/`) y apunta `MS_*_URL` a él. Las suites siguen corriendo en
+segundos y en un portátil sin Docker.
+
+Un doble, no un mock de función: la costura reenvía por red, así que para probar el
+gateway hace falta algo que escuche. Además permite simular lo incómodo — que el otro
+extremo no responda, que devuelva un usuario sin el rol esperado.
+
+**Cada servicio prueba contra su propia base.** `ms-identidad` recrea sólo el esquema
+`identidad`; el gateway sólo `public`. Comparten instancia sin pisarse.
+
+**Una suite de integración corta, aparte.** `tests/integracion/` recorre los caminos
+críticos —entrar, firmar un contrato, registrar un pago— contra el stack real levantado.
+Es lo único que comprueba que el contrato entre servicios sea cierto: un doble que se
+desvía del servicio real deja las suites en verde y el sistema roto. No duplica casos
+borde y **no** forma parte de `npm test`; se lanza con `npm run test:integracion`.
+
+Al extraer un servicio nuevo: se lleva sus pruebas, el gateway gana un doble suyo, y la
+suite de integración gana un camino sólo si es crítico para la demostración.
+
 ## Comandos
 
 ```bash
 docker compose -f infra/docker-compose.yml up --build     # levantar todo
 docker compose -f infra/docker-compose.yml down -v        # reinicio limpio
-npm test --workspace=services/ms-financiero               # pruebas de un servicio
-npm test --workspaces --if-present                        # todas
+npm test --workspace=services/ms-identidad                # pruebas de un servicio
+npm test --workspaces --if-present                        # todas, contra dobles
+npm run test:integracion                                  # caminos criticos, stack arriba
+npm run seed --workspace=services/ms-identidad            # usuarios de prueba
 ```
 
 Pruebas con `NODE_ENV=test`, apuntando a `arriendos360_test`.
@@ -470,12 +504,6 @@ documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
 ---
 
 ## Trampas conocidas
-
-**La cédula es la contraseña inicial de un inquilino.** El modal de alta no pide
-contraseña, así que el frontend manda `contrasena: documentoInquilino`. La cédula no es
-un secreto —el propietario acaba de teclearla y `GET /api/usuarios/buscar` la devuelve—,
-y además nadie le dice al inquilino que puede entrar ni con qué. Se reemplaza por una
-contraseña temporal generada en el servidor en el paso 3b: ver `docs/adr/0007`.
 
 **`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
 cualquier middleware de token, así que los PDF de contrato son públicos para quien

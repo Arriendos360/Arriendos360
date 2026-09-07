@@ -14,11 +14,17 @@ import { useSesion } from '../auth/sesion';
  * una URL escrita a mano no dé acceso a un módulo ajeno. No sustituye a la
  * autorización del servidor: el backend vuelve a comprobarlo siempre.
  */
-const ProtectedRoute = ({ children, rolRequerido }) => {
-    const { autenticado, usuario } = useSesion();
+const ProtectedRoute = ({ children, rolRequerido, permitirCambioPendiente = false }) => {
+    const { autenticado, debeCambiar, usuario } = useSesion();
 
     if (!autenticado) {
         return <Navigate to="/login" replace />;
+    }
+
+    // Quien entró con una contraseña temporal no puede ir a ninguna otra parte:
+    // la API le denegaría todo igualmente. Ver docs/adr/0007.
+    if (debeCambiar && !permitirCambioPendiente) {
+        return <Navigate to="/cambiar-contrasena" replace />;
     }
 
     if (rolRequerido && !usuario?.roles?.includes(rolRequerido)) {

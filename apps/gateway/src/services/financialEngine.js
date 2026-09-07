@@ -1,7 +1,8 @@
 const cron = require('node-cron');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
-const { Contrato, Inmueble, Pago, Usuario } = require('../models');
+const { adjuntarPartes } = require('../clientes/composicion');
+const { Contrato, Inmueble, Pago } = require('../models');
 const { enviarCorreo } = require('../config/mailer');
 
 /**
@@ -15,6 +16,13 @@ const { enviarCorreo } = require('../config/mailer');
  *
  * Este proceso corre sin usuario autenticado, asi que las columnas de auditoria
  * quedan a nombre de USUARIO_SISTEMA (ver models/auditoria.js).
+ *
+ * Los correos van a personas, y las personas viven en ms-identidad. Antes sus
+ * datos llegaban con un `include`; ahora se componen por HTTP en un solo lote
+ * antes de recorrer la lista. Si el servicio no responde, las partes quedan en
+ * `null` y el aviso se omite: el motor sigue generando cuentas de cobro y
+ * marcando mora, que es su trabajo principal, y lo que se pierde es la
+ * notificacion.
  */
 
 const iniciarMotorFinanciero = () => {
@@ -42,13 +50,13 @@ const procesarContratos = async () => {
         
         const contratos = await Contrato.findAll({
             where: { estado: 1 },
-            include: [
-                { model: Inmueble, include: [{ model: Usuario, as: 'Propietario' }] },
-                { model: Usuario, as: 'Inquilino' }
-            ]
+            include: [{ model: Inmueble }]
         });
 
-        for (const contrato of contratos) {
+        // Un solo viaje a ms-identidad para todos los contratos del barrido.
+        const contratosConPartes = await adjuntarPartes(contratos);
+
+        for (const contrato of contratosConPartes) {
             const fechaInicio = new Date(contrato.fecha_inicio);
             const diaCorte = fechaInicio.getDate();
             
@@ -120,16 +128,22 @@ const procesarPagos = async () => {
             include: [
                 { 
                     model: Contrato, 
-                    include: [
-                        { model: Inmueble, include: [{ model: Usuario, as: 'Propietario' }] },
-                        { model: Usuario, as: 'Inquilino' }
-                    ] 
+                    include: [{ model: Inmueble }]
                 }
             ]
         });
 
-        for (const pago of pagosPendientes) {
-            if (!pago.Contrato) continue;
+        // Igual que arriba: se componen las partes de todos los contratos
+        // implicados de una vez, no uno por uno dentro del bucle.
+        const contratosConPartes = await adjuntarPartes(
+            pagosPendientes.map((pago) => pago.Contrato).filter(Boolean)
+        );
+        const porContrato = new Map(contratosConPartes.map((c) => [c.id_contrato, c]));
+
+        for (const pagoOriginal of pagosPendientes) {
+            const pago = pagoOriginal;
+            const contratoCompuesto = porContrato.get(pago.id_contrato);
+            if (!contratoCompuesto) continue;
             
             const fechaCorte = new Date(pago.mes_correspondiente);
             const diffTiempo = hoy - fechaCorte;
@@ -137,18 +151,18 @@ const procesarPagos = async () => {
 
             // RF-12: Vencimiento Próximo (1 día antes de que expire el tiempo de gracia)
             if (diffDias === 4 && pago.estado === 1) {
-                if (pago.Contrato.Inquilino) {
+                if (contratoCompuesto.Inquilino) {
                     await enviarCorreo(
-                        pago.Contrato.Inquilino.email,
+                        contratoCompuesto.Inquilino.email,
                         '⚠️ Aviso: Tu pago vence pronto',
                         `Recuerda que tienes hasta mañana para realizar el pago de tu arriendo sin generar mora.`
                     );
                 }
-                if (pago.Contrato.Inmueble && pago.Contrato.Inmueble.Propietario) {
+                if (contratoCompuesto.Inmueble && contratoCompuesto.Inmueble.Propietario) {
                     await enviarCorreo(
-                        pago.Contrato.Inmueble.Propietario.email,
+                        contratoCompuesto.Inmueble.Propietario.email,
                         '📢 Recordatorio de pago próximo a vencer',
-                        `El pago del inmueble ${pago.Contrato.Inmueble.direccion} vence mañana.`
+                        `El pago del inmueble ${contratoCompuesto.Inmueble.direccion} vence mañana.`
                     );
                 }
             }
@@ -159,18 +173,18 @@ const procesarPagos = async () => {
                 console.log(`🚫 Pago ${pago.id_pago} marcado como EN MORA`);
 
                 // RF-12: Vencido (Al inquilino y propietario)
-                if (pago.Contrato.Inquilino) {
+                if (contratoCompuesto.Inquilino) {
                     await enviarCorreo(
-                        pago.Contrato.Inquilino.email,
+                        contratoCompuesto.Inquilino.email,
                         '🚨 Pago Vencido - Mora Generada',
                         `Tu pago de arriendo ha superado el periodo de gracia. Por favor regulariza tu situación.`
                     );
                 }
-                if (pago.Contrato.Inmueble && pago.Contrato.Inmueble.Propietario) {
+                if (contratoCompuesto.Inmueble && contratoCompuesto.Inmueble.Propietario) {
                     await enviarCorreo(
-                        pago.Contrato.Inmueble.Propietario.email,
+                        contratoCompuesto.Inmueble.Propietario.email,
                         '🔴 Notificación de Inquilino en Mora',
-                        `El inquilino del inmueble ${pago.Contrato.Inmueble.direccion} ha entrado en mora.`
+                        `El inquilino del inmueble ${contratoCompuesto.Inmueble.direccion} ha entrado en mora.`
                     );
                 }
             }

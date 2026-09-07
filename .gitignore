@@ -21,6 +21,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Volcados temporales de verificacion (salida de npm test, builds, compose)
+salida-*.txt
+
 # Archivos subidos por usuarios (contratos, comprobantes)
 apps/gateway/uploads/
 

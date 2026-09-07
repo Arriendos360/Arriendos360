@@ -3,7 +3,6 @@ const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 const { columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } = require('./auditoria');
 const { claveUuid, referenciaUuid } = require('./uuid');
-const Usuario = require('./Usuario');
 
 /**
  * Inmuebles.
@@ -13,10 +12,11 @@ const Usuario = require('./Usuario');
  * 4, cuando se extraiga ms-inmuebles. Aquí sólo cambian el tipo de la clave y la
  * naturaleza de `id_propietario`.
  *
- * `id_propietario` guardaba la CÉDULA del propietario y apuntaba a la tabla
- * `propietarios`, que ya no existe. Ahora guarda el UUID del usuario, como
- * referencia lógica sin clave foránea: al extraer ms-inmuebles, esa columna
- * cruzará a ms-identidad y la regla dura 1 prohíbe la FK.
+ * `id_propietario` guarda el UUID del usuario como referencia lógica pura: ni
+ * clave foránea ni asociación de Sequelize. Ms-identidad ya está extraído, así
+ * que esa columna cruza la frontera del servicio y ni la base ni el ORM pueden
+ * seguirla. Los datos del propietario, cuando hacen falta, los pide el gateway
+ * por HTTP (`clientes/identidad.js`).
  */
 const Inmueble = sequelize.define('Inmueble', {
     id_inmueble: claveUuid(),
@@ -49,19 +49,5 @@ const Inmueble = sequelize.define('Inmueble', {
 });
 
 registrarHooksAuditoria(Inmueble);
-
-// El alias `Propietario` mantiene el nombre que ya usaban los controladores y
-// los PDF (`inmueble.Propietario.nombres`), pero ahora apunta a `Usuario`.
-// `constraints: false` deja constancia de que la referencia es lógica.
-Inmueble.belongsTo(Usuario, {
-    foreignKey: 'id_propietario',
-    as: 'Propietario',
-    constraints: false
-});
-Usuario.hasMany(Inmueble, {
-    foreignKey: 'id_propietario',
-    as: 'Inmuebles',
-    constraints: false
-});
 
 module.exports = Inmueble;

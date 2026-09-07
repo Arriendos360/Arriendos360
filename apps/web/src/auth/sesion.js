@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react';
 export const ROL_PROPIETARIO = 'PROPIETARIO';
 export const ROL_INQUILINO = 'INQUILINO';
 
-const SESION_VACIA = { token: null, usuario: null };
+const SESION_VACIA = { token: null, usuario: null, debeCambiar: false };
 
 let sesion = SESION_VACIA;
 const suscriptores = new Set();
@@ -31,10 +31,34 @@ const notificar = () => {
     }
 };
 
-/** Guarda la sesión devuelta por `POST /api/auth/login`. */
+/**
+ * Guarda la sesión devuelta por `POST /api/auth/login`.
+ *
+ * `debeCambiar` marca a quien entró con una contraseña que no eligió: mientras
+ * esté activo la API le deniega todo salvo cambiarla, así que la SPA lo lleva
+ * directo a esa pantalla. Ver docs/adr/0007.
+ */
 export const guardarSesion = ({ token, usuario }) => {
-    sesion = { token, usuario };
+    sesion = {
+        token,
+        usuario,
+        debeCambiar: Boolean(usuario && usuario.debe_cambiar_contrasena)
+    };
     notificar();
+};
+
+/**
+ * Marca el cambio como pendiente sin tocar el token.
+ *
+ * La llama el interceptor cuando la API responde CAMBIO_CONTRASENA_REQUERIDO:
+ * puede pasar que el token siga siendo válido y la SPA no se hubiera enterado,
+ * por ejemplo si el estado cambió en otra pestaña.
+ */
+export const marcarCambioRequerido = () => {
+    if (!sesion.debeCambiar) {
+        sesion = { ...sesion, debeCambiar: true };
+        notificar();
+    }
 };
 
 /** Borra la sesión. La llama el logout y también el interceptor ante un 401. */
@@ -48,6 +72,9 @@ export const obtenerToken = () => sesion.token;
 export const obtenerUsuario = () => sesion.usuario;
 
 export const haySesion = () => sesion.token !== null;
+
+/** ¿Tiene el usuario que cambiar su contraseña antes de poder hacer nada? */
+export const debeCambiarContrasena = () => sesion.debeCambiar === true;
 
 /**
  * ¿Tiene el usuario este rol?
@@ -79,6 +106,7 @@ export const useSesion = () => {
         token: estado.token,
         usuario: estado.usuario,
         autenticado: estado.token !== null,
+        debeCambiar: estado.debeCambiar === true,
         esPropietario: Array.isArray(estado.usuario?.roles)
             ? estado.usuario.roles.includes(ROL_PROPIETARIO)
             : false

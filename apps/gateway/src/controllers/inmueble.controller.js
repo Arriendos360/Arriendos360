@@ -1,11 +1,15 @@
 const Inmueble = require('../models/Inmueble');
-const Usuario = require('../models/Usuario');
 
 /**
- * El propietario de un inmueble es ahora un UUID de usuario, no una cédula, y
- * sale siempre del `sub` del token — nunca del cuerpo de la petición (regla dura
- * 4). El `include` con alias `Propietario` sigue devolviendo la misma forma de
- * respuesta que antes, pero por debajo lee de `usuarios`.
+ * El propietario de un inmueble es un UUID de usuario que sale siempre del `sub`
+ * del token, nunca del cuerpo de la petición (regla dura 4).
+ *
+ * Estas respuestas ya NO traen los datos del propietario. Antes venían por un
+ * `include` que cruzaba a ms-identidad, y al extraerlo hubo que decidir entre
+ * componerlos por HTTP o quitarlos. Se quitaron: nadie los usaba. El frontend
+ * nunca lee `inmueble.Propietario`, y no podía ser de otro modo — quien mira
+ * este listado es el propietario, así que serían sus propios datos repetidos en
+ * cada fila.
  *
  * CAMBIO DE COMPORTAMIENTO DELIBERADO. El código anterior filtraba por
  * propietario sólo si `rol === 'propietario'`; cualquier otro usuario
@@ -14,17 +18,12 @@ const Usuario = require('../models/Usuario');
  * seguridad, el filtro pasa a aplicarse siempre: un inmueble sólo lo ve su
  * dueño. Es la validación ABAC de pertenencia de la regla dura 8.
  */
-const conPropietario = [{ model: Usuario, as: 'Propietario', attributes: ['id_usuario', 'nombres', 'apellidos', 'documento'] }];
-
 // Obtener todos los inmuebles del propietario autenticado
 const obtenerTodos = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        const inmuebles = await Inmueble.findAll({
-            where: { id_propietario: sub },
-            include: conPropietario
-        });
+        const inmuebles = await Inmueble.findAll({ where: { id_propietario: sub } });
         res.json(inmuebles);
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener inmuebles', error: error.message });
@@ -38,8 +37,7 @@ const obtenerPorId = async (req, res) => {
         const { sub } = req.usuario;
 
         const inmueble = await Inmueble.findOne({
-            where: { id_inmueble: id, id_propietario: sub },
-            include: conPropietario
+            where: { id_inmueble: id, id_propietario: sub }
         });
 
         if (!inmueble) {

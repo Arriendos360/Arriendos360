@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-import { limpiarSesion, obtenerToken } from '../auth/sesion';
+import { limpiarSesion, marcarCambioRequerido, obtenerToken } from '../auth/sesion';
 
 const api = axios.create({
     baseURL: process.env.REACT_APP_API_URL || 'http://localhost:3001/api'
@@ -32,6 +32,14 @@ api.interceptors.response.use(
         if (error.response?.status === 401) {
             limpiarSesion();
         }
+
+        // El gateway deniega todo a quien tiene la contraseña temporal sin
+        // cambiar. Se marca la sesión y los guardianes de ruta llevan a la
+        // pantalla de cambio, en vez de mostrar un 403 que no explica nada.
+        if (error.response?.data?.error_code === 'CAMBIO_CONTRASENA_REQUERIDO') {
+            marcarCambioRequerido();
+        }
+
         return Promise.reject(error);
     }
 );

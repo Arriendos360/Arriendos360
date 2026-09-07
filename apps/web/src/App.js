@@ -4,6 +4,7 @@ import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
+import CambiarContrasena from "./pages/CambiarContrasena";
 import Inmuebles from "./pages/Inmuebles";
 import Contratos from "./pages/Contratos";
 import Pagos from "./pages/Pagos";
@@ -14,6 +15,16 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        {/* Unica ruta accesible con la contrasena temporal sin cambiar. Sin
+            Layout: la barra lateral llevaria a sitios que la API deniega. */}
+        <Route
+          path="/cambiar-contrasena"
+          element={
+            <ProtectedRoute permitirCambioPendiente>
+              <CambiarContrasena />
+            </ProtectedRoute>
+          }
+        />
         {/* Dashboard e Inmuebles son solo de propietarios: el guardian corta la
             navegacion aunque la URL se escriba a mano. El backend lo vuelve a
             comprobar de todas formas (regla dura 8). */}

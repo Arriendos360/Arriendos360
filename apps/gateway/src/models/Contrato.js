@@ -4,7 +4,6 @@ const { sequelize } = require('../config/database');
 const { columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } = require('./auditoria');
 const { claveUuid, referenciaUuid } = require('./uuid');
 const Inmueble = require('./Inmueble');
-const Usuario = require('./Usuario');
 
 /**
  * Contratos.
@@ -13,8 +12,10 @@ const Usuario = require('./Usuario');
  * pasará a `canon` y aparecerán `fecha_inicio_corte`, `fecha_limite_pago` y los
  * datos del deudor solidario cuando se extraiga ms-contratos (paso 6).
  *
- * `id_inquilino` guardaba la CÉDULA y apuntaba a la tabla `inquilinos`, que ya
- * no existe. Ahora guarda el UUID del usuario.
+ * `id_inquilino` guarda el UUID del usuario como referencia lógica pura, sin
+ * asociación de Sequelize: cruza la frontera hacia ms-identidad. El nombre del
+ * inquilino que el listado muestra ya no sale de un `include`, lo compone el
+ * gateway pidiéndoselo al servicio.
  */
 const Contrato = sequelize.define('Contrato', {
     id_contrato: claveUuid(),
@@ -50,21 +51,10 @@ const Contrato = sequelize.define('Contrato', {
 
 registrarHooksAuditoria(Contrato);
 
-// Referencias lógicas: `id_inmueble` cruzará a ms-inmuebles e `id_inquilino` a
-// ms-identidad. El `include` sigue funcionando mientras esto sea un monolito;
-// el paso 6 lo reemplaza por llamadas HTTP (regla dura 2).
+// `id_inmueble` sigue teniendo asociación porque Inmuebles todavía vive en el
+// gateway; el paso 4 la sustituirá por composición, igual que se acaba de hacer
+// con el inquilino. `id_inquilino` ya no la tiene: cruza a ms-identidad.
 Contrato.belongsTo(Inmueble, { foreignKey: 'id_inmueble', constraints: false });
 Inmueble.hasMany(Contrato, { foreignKey: 'id_inmueble', constraints: false });
-
-Contrato.belongsTo(Usuario, {
-    foreignKey: 'id_inquilino',
-    as: 'Inquilino',
-    constraints: false
-});
-Usuario.hasMany(Contrato, {
-    foreignKey: 'id_inquilino',
-    as: 'ContratosComoInquilino',
-    constraints: false
-});
 
 module.exports = Contrato;

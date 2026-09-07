@@ -1,13 +1,15 @@
 /**
- * Utilidades comunes de las pruebas de integración.
+ * Utilidades comunes de las pruebas del gateway.
  *
- * Las seis suites originales empezaban con `sequelize.sync({ force: true })` y
- * un bloque copiado de registro + login. `sync()` ya no existe (lo reemplazaron
- * las migraciones versionadas) y el registro cambió de contrato, así que ese
- * bloque se centraliza aquí en vez de repetirse seis veces con seis variantes.
+ * Cambio importante desde que se extrajo ms-identidad: `/api/auth` y
+ * `/api/usuarios` ya no los sirve el gateway, así que las suites no pueden crear
+ * usuarios contra el `app` en proceso. Se levanta un DOBLE del servicio
+ * (`tests/dobles/identidad.js`) y se apunta `MS_IDENTIDAD_URL` a él; la costura
+ * reenvía igual que en producción, sólo que al otro extremo hay un servidor de
+ * mentira con usuarios en memoria.
  *
- * Nada de esto toca la base de desarrollo: `recrearBase()` delega en
- * `recrearEsquema()`, que sólo funciona con NODE_ENV=test.
+ * Consecuencia práctica: `prepararEntorno()` tiene que llamarse ANTES de la
+ * primera petición, y `cerrarEntorno()` al final para no dejar el puerto abierto.
  */
 
 const request = require('supertest');
@@ -15,29 +17,49 @@ const request = require('supertest');
 const app = require('../../src/app');
 const { sequelize } = require('../../src/config/database');
 const { recrearEsquema } = require('../../src/database/migraciones');
+const { crearIdentidadFalsa } = require('../dobles/identidad');
 
 const CONTRASENA_POR_DEFECTO = 'pass123';
 
-/** Deja la base vacía y con el esquema recién migrado. */
-const recrearBase = () => recrearEsquema(sequelize);
+/** El doble activo. Lo comparten los helpers de este módulo. */
+let identidad = null;
 
-const cerrarBase = () => sequelize.close();
+/**
+ * Levanta el doble de identidad, lo cablea y deja el esquema del gateway limpio.
+ *
+ * @returns {Promise<object>} el doble, por si la prueba necesita manipularlo.
+ */
+const prepararEntorno = async () => {
+    identidad = await crearIdentidadFalsa();
+    // La costura lee `process.env` en cada petición, así que basta con ponerlo.
+    process.env.MS_IDENTIDAD_URL = identidad.url;
+
+    await recrearEsquema(sequelize);
+    return identidad;
+};
+
+const cerrarEntorno = async () => {
+    if (identidad) {
+        await identidad.cerrar();
+        identidad = null;
+    }
+    delete process.env.MS_IDENTIDAD_URL;
+    await sequelize.close();
+};
+
+/** El doble en curso, para pruebas que necesiten inspeccionarlo. */
+const identidadFalsa = () => identidad;
 
 /**
  * Registra un propietario y devuelve su token y su UUID.
  *
- * El registro público siempre crea PROPIETARIO: el contrato de interfaz del
- * Capítulo 2 no lleva campo `rol`.
+ * Va contra el gateway, no contra el doble: así la petición atraviesa la matriz
+ * RBAC y la costura, que es justo lo que interesa ejercitar.
  */
 const registrarPropietario = async (datos) => {
-    const cuerpo = {
-        contrasena: CONTRASENA_POR_DEFECTO,
-        telefono: '3000000000',
-        ...datos
-    };
+    const cuerpo = { contrasena: CONTRASENA_POR_DEFECTO, telefono: '3000000000', ...datos };
 
     const registro = await request(app).post('/api/auth/registro').send(cuerpo);
-
     const login = await request(app)
         .post('/api/auth/login')
         .send({ email: cuerpo.email, contrasena: cuerpo.contrasena });
@@ -52,20 +74,9 @@ const registrarPropietario = async (datos) => {
     };
 };
 
-/**
- * Da de alta un inquilino. Requiere el token de un propietario: dar de alta
- * usuarios dejó de ser una operación pública cuando el registro se fijó a
- * PROPIETARIO.
- *
- * Devuelve el UUID, que es lo que `Contratos.id_inquilino` guarda ahora. Antes
- * se usaba la cédula directamente.
- */
+/** Da de alta un inquilino con el token de un propietario. */
 const crearInquilino = async (tokenPropietario, datos) => {
-    const cuerpo = {
-        contrasena: CONTRASENA_POR_DEFECTO,
-        telefono: '3000000001',
-        ...datos
-    };
+    const cuerpo = { contrasena: CONTRASENA_POR_DEFECTO, telefono: '3000000001', ...datos };
 
     const respuesta = await request(app)
         .post('/api/usuarios/inquilinos')
@@ -80,7 +91,6 @@ const crearInquilino = async (tokenPropietario, datos) => {
     };
 };
 
-/** Inicia sesión y devuelve la respuesta completa. */
 const iniciarSesion = (email, contrasena = CONTRASENA_POR_DEFECTO) =>
     request(app).post('/api/auth/login').send({ email, contrasena });
 
@@ -90,11 +100,12 @@ const conToken = (token) => ['Authorization', `Bearer ${token}`];
 module.exports = {
     CONTRASENA_POR_DEFECTO,
     app,
-    cerrarBase,
+    cerrarEntorno,
     conToken,
     crearInquilino,
+    identidadFalsa,
     iniciarSesion,
-    recrearBase,
+    prepararEntorno,
     registrarPropietario,
     sequelize
 };

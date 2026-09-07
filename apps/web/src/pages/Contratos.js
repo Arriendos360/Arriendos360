@@ -27,6 +27,8 @@ const Contratos = () => {
 
     // Tenant Modal state
     const [showTenantModal, setShowTenantModal] = useState(false);
+    // La temporal que devuelve ms-identidad, para mostrarla UNA vez.
+    const [contrasenaTemporal, setContrasenaTemporal] = useState(null);
     const [tenantData, setTenantData] = useState({
         nombres: '',
         apellidos: '',
@@ -69,7 +71,7 @@ const Contratos = () => {
      */
     const buscarInquilino = async (documento) => {
         try {
-            const respuesta = await api.get('/usuarios/buscar', { params: { documento } });
+            const respuesta = await api.get('/usuarios', { params: { documento } });
             return respuesta.data.id;
         } catch (error) {
             if (error.response?.status === 404) return null;
@@ -127,16 +129,17 @@ const Contratos = () => {
     const handleCreateTenant = async (e) => {
         e.preventDefault();
         try {
-            // Alta de inquilino: ruta propia y autenticada. El registro público
-            // quedó fijado a PROPIETARIO por el contrato de interfaz.
+            // Alta de inquilino: ruta propia y autenticada. La contraseña NO se
+            // manda: la genera ms-identidad y la devuelve una sola vez, para que
+            // el propietario se la entregue al inquilino por fuera del sistema.
+            // Antes se usaba la cédula, que no es un secreto. Ver docs/adr/0007.
             const respuesta = await api.post('/usuarios/inquilinos', {
                 ...tenantData,
-                documento: documentoInquilino,
-                contrasena: documentoInquilino // La cédula es la contraseña inicial
+                documento: documentoInquilino
             });
 
             setShowTenantModal(false);
-            showNotify('Inquilino registrado. Creando el contrato...', 'success');
+            setContrasenaTemporal(respuesta.data.contrasena_temporal);
 
             // Ya tenemos su UUID, así que el contrato sale sin volver a buscar.
             await enviarContrato(respuesta.data.usuario.id);
@@ -244,6 +247,39 @@ const Contratos = () => {
                             </button>
                         </div>
                     </form>
+                </div>
+            )}
+
+            {/* La contraseña temporal se muestra UNA vez: no hay forma de
+                recuperarla después. Se cierra a mano, para que no desaparezca
+                sola antes de que el propietario la anote. */}
+            {contrasenaTemporal && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000
+                }}>
+                    <div style={{ background: '#fff', padding: '2rem', borderRadius: '0.75rem', width: '100%', maxWidth: '440px' }}>
+                        <h4 style={{ margin: '0 0 0.5rem', color: '#0f172a' }}>Contraseña temporal del inquilino</h4>
+                        <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+                            Entrégasela para que pueda entrar. <b>No se puede volver a consultar</b>:
+                            si cierras esta ventana sin anotarla, habrá que crear otra.
+                            La primera vez que entre, el sistema le pedirá elegir una propia.
+                        </p>
+                        <div style={{
+                            fontFamily: 'monospace', fontSize: '1.5rem', letterSpacing: '0.1em',
+                            textAlign: 'center', background: '#f1f5f9', padding: '1rem',
+                            borderRadius: '0.5rem', color: '#0f172a', userSelect: 'all'
+                        }}>
+                            {contrasenaTemporal}
+                        </div>
+                        <button
+                            className="btn btn-primary"
+                            style={{ width: '100%', marginTop: '1.5rem' }}
+                            onClick={() => setContrasenaTemporal(null)}
+                        >
+                            Ya la anoté
+                        </button>
+                    </div>
                 </div>
             )}
 

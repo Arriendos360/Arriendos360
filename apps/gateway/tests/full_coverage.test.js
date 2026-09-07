@@ -2,17 +2,17 @@ const request = require('supertest');
 
 const {
     app,
-    cerrarBase,
+    cerrarEntorno,
     conToken,
     crearInquilino,
-    recrearBase,
+    prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
 
 let token, idInmueble, idContrato;
 
 beforeAll(async () => {
-    await recrearBase();
+    await prepararEntorno();
 
     // Configuración inicial: Registro y Login
     const propietario = await registrarPropietario({
@@ -34,7 +34,7 @@ beforeAll(async () => {
     idContrato = resCon.body.contrato.id_contrato;
 });
 
-afterAll(async () => { await cerrarBase(); });
+afterAll(async () => { await cerrarEntorno(); });
 
 describe('Cobertura Total - Inmuebles', () => {
     test('GET /api/inmuebles', async () => {
