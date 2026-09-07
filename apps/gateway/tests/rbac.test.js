@@ -157,7 +157,9 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
         ['GET', '/api/pagos/abc/recibo', INQUILINO, SIN_ROLES],
         ['POST', '/api/pagos', PROPIETARIO, INQUILINO],
         ['POST', '/api/pagos/verificar-mora', PROPIETARIO, INQUILINO],
-        ['PUT', '/api/pagos/abc/pagar', INQUILINO, SIN_ROLES],
+        // Registrar el abono es del propietario: el inquilino lo consulta, no lo
+        // asienta. Ver docs/adr/0006.
+        ['PUT', '/api/pagos/abc/pagar', PROPIETARIO, INQUILINO],
 
         ['GET', '/api/dashboard/resumen', PROPIETARIO, INQUILINO],
         ['GET', '/api/dashboard/mora', PROPIETARIO, INQUILINO]
@@ -176,6 +178,18 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
     test.each(CASOS)('%s %s exige token', async (metodo, ruta) => {
         const respuesta = await pedir(metodo, ruta);
         expect(respuesta.status).toBe(401);
+    });
+});
+
+describe('El inquilino consulta pagos pero no los asienta', () => {
+    test('puede leer el listado y el recibo', async () => {
+        expect((await pedir('GET', '/api/pagos', INQUILINO())).status).toBe(200);
+        expect((await pedir('GET', '/api/pagos/abc/recibo', INQUILINO())).status).toBe(200);
+    });
+
+    test('no puede registrar un abono', async () => {
+        const respuesta = await pedir('PUT', '/api/pagos/abc/pagar', INQUILINO());
+        expect(respuesta.status).toBe(403);
     });
 });
 
