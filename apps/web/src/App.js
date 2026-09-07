@@ -14,10 +14,13 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        {/* Dashboard e Inmuebles son solo de propietarios: el guardian corta la
+            navegacion aunque la URL se escriba a mano. El backend lo vuelve a
+            comprobar de todas formas (regla dura 8). */}
         <Route 
           path="/" 
           element={
-            <ProtectedRoute>
+            <ProtectedRoute rolRequerido="PROPIETARIO">
               <Layout>
                 <Dashboard />
               </Layout>
@@ -27,7 +30,7 @@ function App() {
         <Route 
           path="/inmuebles" 
           element={
-            <ProtectedRoute>
+            <ProtectedRoute rolRequerido="PROPIETARIO">
               <Layout>
                 <Inmuebles />
               </Layout>

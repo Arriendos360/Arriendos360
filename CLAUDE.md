@@ -31,17 +31,28 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1 y 2 de la migración completados. El sistema sigue siendo un **monolito modular
-funcionando**, ~4.100 líneas, ahora dentro de una estructura de monorepo:
+Pasos 1, 2 y 3a de la migración completados. El sistema sigue siendo un **monolito
+modular funcionando**, ahora dentro de una estructura de monorepo y con el modelo de
+identidad del Capítulo 2 ya implementado:
 
 - `apps/gateway/` — el antiguo `backend/`. Express + Sequelize + PostgreSQL en
   JavaScript (CommonJS). Incluye la costura de enrutamiento: cada prefijo se resuelve
   local o remoto según haya o no valor en su variable `MS_*_URL`. Hoy todos locales.
 - `apps/web/` — el antiguo `frontend/`. React 18 con CRA. **Sin Tailwind**, aunque el
   PMP lo declara.
-- `packages/contracts/` — DTOs en TypeScript de los 5 endpoints documentados.
-- `packages/shared/` — verificación local del JWT, error estándar, cliente HTTP.
+- `packages/contracts/` — DTOs en TypeScript de los endpoints documentados.
+- `packages/shared/` — verificación local del JWT y de revocados, error estándar,
+  cliente HTTP. Todavía sin consumir: el build del gateway usa contexto
+  `apps/gateway` y `packages/` no entra en la imagen. Se conecta en el paso 3b.
+- `database/` — migraciones SQL versionadas, una carpeta por esquema
+  (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
+
+Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
+`propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
+claims nuevos (`sub`/`email`/`roles`/`jti`), `logout` con `TokensRevocados`, token en
+memoria en la SPA y descargas por blob. Falta el 3b: extraer `ms-identidad` y montar
+la matriz RBAC.
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -316,11 +327,10 @@ remoto lo ya extraído.
 1. ~~**Estructura.** Monorepo con npm workspaces.~~ **Hecho.**
 2. ~~**Gateway.** Costura de enrutamiento y paquetes compartidos.~~ **Hecho.**
 3. **Identidad y seguridad.** Se parte en dos PRs:
-   - **3a.** Rehacer el modelo de identidad dentro del gateway: `Usuarios` + `Roles` +
-     `RolesUsuario`, migración global a UUID, columnas de auditoría, claims nuevos,
-     `logout` y `TokensRevocados`, token en memoria en el SPA, descargas por blob.
-     Migraciones versionadas en lugar de `sequelize.sync()`.
+   - ~~**3a.** Rehacer el modelo de identidad dentro del gateway.~~ **Hecho.**
    - **3b.** Extraer físicamente `ms-identidad` y montar la matriz RBAC en el gateway.
+     Arrastra dos cosas del 3a: hacer el build de Docker consciente del monorepo (para
+     que el gateway pueda consumir `packages/shared`) y llevarse `database/identidad/`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
    validación ABAC de pertenencia.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
@@ -393,10 +403,6 @@ hosting. Hoy los archivos van a disco local, que no sobrevive a scale-to-zero.
 **Frecuencia de refresco de la caché de revocados en el gateway.** Ventana entre el
 logout y su efecto real en las demás réplicas.
 
-**Endpoints del documento vs. implementados.** La sección de Interfaz gráfica describe
-el comportamiento actual del frontend (`POST /auth/register`, `PUT /pagos/:id/pagar`).
-Ganan los contratos de la sección de microservicios; el frontend se adapta.
-
 **Lockfiles anidados.** `apps/gateway` y `apps/web` conservan `package-lock.json`, pero
 npm en modo workspaces los ignora: manda el de la raíz. Los Dockerfiles deben construir
 desde el contexto raíz con `npm ci --workspace=...` y esos lockfiles deben borrarse.
@@ -413,13 +419,10 @@ no lo aplica: cualquier usuario autenticado puede ejecutarlo. Pertenece a
 
 ## Trampas conocidas
 
-**`sequelize.sync()` en `app.js`.** Crea tablas al arrancar. Cómodo en desarrollo,
-peligroso en producción. Con el cambio a UUID, reemplazarlo por migraciones deja de ser
-opcional.
-
-**Trazabilidad rota en `financialEngine.js`.** Los comentarios citan RF-14, RF-15 y
-RF-16, pero según el SRS esos son requisitos del Dashboard. Recibos es RF-11 y alertas
-de mora es RF-12. Corregir al tocar el archivo.
+**`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
+cualquier middleware de token, así que los PDF de contrato son públicos para quien
+conozca la URL. El `?token=` que el frontend les pegaba nunca protegió nada. Se
+resuelve en el paso 6, al mover los anexos a almacenamiento en la nube con URL firmada.
 
 **`backend/uploads/` en disco local.** No sobrevive a un contenedor efímero.
 

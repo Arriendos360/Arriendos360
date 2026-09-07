@@ -1,17 +1,28 @@
-const Usuario = require('./Usuario');
-const Propietario = require('./Propietario');
-const Inquilino = require('./Inquilino');
-const Inmueble = require('./Inmueble');
-const Contrato = require('./Contrato');
-const Pago = require('./Pago');
+/**
+ * Punto único de importación de los modelos.
+ *
+ * `Propietario` e `Inquilino` desaparecieron: la distinción vive ahora en
+ * `RolUsuario`. Donde antes se hacía `include: [{ model: Propietario }]`, ahora
+ * va `include: [{ model: Usuario, as: 'Propietario' }]` — el alias sobrevive,
+ * la tabla no.
+ */
+
 const Abono = require('./Abono');
+const Contrato = require('./Contrato');
+const Inmueble = require('./Inmueble');
+const Pago = require('./Pago');
+const Rol = require('./Rol');
+const RolUsuario = require('./RolUsuario');
+const TokenRevocado = require('./TokenRevocado');
+const Usuario = require('./Usuario');
 
 module.exports = {
-    Usuario,
-    Propietario,
-    Inquilino,
-    Inmueble,
+    Abono,
     Contrato,
+    Inmueble,
     Pago,
-    Abono
+    Rol,
+    RolUsuario,
+    TokenRevocado,
+    Usuario
 };

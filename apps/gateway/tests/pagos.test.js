@@ -1,32 +1,31 @@
 const request = require('supertest');
-const app = require('../src/app');
-const { sequelize } = require('../src/config/database');
+
+const {
+    app,
+    cerrarBase,
+    conToken,
+    crearInquilino,
+    recrearBase,
+    registrarPropietario
+} = require('./utiles/entorno');
 
 let tokenProp, idContrato;
 
 beforeAll(async () => {
-    await sequelize.sync({ force: true });
+    await recrearBase();
 
     // 1. Registrar Propietario
-    await request(app).post('/api/auth/register').send({
-        correo: 'prop@pago.com',
-        contrasena: 'pass123',
-        rol: 'propietario',
+    const propietario = await registrarPropietario({
+        email: 'prop@pago.com',
         documento: 'P123',
         nombres: 'Prop',
         apellidos: 'Pago'
     });
-    const login = await request(app).post('/api/auth/login').send({
-        correo: 'prop@pago.com',
-        contrasena: 'pass123'
-    });
-    tokenProp = login.body.token;
+    tokenProp = propietario.token;
 
-    // 2. Registrar Inquilino
-    await request(app).post('/api/auth/register').send({
-        correo: 'inq@pago.com',
-        contrasena: 'pass123',
-        rol: 'inquilino',
+    // 2. Dar de alta al Inquilino
+    const inquilino = await crearInquilino(tokenProp, {
+        email: 'inq@pago.com',
         documento: 'I123',
         nombres: 'Inq',
         apellidos: 'Pago'
@@ -35,17 +34,17 @@ beforeAll(async () => {
     // 3. Crear Inmueble
     const resInm = await request(app)
         .post('/api/inmuebles')
-        .set('Authorization', `Bearer ${tokenProp}`)
+        .set(...conToken(tokenProp))
         .send({ direccion: 'Calle Pago 1', tipo_inmueble: 'Apto' });
     const idInm = resInm.body.inmueble.id_inmueble;
 
     // 4. Crear Contrato
     const resCon = await request(app)
         .post('/api/contratos')
-        .set('Authorization', `Bearer ${tokenProp}`)
+        .set(...conToken(tokenProp))
         .send({
             id_inmueble: idInm,
-            id_inquilino: 'I123',
+            id_inquilino: inquilino.id,
             fecha_inicio: '2023-01-01',
             fecha_fin: '2023-12-31',
             valor_mensual: 1200
@@ -54,7 +53,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    await sequelize.close();
+    await cerrarBase();
 });
 
 describe('Gestión de Pagos', () => {
@@ -63,7 +62,7 @@ describe('Gestión de Pagos', () => {
     test('Debería crear un cobro (pago pendiente)', async () => {
         const response = await request(app)
             .post('/api/pagos')
-            .set('Authorization', `Bearer ${tokenProp}`)
+            .set(...conToken(tokenProp))
             .send({
                 id_contrato: idContrato,
                 monto_total: 1200,
@@ -78,7 +77,7 @@ describe('Gestión de Pagos', () => {
     test('Debería registrar un pago realizado', async () => {
         const response = await request(app)
             .put(`/api/pagos/${idPago}/pagar`)
-            .set('Authorization', `Bearer ${tokenProp}`)
+            .set(...conToken(tokenProp))
             .send({
                 monto_pagado: 1200,
                 tipo_transaccion: 'Efectivo',
@@ -95,7 +94,7 @@ describe('Dashboard', () => {
     test('Debería retornar resumen con ingresos', async () => {
         const response = await request(app)
             .get('/api/dashboard/resumen')
-            .set('Authorization', `Bearer ${tokenProp}`);
+            .set(...conToken(tokenProp));
         
         expect(response.statusCode).toBe(200);
         expect(parseFloat(response.body.ingresos_totales)).toBe(1200);

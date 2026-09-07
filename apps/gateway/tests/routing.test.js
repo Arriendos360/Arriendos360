@@ -228,7 +228,7 @@ describe('Descripcion del enrutamiento para el arranque', () => {
         const entorno = { MS_INMUEBLES_URL: 'http://ms-inmuebles:3012' };
         const descripcion = describirEnrutamiento(entorno);
 
-        // Aparecen los seis prefijos de la tabla.
+        // Aparecen los siete prefijos de la tabla.
         for (const entrada of TABLA_RUTAS) {
             expect(descripcion).toContain(entrada.prefijo);
         }
@@ -241,10 +241,10 @@ describe('Descripcion del enrutamiento para el arranque', () => {
         // Los locales dicen por que lo son.
         expect(descripcion).toContain('MS_IDENTIDAD_URL sin definir');
         expect(descripcion).toContain('siempre local, no tiene servicio propio');
-        expect(descripcion).toContain('6 prefijos, 1 remoto');
+        expect(descripcion).toContain('7 prefijos, 1 remoto');
     });
 
-    test('sin variables definidas, los seis prefijos resuelven en local', () => {
+    test('sin variables definidas, los siete prefijos resuelven en local', () => {
         // Es el estado de hoy: la costura no cambia nada observable.
         const entorno = {};
 
@@ -253,6 +253,6 @@ describe('Descripcion del enrutamiento para el arranque', () => {
             expect(urlDestino(entrada, entorno)).toBeNull();
         }
 
-        expect(describirEnrutamiento(entorno)).toContain('6 prefijos, 0 remotos');
+        expect(describirEnrutamiento(entorno)).toContain('7 prefijos, 0 remotos');
     });
 });

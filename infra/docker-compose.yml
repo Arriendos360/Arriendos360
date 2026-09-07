@@ -32,12 +32,23 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=arriendos360_db
       - JWT_SECRET=${JWT_SECRET}
+      # Las migraciones viven en database/, fuera del contexto de build del
+      # gateway, asi que entran por volumen y no por COPY. Cuando el paso 8
+      # mueva el build al contexto raiz esto podra ser un COPY normal.
+      - RUTA_MIGRACIONES=/database
+      # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
+      # aqui hace que el gateway reenvie ese prefijo al microservicio.
+      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-}
+      - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-}
+      - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-}
+      - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     depends_on:
       - db
     volumes:
       - ../apps/gateway:/app
+      - ../database:/database:ro
       - /app/node_modules
 
   # Aplicación Frontend

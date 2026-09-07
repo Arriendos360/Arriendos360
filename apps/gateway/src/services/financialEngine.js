@@ -1,12 +1,20 @@
 const cron = require('node-cron');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
-const { Contrato, Inmueble, Pago, Inquilino, Propietario, Usuario } = require('../models');
+const { Contrato, Inmueble, Pago, Usuario } = require('../models');
 const { enviarCorreo } = require('../config/mailer');
 
 /**
  * MOTOR FINANCIERO - Arriendos360
- * RF-14, RF-15, RF-16
+ *
+ * Trazabilidad corregida: los comentarios citaban RF-14, RF-15 y RF-16, pero
+ * segun el SRS esos son requisitos del Dashboard. La generacion de recibos es
+ * RF-11 y las alertas de mora son RF-12. El control de dias de gracia no tiene
+ * requisito propio identificado; queda marcado como pendiente de confirmar
+ * contra el SRS en vez de inventarle un numero.
+ *
+ * Este proceso corre sin usuario autenticado, asi que las columnas de auditoria
+ * quedan a nombre de USUARIO_SISTEMA (ver models/auditoria.js).
  */
 
 const iniciarMotorFinanciero = () => {
@@ -20,7 +28,7 @@ const iniciarMotorFinanciero = () => {
 };
 
 /**
- * RF-14: Generación Automática de Recibos
+ * RF-11: Generación Automática de Recibos
  * Regla: 2 días antes de la fecha de corte (aniversario)
  */
 const procesarContratos = async () => {
@@ -35,8 +43,8 @@ const procesarContratos = async () => {
         const contratos = await Contrato.findAll({
             where: { estado: 1 },
             include: [
-                { model: Inmueble, include: [{ model: Propietario, include: [Usuario] }] },
-                { model: Inquilino, include: [Usuario] }
+                { model: Inmueble, include: [{ model: Usuario, as: 'Propietario' }] },
+                { model: Usuario, as: 'Inquilino' }
             ]
         });
 
@@ -84,11 +92,11 @@ const procesarContratos = async () => {
 
                     console.log(`✅ Recibo generado (Catch-up/Scheduled) para contrato ${contrato.id_contrato} - Periodo: ${mesSQL}/${anioSQL}`);
 
-                    if (contrato.Inquilino && contrato.Inquilino.Usuario) {
+                    if (contrato.Inquilino) {
                         await enviarCorreo(
-                            contrato.Inquilino.Usuario.correo,
+                            contrato.Inquilino.email,
                             '🏠 Nuevo recibo de arriendo generado',
-                            `Hola ${contrato.Inquilino.Usuario.nombres}, se ha generado tu recibo de arriendo para el periodo que inicia el ${diaCorte}. Valor: $${contrato.valor_mensual}.`
+                            `Hola ${contrato.Inquilino.nombres}, se ha generado tu recibo de arriendo para el periodo que inicia el ${diaCorte}. Valor: $${contrato.valor_mensual}.`
                         );
                     }
                 }
@@ -100,8 +108,8 @@ const procesarContratos = async () => {
 };
 
 /**
- * RF-16: Control de Días de Gracia y Cálculo de Mora
- * RF-15: Alertas de Vencimiento y Vencido
+ * Control de Días de Gracia y Cálculo de Mora (requisito por confirmar en el SRS)
+ * RF-12: Alertas de Vencimiento y Vencido
  */
 const procesarPagos = async () => {
     try {
@@ -113,8 +121,8 @@ const procesarPagos = async () => {
                 { 
                     model: Contrato, 
                     include: [
-                        { model: Inmueble, include: [{ model: Propietario, include: [Usuario] }] },
-                        { model: Inquilino, include: [Usuario] }
+                        { model: Inmueble, include: [{ model: Usuario, as: 'Propietario' }] },
+                        { model: Usuario, as: 'Inquilino' }
                     ] 
                 }
             ]
@@ -127,40 +135,40 @@ const procesarPagos = async () => {
             const diffTiempo = hoy - fechaCorte;
             const diffDias = Math.floor(diffTiempo / (1000 * 60 * 60 * 24));
 
-            // RF-15: Vencimiento Próximo (1 día antes de que expire el tiempo de gracia)
+            // RF-12: Vencimiento Próximo (1 día antes de que expire el tiempo de gracia)
             if (diffDias === 4 && pago.estado === 1) {
                 if (pago.Contrato.Inquilino) {
                     await enviarCorreo(
-                        pago.Contrato.Inquilino.Usuario.correo,
+                        pago.Contrato.Inquilino.email,
                         '⚠️ Aviso: Tu pago vence pronto',
                         `Recuerda que tienes hasta mañana para realizar el pago de tu arriendo sin generar mora.`
                     );
                 }
                 if (pago.Contrato.Inmueble && pago.Contrato.Inmueble.Propietario) {
                     await enviarCorreo(
-                        pago.Contrato.Inmueble.Propietario.Usuario.correo,
+                        pago.Contrato.Inmueble.Propietario.email,
                         '📢 Recordatorio de pago próximo a vencer',
                         `El pago del inmueble ${pago.Contrato.Inmueble.direccion} vence mañana.`
                     );
                 }
             }
 
-            // RF-16: Cambio a Mora (Al inicio del sexto día)
+            // Cambio a Mora (Al inicio del sexto día)
             if (diffDias >= 6 && pago.estado === 1) {
                 await pago.update({ estado: 3 }); // 3 = Vencido/En Mora
                 console.log(`🚫 Pago ${pago.id_pago} marcado como EN MORA`);
 
-                // RF-15: Vencido (Al inquilino y propietario)
+                // RF-12: Vencido (Al inquilino y propietario)
                 if (pago.Contrato.Inquilino) {
                     await enviarCorreo(
-                        pago.Contrato.Inquilino.Usuario.correo,
+                        pago.Contrato.Inquilino.email,
                         '🚨 Pago Vencido - Mora Generada',
                         `Tu pago de arriendo ha superado el periodo de gracia. Por favor regulariza tu situación.`
                     );
                 }
                 if (pago.Contrato.Inmueble && pago.Contrato.Inmueble.Propietario) {
                     await enviarCorreo(
-                        pago.Contrato.Inmueble.Propietario.Usuario.correo,
+                        pago.Contrato.Inmueble.Propietario.email,
                         '🔴 Notificación de Inquilino en Mora',
                         `El inquilino del inmueble ${pago.Contrato.Inmueble.direccion} ha entrado en mora.`
                     );

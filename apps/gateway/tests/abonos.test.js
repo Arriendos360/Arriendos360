@@ -1,47 +1,51 @@
 const request = require('supertest');
-const app = require('../src/app');
-const { sequelize } = require('../src/config/database');
+
+const {
+    app,
+    cerrarBase,
+    conToken,
+    crearInquilino,
+    recrearBase,
+    registrarPropietario
+} = require('./utiles/entorno');
 
 let tokenProp, idContrato, idPago;
 
 beforeAll(async () => {
-    await sequelize.sync({ force: true });
+    await recrearBase();
 
     // 1. Registrar Propietario
-    await request(app).post('/api/auth/register').send({
-        correo: 'prop@abono.com', contrasena: 'pass123', rol: 'propietario', documento: 'P_ABONO', nombres: 'Prop', apellidos: 'Abono'
+    const propietario = await registrarPropietario({
+        email: 'prop@abono.com', documento: 'P_ABONO', nombres: 'Prop', apellidos: 'Abono'
     });
-    const login = await request(app).post('/api/auth/login').send({
-        correo: 'prop@abono.com', contrasena: 'pass123'
-    });
-    tokenProp = login.body.token;
+    tokenProp = propietario.token;
 
-    // 2. Registrar Inquilino
-    await request(app).post('/api/auth/register').send({
-        correo: 'inq@abono.com', contrasena: 'pass123', rol: 'inquilino', documento: 'I_ABONO', nombres: 'Inq', apellidos: 'Abono'
+    // 2. Dar de alta al Inquilino. `id_inquilino` es ahora su UUID, no su cédula.
+    const inquilino = await crearInquilino(tokenProp, {
+        email: 'inq@abono.com', documento: 'I_ABONO', nombres: 'Inq', apellidos: 'Abono'
     });
 
     // 3. Crear Inmueble y Contrato
-    const resInm = await request(app).post('/api/inmuebles').set('Authorization', `Bearer ${tokenProp}`).send({ direccion: 'Abono Street', tipo_inmueble: 'Casa' });
-    const resCon = await request(app).post('/api/contratos').set('Authorization', `Bearer ${tokenProp}`).send({
-        id_inmueble: resInm.body.inmueble.id_inmueble, id_inquilino: 'I_ABONO', fecha_inicio: '2023-01-01', fecha_fin: '2023-12-31', valor_mensual: 1000
+    const resInm = await request(app).post('/api/inmuebles').set(...conToken(tokenProp)).send({ direccion: 'Abono Street', tipo_inmueble: 'Casa' });
+    const resCon = await request(app).post('/api/contratos').set(...conToken(tokenProp)).send({
+        id_inmueble: resInm.body.inmueble.id_inmueble, id_inquilino: inquilino.id, fecha_inicio: '2023-01-01', fecha_fin: '2023-12-31', valor_mensual: 1000
     });
     idContrato = resCon.body.contrato.id_contrato;
 
     // 4. Generar cobro inicial
-    const resPago = await request(app).post('/api/pagos').set('Authorization', `Bearer ${tokenProp}`).send({
+    const resPago = await request(app).post('/api/pagos').set(...conToken(tokenProp)).send({
         id_contrato: idContrato, monto_total: 1000, mes_correspondiente: '2023-01-01'
     });
     idPago = resPago.body.pago.id_pago;
 });
 
-afterAll(async () => { await sequelize.close(); });
+afterAll(async () => { await cerrarBase(); });
 
 describe('RF-17 & RF-18: Gestión de Abonos', () => {
     test('Debería registrar un abono parcial y cambiar estado a Pago Parcial', async () => {
         const response = await request(app)
             .put(`/api/pagos/${idPago}/pagar`)
-            .set('Authorization', `Bearer ${tokenProp}`)
+            .set(...conToken(tokenProp))
             .send({ monto_pagado: 400, tipo_transaccion: 'Transferencia', observaciones: 'Primer abono' });
         
         expect(response.statusCode).toBe(200);
@@ -53,7 +57,7 @@ describe('RF-17 & RF-18: Gestión de Abonos', () => {
     test('Debería bloquear un sobrepago (monto > saldo pendiente)', async () => {
         const response = await request(app)
             .put(`/api/pagos/${idPago}/pagar`)
-            .set('Authorization', `Bearer ${tokenProp}`)
+            .set(...conToken(tokenProp))
             .send({ monto_pagado: 700 }); // Saldo es 600
         
         expect(response.statusCode).toBe(400);
@@ -63,7 +67,7 @@ describe('RF-17 & RF-18: Gestión de Abonos', () => {
     test('Debería completar el pago al llegar a saldo cero', async () => {
         const response = await request(app)
             .put(`/api/pagos/${idPago}/pagar`)
-            .set('Authorization', `Bearer ${tokenProp}`)
+            .set(...conToken(tokenProp))
             .send({ monto_pagado: 600 });
         
         expect(response.statusCode).toBe(200);
@@ -74,19 +78,19 @@ describe('RF-17 & RF-18: Gestión de Abonos', () => {
     test('Debería poder ver el historial de abonos', async () => {
         const response = await request(app)
             .get(`/api/pagos/${idPago}/abonos`)
-            .set('Authorization', `Bearer ${tokenProp}`);
+            .set(...conToken(tokenProp));
         
         expect(response.statusCode).toBe(200);
         expect(response.body.length).toBe(2);
     });
 
     test('RF-18: Debería obtener un comprobante de abono específico', async () => {
-        const resAbonos = await request(app).get(`/api/pagos/${idPago}/abonos`).set('Authorization', `Bearer ${tokenProp}`);
+        const resAbonos = await request(app).get(`/api/pagos/${idPago}/abonos`).set(...conToken(tokenProp));
         const idAbono = resAbonos.body[0].id_abono;
 
         const response = await request(app)
             .get(`/api/pagos/abono/${idAbono}`)
-            .set('Authorization', `Bearer ${tokenProp}`);
+            .set(...conToken(tokenProp));
 
         expect(response.statusCode).toBe(200);
         expect(response.header['content-type']).toBe('application/pdf');

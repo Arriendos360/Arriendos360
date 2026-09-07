@@ -6,7 +6,9 @@
  * valida nada en runtime. Cuando cada microservicio se extraiga, estos tipos son
  * la referencia unica de la forma de cada payload.
  *
- * Nadie los consume todavia (paso 2 de la migracion).
+ * Nadie los consume todavia: el Dockerfile del gateway construye con contexto
+ * `apps/gateway`, asi que `packages/` no entra en la imagen. Se conectan en el
+ * paso 3b, que ya tiene que tocar los Dockerfiles para extraer ms-identidad.
  */
 
 export type {
@@ -17,7 +19,14 @@ export type {
   UUID,
 } from './comunes';
 
-export type { RegistroUsuarioRequest } from './identidad';
+export type {
+  ClaimsToken,
+  LoginRequest,
+  LoginResponse,
+  RegistroUsuarioRequest,
+  TokenRevocado,
+  UsuarioLogin,
+} from './identidad';
 
 export type { CrearInmuebleRequest } from './inmuebles';
 

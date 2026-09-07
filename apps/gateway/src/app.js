@@ -12,8 +12,10 @@ const contratoRoutes = require('./routes/contrato.routes');
 const pagoRoutes = require('./routes/pago.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const adminRoutes = require('./routes/admin.routes');
+const usuarioRoutes = require('./routes/usuario.routes');
 const { iniciarMotorFinanciero } = require('./services/financialEngine');
 const { crearEnrutadorGateway, describirEnrutamiento } = require('./routing');
+const { aplicarMigraciones } = require('./database/migraciones');
 
 // Crear aplicación Express
 const app = express();
@@ -46,6 +48,7 @@ app.get('/', (req, res) => {
 
 // Usar rutas
 app.use('/api/auth', authRoutes);
+app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/inmuebles', inmuebleRoutes);
 app.use('/api/contratos', contratoRoutes);
 app.use('/api/pagos', pagoRoutes);
@@ -65,9 +68,15 @@ if (process.env.NODE_ENV !== 'test') {
             await sequelize.authenticate();
             console.log('✅ Conexión a PostgreSQL exitosa');
             
-            // Sincronizar modelos (crear tablas si no existen)
-            await sequelize.sync();
-            console.log('✅ Tablas sincronizadas');
+            // Migraciones versionadas en lugar de sequelize.sync(). Con el paso
+            // a UUID, sync() dejó de poder reproducir el esquema: no sabe generar
+            // identificadores en la aplicación. Ver docs/adr/0003.
+            const aplicadas = await aplicarMigraciones(sequelize);
+            console.log(
+                aplicadas.length > 0
+                    ? `✅ Migraciones aplicadas: ${aplicadas.join(', ')}`
+                    : '✅ Esquema al día, sin migraciones pendientes'
+            );
 
             // Iniciar Motor Financiero (Background Tasks)
             iniciarMotorFinanciero();

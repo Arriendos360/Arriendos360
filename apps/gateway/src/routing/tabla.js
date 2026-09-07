@@ -10,8 +10,11 @@
  * poner su URL en el entorno, sin tocar codigo ni redesplegar el gateway con
  * otra bandera.
  *
- * Hoy las cuatro variables estan vacias, de modo que los seis prefijos resuelven
+ * Hoy las cuatro variables estan vacias, de modo que los siete prefijos resuelven
  * en LOCAL y el comportamiento es identico al de antes de esta costura.
+ *
+ * `/api/auth` y `/api/usuarios` comparten variable: los dos son ms-identidad, y
+ * se extraeran juntos en el paso 3b.
  */
 
 const MODO_LOCAL = 'local';
@@ -28,6 +31,7 @@ const MODO_REMOTO = 'remoto';
  */
 const TABLA_RUTAS = [
     { prefijo: '/api/auth', servicio: 'ms-identidad', variableEntorno: 'MS_IDENTIDAD_URL' },
+    { prefijo: '/api/usuarios', servicio: 'ms-identidad', variableEntorno: 'MS_IDENTIDAD_URL' },
     { prefijo: '/api/inmuebles', servicio: 'ms-inmuebles', variableEntorno: 'MS_INMUEBLES_URL' },
     { prefijo: '/api/contratos', servicio: 'ms-contratos', variableEntorno: 'MS_CONTRATOS_URL' },
     { prefijo: '/api/pagos', servicio: 'ms-financiero', variableEntorno: 'MS_FINANCIERO_URL' },

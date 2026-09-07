@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';
 import { Receipt, Download, Calendar, MapPin, Search, CheckCircle, Clock } from 'lucide-react';
+
+import api from '../services/api';
+import { abrirPdf } from '../services/descargas';
 
 const Comprobantes = () => {
     const [abonos, setAbonos] = useState([]);
@@ -142,7 +144,7 @@ const Comprobantes = () => {
                                 {/* Botón descarga */}
                                 <div style={{ padding: '1rem', display: 'flex', alignItems: 'center', borderLeft: '1px solid #f1f5f9' }}>
                                     <button
-                                        onClick={() => window.open(`http://localhost:3001/api/pagos/abono/${abono.id_abono}?token=${localStorage.getItem('token')}`)}
+                                        onClick={() => abrirPdf(`/pagos/abono/${abono.id_abono}`, `Comprobante_${abono.id_abono}.pdf`)}
                                         style={{
                                             background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
                                             color: '#fff', border: 'none', borderRadius: '0.6rem',

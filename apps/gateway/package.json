@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon -L src/app.js",
-    "test": "cross-env NODE_ENV=test jest --detectOpenHandles --forceExit --runInBand"
+    "test": "cross-env NODE_ENV=test jest --detectOpenHandles --forceExit --runInBand",
+    "seed": "node src/database/seed.js",
+    "migrate": "node -e \"const{sequelize}=require('./src/config/database');require('./src/database/migraciones').aplicarMigraciones(sequelize).then(a=>{console.log(a.length?a.join(', '):'sin migraciones pendientes');return sequelize.close()})\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

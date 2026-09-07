@@ -1,31 +1,83 @@
-const { Sequelize, Op } = require('sequelize');
-const { Pago, Contrato, Inmueble, Abono, Inquilino, Propietario, Usuario } = require('../models');
-const { generarPDFComprobante } = require('../services/pdfService');
+const { Op } = require('sequelize');
 const PDFDocument = require('pdfkit');
 
-// Obtener todos los pagos (Filtrados por propiedad/perfil)
+const { Pago, Contrato, Inmueble, Abono, Usuario } = require('../models');
+const { esUuid } = require('../models/uuid');
+const { generarPDFComprobante } = require('../services/pdfService');
+
+/**
+ * Pagos y abonos.
+ *
+ * Dos cambios estructurales respecto a la versión anterior, ambos consecuencia
+ * del nuevo modelo de identidad:
+ *
+ * 1. `id_perfil` (la cédula del perfil) desaparece y su papel lo hace el `sub`
+ *    del token, que es el UUID del usuario.
+ * 2. Las tablas `propietarios` e `inquilinos` ya no existen. Donde antes se
+ *    navegaba `Inmueble -> Propietario -> Usuario`, ahora se llega directo a
+ *    `Usuario` por el alias `Propietario`. Un nivel menos de anidamiento.
+ *
+ * La visibilidad deja de decidirse por el rol declarado y pasa a decidirse por
+ * la pertenencia real: se ve un pago si eres el dueño del inmueble O el
+ * inquilino del contrato. Para usuarios de un solo rol el resultado no cambia;
+ * para quien es las dos cosas a la vez, que el modelo canónico ahora permite,
+ * ya no se pierde la mitad de sus datos.
+ */
+
+// Rutas de columna a través de los `include`. Sequelize resuelve `$a.b.c$`
+// contra los alias de la consulta, lo que permite poner la condición OR en el
+// nivel superior en vez de repartirla por los `where` anidados.
+const RUTA_PROPIETARIO_DESDE_PAGO = '$Contrato.Inmueble.id_propietario$';
+const RUTA_INQUILINO_DESDE_PAGO = '$Contrato.id_inquilino$';
+const RUTA_PROPIETARIO_DESDE_ABONO = '$Pago.Contrato.Inmueble.id_propietario$';
+const RUTA_INQUILINO_DESDE_ABONO = '$Pago.Contrato.id_inquilino$';
+
+const esParteDelPago = (sub) => ({
+    [Op.or]: [{ [RUTA_PROPIETARIO_DESDE_PAGO]: sub }, { [RUTA_INQUILINO_DESDE_PAGO]: sub }]
+});
+
+const esParteDelAbono = (sub) => ({
+    [Op.or]: [{ [RUTA_PROPIETARIO_DESDE_ABONO]: sub }, { [RUTA_INQUILINO_DESDE_ABONO]: sub }]
+});
+
+/** Contrato con su inmueble, como INNER JOIN: sin ellos no hay a quién autorizar. */
+const contratoConInmueble = {
+    model: Contrato,
+    required: true,
+    include: [{ model: Inmueble, required: true }]
+};
+
+/** Las dos partes del contrato, ya como usuarios. Se usan para los PDF. */
+const contratoConPartes = {
+    model: Contrato,
+    include: [
+        { model: Inmueble, include: [{ model: Usuario, as: 'Propietario' }] },
+        { model: Usuario, as: 'Inquilino' }
+    ]
+};
+
+/** ¿Es este usuario parte del contrato al que pertenece el pago? */
+const puedeVerPago = (pago, sub) => {
+    const contrato = pago.Contrato;
+    if (!contrato) {
+        return false;
+    }
+
+    const esDuenio = contrato.Inmueble && contrato.Inmueble.id_propietario === sub;
+    const esInquilino = contrato.id_inquilino === sub;
+
+    return esDuenio || esInquilino;
+};
+
+// Obtener todos los pagos en los que el usuario es parte
 const obtenerTodos = async (req, res) => {
     try {
-        const { rol, id_perfil } = req.usuario;
-        
-        const filter = {
-            include: [{ 
-                model: Contrato,
-                required: true,
-                include: [{
-                    model: Inmueble,
-                    required: true
-                }]
-            }]
-        };
+        const { sub } = req.usuario;
 
-        if (rol === 'propietario') {
-            filter.include[0].include[0].where = { id_propietario: id_perfil };
-        } else if (rol === 'inquilino') {
-            filter.include[0].where = { id_inquilino: id_perfil };
-        }
-
-        const pagos = await Pago.findAll(filter);
+        const pagos = await Pago.findAll({
+            where: esParteDelPago(sub),
+            include: [contratoConInmueble]
+        });
         res.json(pagos);
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener pagos', error: error.message });
@@ -36,17 +88,19 @@ const obtenerTodos = async (req, res) => {
 const obtenerPorContrato = async (req, res) => {
     try {
         const { id_contrato } = req.params;
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
 
-        const contrato = await Contrato.findOne({
-            where: { id_contrato },
-            include: [{ model: Inmueble }]
-        });
+        const contrato = esUuid(id_contrato)
+            ? await Contrato.findOne({
+                where: { id_contrato },
+                include: [{ model: Inmueble }]
+            })
+            : null;
 
         if (!contrato) return res.status(404).json({ mensaje: 'Contrato no encontrado' });
 
-        const esDuenio = contrato.Inmueble.id_propietario === id_perfil;
-        const esInquilino = contrato.id_inquilino === id_perfil;
+        const esDuenio = contrato.Inmueble && contrato.Inmueble.id_propietario === sub;
+        const esInquilino = contrato.id_inquilino === sub;
 
         if (!esDuenio && !esInquilino) {
             return res.status(403).json({ mensaje: 'No tienes permisos para ver los pagos de este contrato' });
@@ -65,17 +119,24 @@ const obtenerPorContrato = async (req, res) => {
 // Crear pago
 const crear = async (req, res) => {
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
         const { id_contrato, monto_total } = req.body;
 
-        const contrato = await Contrato.findOne({
-            where: { id_contrato },
-            include: [{ model: Inmueble, where: { id_propietario: id_perfil } }]
-        });
+        const contrato = esUuid(id_contrato)
+            ? await Contrato.findOne({
+                where: { id_contrato },
+                include: [{ model: Inmueble, required: true, where: { id_propietario: sub } }]
+            })
+            : null;
 
         if (!contrato) return res.status(403).json({ mensaje: 'No tienes permisos sobre este contrato' });
 
-        const nuevoPago = await Pago.create({ ...req.body, saldo_pendiente: monto_total });
+        const { creado_por, actualizado_por, ...datos } = req.body;
+
+        const nuevoPago = await Pago.create(
+            { ...datos, saldo_pendiente: monto_total },
+            { usuarioAuditor: sub }
+        );
         res.status(201).json({ mensaje: 'Pago registrado exitosamente', pago: nuevoPago });
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al crear pago', error: error.message });
@@ -85,27 +146,33 @@ const crear = async (req, res) => {
 // Registrar abono - RF-17
 const registrarPago = async (req, res) => {
     const { id } = req.params;
-    const { id_perfil } = req.usuario;
+    const { sub } = req.usuario;
     const { monto_pagado, tipo_transaccion, observaciones } = req.body;
     const t = await Pago.sequelize.transaction();
     try {
-        const pago = await Pago.findByPk(id, { include: [{ model: Contrato, include: [Inmueble] }], transaction: t });
+        const pago = esUuid(id)
+            ? await Pago.findByPk(id, { include: [contratoConInmueble], transaction: t })
+            : null;
         if (!pago) { await t.rollback(); return res.status(404).json({ mensaje: 'Pago no encontrado' }); }
 
         if (parseFloat(monto_pagado) <= 0 || parseFloat(monto_pagado) > parseFloat(pago.saldo_pendiente)) {
             await t.rollback(); return res.status(400).json({ mensaje: 'Monto inválido o superior al saldo' });
         }
 
-        const esDuenio = pago.Contrato.Inmueble.id_propietario === id_perfil;
-        const esInquilino = pago.Contrato.id_inquilino === id_perfil;
-        if (!esDuenio && !esInquilino) { await t.rollback(); return res.status(403).json({ mensaje: 'No autorizado' }); }
-        
-        const nuevoSaldo = parseFloat(pago.saldo_pendiente) - parseFloat(monto_pagado);
-        const nuevoAbono = await Abono.create({ id_pago: pago.id_pago, monto: monto_pagado, tipo_transaccion, observaciones, saldo_restante_momento: nuevoSaldo }, { transaction: t });
+        if (!puedeVerPago(pago, sub)) { await t.rollback(); return res.status(403).json({ mensaje: 'No autorizado' }); }
 
-        let nuevoEstado = nuevoSaldo === 0 ? 2 : (pago.estado === 3 ? 3 : 4); 
-        await pago.update({ fecha_pago: new Date(), saldo_pendiente: nuevoSaldo, estado: nuevoEstado, tipo_transaccion, observaciones }, { transaction: t });
-        
+        const nuevoSaldo = parseFloat(pago.saldo_pendiente) - parseFloat(monto_pagado);
+        const nuevoAbono = await Abono.create(
+            { id_pago: pago.id_pago, monto: monto_pagado, tipo_transaccion, observaciones, saldo_restante_momento: nuevoSaldo },
+            { transaction: t, usuarioAuditor: sub }
+        );
+
+        let nuevoEstado = nuevoSaldo === 0 ? 2 : (pago.estado === 3 ? 3 : 4);
+        await pago.update(
+            { fecha_pago: new Date(), saldo_pendiente: nuevoSaldo, estado: nuevoEstado, tipo_transaccion, observaciones },
+            { transaction: t, usuarioAuditor: sub }
+        );
+
         await t.commit();
         res.json({ mensaje: nuevoSaldo === 0 ? 'Pago completado exitosamente' : 'Abono registrado exitosamente', pago, abono: nuevoAbono });
     } catch (error) { await t.rollback(); res.status(500).json({ mensaje: 'Error', error: error.message }); }
@@ -114,31 +181,13 @@ const registrarPago = async (req, res) => {
 // Obtener historial global de abonos
 const obtenerHistorialGlobalAbonos = async (req, res) => {
     try {
-        const { rol, id_perfil } = req.usuario;
-        
-        const filter = {
-            include: [{
-                model: Pago,
-                required: true,
-                include: [{
-                    model: Contrato,
-                    required: true,
-                    include: [{
-                        model: Inmueble,
-                        required: true
-                    }]
-                }]
-            }],
+        const { sub } = req.usuario;
+
+        const abonos = await Abono.findAll({
+            where: esParteDelAbono(sub),
+            include: [{ model: Pago, required: true, include: [contratoConInmueble] }],
             order: [['fecha_abono', 'DESC']]
-        };
-
-        if (rol === 'propietario') {
-            filter.include[0].include[0].include[0].where = { id_propietario: id_perfil };
-        } else if (rol === 'inquilino') {
-            filter.include[0].include[0].where = { id_inquilino: id_perfil };
-        }
-
-        const abonos = await Abono.findAll(filter);
+        });
         res.json(abonos);
     } catch (error) { res.status(500).json({ mensaje: 'Error al obtener historial global', error: error.message }); }
 };
@@ -149,54 +198,74 @@ const fmt = (v) => `$ ${parseFloat(v || 0).toLocaleString('es-CO', { minimumFrac
 // Formateador de periodo (Ej: Junio 2026)
 const fmtPeriodo = (date) => new Date(date).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }).replace(/^\w/, (c) => c.toUpperCase());
 
+/**
+ * Datos comunes de la cabecera de los comprobantes.
+ *
+ * `arrendatario` es ahora un `Usuario` directo, no un `Inquilino` con un
+ * `Usuario` colgando, y su cédula sale de `documento` en vez de la antigua clave
+ * primaria `id_inquilino`. Lo que se imprime en el PDF es idéntico.
+ */
+const datosEmpresa = {
+    empresa_nombre: "ARRIENDOS 360 S.A.S",
+    empresa_nit: "900.123.456-7",
+    empresa_telefono: "+57 (601) 321 0000",
+    empresa_email: "soporte@arriendos360.com",
+    empresa_ciudad: "Bogotá D.C."
+};
+
+const datosArrendatario = (arrendatario) => ({
+    nombre_arrendatario: `${arrendatario.nombres} ${arrendatario.apellidos}`,
+    cedula_arrendatario: arrendatario.documento,
+    telefono_arrendatario: arrendatario.telefono || 'No registrado',
+    email_arrendatario: arrendatario.email
+});
+
+const datosInmueble = (inmueble) => ({
+    direccion_inmueble: inmueble.direccion,
+    barrio_ciudad: `${inmueble.barrio}, ${inmueble.municipio}`,
+    tipo_inmueble: inmueble.tipo_inmueble
+});
+
+/** Envía un PDF ya construido con el mismo encabezado que usaba `window.open`. */
+const responderPdf = (res, nombreArchivo, data) => {
+    const doc = new PDFDocument({ size: 'LETTER', margin: 0 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${nombreArchivo}"`);
+    doc.pipe(res);
+    generarPDFComprobante(doc, data);
+    doc.end();
+};
+
 // Generar comprobante abono - RF-18 (Versión PDF Estilizada)
 const generarComprobanteAbono = async (req, res) => {
     try {
         const { id_abono } = req.params;
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
 
-        const abono = await Abono.findByPk(id_abono, {
-            include: [{
-                model: Pago,
-                include: [{
-                    model: Contrato,
-                    include: [
-                        { model: Inmueble, include: [{ model: Propietario, include: [Usuario] }] },
-                        { model: Inquilino, include: [Usuario] }
-                    ]
-                }]
-            }]
-        });
+        const abono = esUuid(id_abono)
+            ? await Abono.findByPk(id_abono, {
+                include: [{ model: Pago, include: [contratoConPartes] }]
+            })
+            : null;
 
         if (!abono) return res.status(404).json({ mensaje: 'No encontrado' });
 
-        const owner = abono.Pago.Contrato.Inmueble.Propietario;
-        const tenant = abono.Pago.Contrato.Inquilino;
-
-        if (owner.id_propietario !== id_perfil && tenant.id_inquilino !== id_perfil) {
+        if (!abono.Pago || !puedeVerPago(abono.Pago, sub)) {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
+        const contrato = abono.Pago.Contrato;
+        const arrendatario = contrato.Inquilino;
         const esTotal = parseFloat(abono.saldo_restante_momento) === 0;
         const periodo = fmtPeriodo(abono.Pago.mes_correspondiente);
 
-        const data = {
-            empresa_nombre: "ARRIENDOS 360 S.A.S",
-            empresa_nit: "900.123.456-7",
-            empresa_telefono: "+57 (601) 321 0000",
-            empresa_email: "soporte@arriendos360.com",
-            empresa_ciudad: "Bogotá D.C.",
-            
+        responderPdf(res, `Comprobante_${id_abono}.pdf`, {
+            ...datosEmpresa,
+            ...datosArrendatario(arrendatario),
+            ...datosInmueble(contrato.Inmueble),
             numero_comprobante: `TRX-${abono.id_abono}`,
             fecha_expedicion: new Date(abono.fecha_abono).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }),
             estado_pago: esTotal ? 'PAGADO' : 'ABONO PARCIAL',
-            nombre_arrendatario: `${tenant.Usuario.nombres} ${tenant.Usuario.apellidos}`,
-            cedula_arrendatario: tenant.id_inquilino,
-            telefono_arrendatario: tenant.Usuario.telefono || 'No registrado',
-            email_arrendatario: tenant.Usuario.correo,
-            direccion_inmueble: abono.Pago.Contrato.Inmueble.direccion,
-            barrio_ciudad: `${abono.Pago.Contrato.Inmueble.barrio}, ${abono.Pago.Contrato.Inmueble.municipio}`,
-            tipo_inmueble: abono.Pago.Contrato.Inmueble.tipo_inmueble,
             periodo: periodo,
             concepto: esTotal ? `Pago de arriendo periodo ${periodo}` : `Abono arriendo periodo ${periodo}`,
             canon_mensual: fmt(abono.Pago.monto_total),
@@ -206,15 +275,7 @@ const generarComprobanteAbono = async (req, res) => {
             forma_pago: abono.tipo_transaccion || 'Transferencia Bancaria',
             banco: 'Red Bancaria Nacional',
             referencia_pago: abono.observaciones || `Abono No. ${abono.id_abono}`
-        };
-
-        const doc = new PDFDocument({ size: 'LETTER', margin: 0 });
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="Comprobante_${id_abono}.pdf"`);
-        doc.pipe(res);
-        generarPDFComprobante(doc, data);
-        doc.end();
-
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
@@ -225,47 +286,30 @@ const generarComprobanteAbono = async (req, res) => {
 const generarRecibo = async (req, res) => {
     try {
         const { id } = req.params;
-        const { id_perfil } = req.usuario;
-        
-        const pago = await Pago.findByPk(id, {
-            include: [{
-                model: Contrato,
-                include: [
-                    { model: Inmueble, include: [{ model: Propietario, include: [Usuario] }] },
-                    { model: Inquilino, include: [Usuario] }
-                ]
-            }]
-        });
-        
-        if (!pago) return res.status(404).json({ mensaje: 'No encontrado' });
-        
-        const owner = pago.Contrato.Inmueble.Propietario;
-        const tenant = pago.Contrato.Inquilino;
+        const { sub } = req.usuario;
 
-        if (owner.id_propietario !== id_perfil && tenant.id_inquilino !== id_perfil) {
+        const pago = esUuid(id)
+            ? await Pago.findByPk(id, { include: [contratoConPartes] })
+            : null;
+
+        if (!pago) return res.status(404).json({ mensaje: 'No encontrado' });
+
+        if (!puedeVerPago(pago, sub)) {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
+        const contrato = pago.Contrato;
+        const arrendatario = contrato.Inquilino;
         const esTotal = parseFloat(pago.saldo_pendiente) === 0;
         const periodo = fmtPeriodo(pago.mes_correspondiente);
 
-        const data = {
-            empresa_nombre: "ARRIENDOS 360 S.A.S",
-            empresa_nit: "900.123.456-7",
-            empresa_telefono: "+57 (601) 321 0000",
-            empresa_email: "soporte@arriendos360.com",
-            empresa_ciudad: "Bogotá D.C.",
-
+        responderPdf(res, `Recibo_Mensual_${id}.pdf`, {
+            ...datosEmpresa,
+            ...datosArrendatario(arrendatario),
+            ...datosInmueble(contrato.Inmueble),
             numero_comprobante: `REC-${pago.id_pago}`,
             fecha_expedicion: new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }),
             estado_pago: { 1: 'PENDIENTE', 2: 'PAGADO', 3: 'EN MORA', 4: 'PAGO PARCIAL' }[pago.estado],
-            nombre_arrendatario: `${tenant.Usuario.nombres} ${tenant.Usuario.apellidos}`,
-            cedula_arrendatario: tenant.id_inquilino,
-            telefono_arrendatario: tenant.Usuario.telefono || 'No registrado',
-            email_arrendatario: tenant.Usuario.correo,
-            direccion_inmueble: pago.Contrato.Inmueble.direccion,
-            barrio_ciudad: `${pago.Contrato.Inmueble.barrio}, ${pago.Contrato.Inmueble.municipio}`,
-            tipo_inmueble: pago.Contrato.Inmueble.tipo_inmueble,
             periodo: periodo,
             concepto: esTotal ? `Pago de arriendo periodo ${periodo}` : `Abono arriendo periodo ${periodo}`,
             canon_mensual: fmt(pago.monto_total),
@@ -275,45 +319,36 @@ const generarRecibo = async (req, res) => {
             forma_pago: pago.tipo_transaccion || 'Múltiple',
             banco: 'N/A',
             referencia_pago: `Recibo mensual No. ${pago.id_pago}`
-        };
-
-        const doc = new PDFDocument({ size: 'LETTER', margin: 0 });
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="Recibo_Mensual_${id}.pdf"`);
-        doc.pipe(res);
-        generarPDFComprobante(doc, data);
-        doc.end();
-
-    } catch (error) { 
-        res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message }); 
+        });
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
     }
 };
 
-// ... (Restantes métodos)
 const obtenerPendientes = async (req, res) => {
     try {
-        const { rol, id_perfil } = req.usuario;
-        const filter = {
-            where: { estado: { [Op.in]: [1, 4] } },
-            include: [{ model: Contrato, required: true, include: [{ model: Inmueble, required: true }] }],
+        const { sub } = req.usuario;
+
+        const pagos = await Pago.findAll({
+            where: {
+                [Op.and]: [{ estado: { [Op.in]: [1, 4] } }, esParteDelPago(sub)]
+            },
+            include: [contratoConInmueble],
             order: [['mes_correspondiente', 'ASC']]
-        };
-        if (rol === 'propietario') filter.include[0].include[0].where = { id_propietario: id_perfil };
-        else if (rol === 'inquilino') filter.include[0].where = { id_inquilino: id_perfil };
-        const pagos = await Pago.findAll(filter);
+        });
         res.json(pagos);
     } catch (error) { res.status(500).json({ mensaje: 'Error', error: error.message }); }
 };
 
 const verificarMora = async (req, res) => {
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
         const hoy = new Date();
         const pagosVencidos = await Pago.findAll({
             where: { estado: { [Op.in]: [1, 4] }, mes_correspondiente: { [Op.lt]: hoy } },
-            include: [{ model: Contrato, required: true, include: [{ model: Inmueble, required: true, where: { id_propietario: id_perfil } }] }]
+            include: [{ model: Contrato, required: true, include: [{ model: Inmueble, required: true, where: { id_propietario: sub } }] }]
         });
-        for (const pago of pagosVencidos) { await pago.update({ estado: 3 }); }
+        for (const pago of pagosVencidos) { await pago.update({ estado: 3 }, { usuarioAuditor: sub }); }
         res.json({ mensaje: 'Mora verificada', pagos_actualizados: pagosVencidos.length });
     } catch (error) { res.status(500).json({ mensaje: 'Error', error: error.message }); }
 };
@@ -321,16 +356,18 @@ const verificarMora = async (req, res) => {
 const obtenerAbonos = async (req, res) => {
     try {
         const { id } = req.params;
-        const { id_perfil } = req.usuario;
-        const pago = await Pago.findByPk(id, { include: [{ model: Contrato, include: [Inmueble] }] });
+        const { sub } = req.usuario;
+        const pago = esUuid(id)
+            ? await Pago.findByPk(id, { include: [contratoConInmueble] })
+            : null;
         if (!pago) return res.status(404).json({ mensaje: 'No encontrado' });
-        if (pago.Contrato.Inmueble.id_propietario !== id_perfil && pago.Contrato.id_inquilino !== id_perfil) return res.status(403).json({ mensaje: 'No autorizado' });
+        if (!puedeVerPago(pago, sub)) return res.status(403).json({ mensaje: 'No autorizado' });
         const abonos = await Abono.findAll({ where: { id_pago: id }, order: [['fecha_abono', 'DESC']] });
         res.json(abonos);
     } catch (error) { res.status(500).json({ mensaje: 'Error al obtener abonos', error: error.message }); }
 };
 
-module.exports = { 
+module.exports = {
     obtenerTodos, obtenerPorContrato, crear, registrarPago, obtenerPendientes,
     verificarMora, generarRecibo, obtenerAbonos, generarComprobanteAbono, obtenerHistorialGlobalAbonos
 };
