@@ -14,7 +14,12 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
-const { MATRIZ, MENSAJE_NO_DECLARADA, crearControlDeAcceso } = require('../src/routing');
+const {
+    MATRIZ,
+    MENSAJE_NO_DECLARADA,
+    crearControlDeAcceso,
+    resolverPolitica
+} = require('../src/routing');
 
 const SECRETO = 'secreto-de-pruebas-rbac';
 
@@ -129,40 +134,43 @@ describe('Rutas sólo autenticadas', () => {
 });
 
 /**
- * Tabla de casos: cada fila de la matriz con el rol que debe pasar y el rol que
- * debe ser rechazado. Es la comprobación que pedía el enunciado, y se escribe
- * como datos para que añadir una política sea añadir una fila aquí.
+ * Una fila por política de la matriz, con el rol que debe pasar y el rol que
+ * debe ser rechazado.
+ *
+ * ANTES había 20 filas para 13 políticas: siete repetían una política ya
+ * cubierta cambiando sólo la forma de la ruta bajo el mismo `**`
+ * (`/api/pagos`, `/api/pagos/pendientes` y `/api/pagos/abc/recibo` caen las tres
+ * en `GET /api/pagos/**`). Eso no comprobaba la política sino el comparador de
+ * patrones, y lo hacía por HTTP, que es la forma más cara de comprobarlo. El
+ * comparador tiene ahora su propia tabla, directa y sin red, más abajo.
+ *
+ * Aquí queda una fila por política, y con la consolidación apareció una que no
+ * tenía ninguna prueba: `DELETE /api/contratos/**`.
  */
 describe('Cada política, con el rol correcto y con el equivocado', () => {
     const CASOS = [
-        // [método, ruta, rol que pasa, rol que se rechaza]
+        // [método, ruta representativa, rol que pasa, rol que se rechaza]
         ['GET', '/api/usuarios/buscar?documento=123', PROPIETARIO, INQUILINO],
         ['POST', '/api/usuarios/inquilinos', PROPIETARIO, INQUILINO],
 
         ['GET', '/api/inmuebles', PROPIETARIO, INQUILINO],
-        ['GET', '/api/inmuebles/abc', PROPIETARIO, INQUILINO],
         ['POST', '/api/inmuebles', PROPIETARIO, INQUILINO],
         ['PUT', '/api/inmuebles/abc', PROPIETARIO, INQUILINO],
         ['DELETE', '/api/inmuebles/abc', PROPIETARIO, INQUILINO],
 
         ['GET', '/api/contratos', INQUILINO, SIN_ROLES],
-        ['GET', '/api/contratos/abc', INQUILINO, SIN_ROLES],
         ['POST', '/api/contratos', PROPIETARIO, INQUILINO],
-        // Las dos que el enunciado nombraba expresamente:
         ['PUT', '/api/contratos/abc/finalizar', PROPIETARIO, INQUILINO],
-        ['POST', '/api/contratos/abc/anexos', PROPIETARIO, INQUILINO],
+        // Sin cobertura hasta esta consolidación.
+        ['DELETE', '/api/contratos/abc', PROPIETARIO, INQUILINO],
 
         ['GET', '/api/pagos', INQUILINO, SIN_ROLES],
-        ['GET', '/api/pagos/pendientes', INQUILINO, SIN_ROLES],
-        ['GET', '/api/pagos/abc/recibo', INQUILINO, SIN_ROLES],
         ['POST', '/api/pagos', PROPIETARIO, INQUILINO],
-        ['POST', '/api/pagos/verificar-mora', PROPIETARIO, INQUILINO],
         // Registrar el abono es del propietario: el inquilino lo consulta, no lo
         // asienta. Ver docs/adr/0006.
         ['PUT', '/api/pagos/abc/pagar', PROPIETARIO, INQUILINO],
 
-        ['GET', '/api/dashboard/resumen', PROPIETARIO, INQUILINO],
-        ['GET', '/api/dashboard/mora', PROPIETARIO, INQUILINO]
+        ['GET', '/api/dashboard/resumen', PROPIETARIO, INQUILINO]
     ];
 
     test.each(CASOS)('%s %s deja pasar al rol correcto', async (metodo, ruta, permitido) => {
@@ -178,6 +186,76 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
     test.each(CASOS)('%s %s exige token', async (metodo, ruta) => {
         const respuesta = await pedir(metodo, ruta);
         expect(respuesta.status).toBe(401);
+    });
+
+    test('la tabla cubre TODAS las políticas de la matriz', () => {
+        // Red de seguridad contra el hueco que esta consolidación destapó: una
+        // política nueva sin fila aquí hace fallar esta prueba en vez de pasar
+        // desapercibida.
+        const cubiertas = new Set(
+            CASOS.map(([metodo, ruta]) => {
+                const politica = resolverPolitica(metodo, ruta.split('?')[0]);
+                return `${politica.metodo} ${politica.patron}`;
+            })
+        );
+
+        // Las tres de /api/auth se comprueban en sus propios describe, porque no
+        // encajan en el eje rol correcto / rol equivocado.
+        const enOtroSitio = new Set([
+            'POST /api/auth/registro',
+            'POST /api/auth/login',
+            'POST /api/auth/logout'
+        ]);
+
+        const sinCubrir = MATRIZ.map((p) => `${p.metodo} ${p.patron}`).filter(
+            (clave) => !cubiertas.has(clave) && !enOtroSitio.has(clave)
+        );
+
+        expect(sinCubrir).toEqual([]);
+    });
+});
+
+/**
+ * El comparador de patrones, sin pasar por HTTP.
+ *
+ * Aquí es donde se comprueba que `**` alcanza las subrutas y que `:id` consume
+ * exactamente un segmento. Antes esto se verificaba de refilón, repitiendo filas
+ * de la tabla de arriba con rutas más profundas.
+ */
+describe('Resolución de patrones', () => {
+    const RESOLUCIONES = [
+        // [método, ruta, patrón que debe resolver]
+        ['GET', '/api/pagos', '/api/pagos/**'],
+        ['GET', '/api/pagos/pendientes', '/api/pagos/**'],
+        ['GET', '/api/pagos/abc/recibo', '/api/pagos/**'],
+        ['GET', '/api/pagos/abono/abc', '/api/pagos/**'],
+        ['GET', '/api/inmuebles', '/api/inmuebles/**'],
+        ['GET', '/api/inmuebles/abc', '/api/inmuebles/**'],
+        ['GET', '/api/contratos/abc', '/api/contratos/**'],
+        ['POST', '/api/contratos/abc/anexos', '/api/contratos/**'],
+        ['GET', '/api/usuarios/buscar', '/api/usuarios/**'],
+        ['GET', '/api/dashboard/mora', '/api/dashboard/**'],
+        ['PUT', '/api/pagos/abc/pagar', '/api/pagos/:id/pagar']
+    ];
+
+    test.each(RESOLUCIONES)('%s %s resuelve a %s', (metodo, ruta, patron) => {
+        expect(resolverPolitica(metodo, ruta).patron).toBe(patron);
+    });
+
+    test('`:id` consume exactamente un segmento, ni cero ni dos', () => {
+        // `/api/pagos/a/b/pagar` no debe caer en `/api/pagos/:id/pagar`; cae en
+        // el comodín de GET, que para PUT no existe, así que no hay política.
+        expect(resolverPolitica('PUT', '/api/pagos/a/b/pagar')).toBeNull();
+        expect(resolverPolitica('PUT', '/api/pagos//pagar')).toBeNull();
+    });
+
+    test('un prefijo parcial no cuela: /api/pagosfalsos no es /api/pagos', () => {
+        expect(resolverPolitica('GET', '/api/pagosfalsos')).toBeNull();
+    });
+
+    test('el método forma parte de la llave, no sólo la ruta', () => {
+        expect(resolverPolitica('GET', '/api/inmuebles').acceso).toEqual(['PROPIETARIO']);
+        expect(resolverPolitica('PATCH', '/api/inmuebles')).toBeNull();
     });
 });
 
