@@ -14,15 +14,17 @@ WORKDIR /repo
 # Manifiestos primero, en su propia capa. Se copian los de todos los workspaces
 # porque npm resuelve el grafo completo contra el lockfile de la raiz.
 COPY package.json package-lock.json ./
-COPY apps/gateway/package.json        apps/gateway/
-COPY apps/web/package.json            apps/web/
-COPY packages/contracts/package.json  packages/contracts/
-COPY packages/shared/package.json     packages/shared/
+COPY apps/gateway/package.json          apps/gateway/
+COPY apps/web/package.json              apps/web/
+COPY services/ms-identidad/package.json services/ms-identidad/
+COPY services/ms-inmuebles/package.json services/ms-inmuebles/
 
-# Solo el workspace de la SPA: no necesita el gateway ni, por ahora, los
-# paquetes compartidos. Cuando la SPA consuma `packages/contracts` para tipar
-# sus llamadas, se añade aqui junto con su compilacion.
-RUN npm ci --include-workspace-root --workspace=apps/web
+# `packages/` entra entero y ANTES del `npm ci`: la SPA ya consume
+# `arriendos360-contracts` —el catalogo cerrado de tipos de inmueble— y su
+# script `prepare` compila TypeScript, que necesita las fuentes.
+COPY packages/ packages/
+
+RUN npm ci --include-workspace-root     --workspace=apps/web     --workspace=packages/contracts
 
 # -------------------------------------------------------------------- codigo
 COPY apps/web/ apps/web/

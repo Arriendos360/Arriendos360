@@ -2,12 +2,26 @@ import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 import { Plus, Home as HomeIcon, X, MapPin, Pencil, Trash2, User, Calendar, ChevronDown, ChevronUp, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
 import { colombiaData } from '../data/colombia';
+import { TIPOS_INMUEBLE } from 'arriendos360-contracts';
+
+/**
+ * Etiquetas del catálogo cerrado de tipos.
+ *
+ * Los VALORES vienen de `packages/contracts`, que es la misma lista contra la
+ * que valida ms-inmuebles y contra la que hay un CHECK en la base. Aquí solo se
+ * decide cómo se escriben en pantalla: el catálogo va en minúsculas porque es un
+ * dato, y la mayúscula inicial es presentación.
+ *
+ * Antes esta lista estaba escrita a mano aquí e incluía «Finca», que no existe
+ * en el modelo canónico y que la API ahora rechaza.
+ */
+const etiquetaDeTipo = (tipo) => tipo.charAt(0).toUpperCase() + tipo.slice(1);
 
 const FORM_VACIO = {
     direccion: '', departamento: '', municipio: '', barrio: '',
-    tipo_inmueble: 'Apartamento', area_m2: '', estrato: 3,
+    tipo: 'apartamento', area_m2: '', estrato: 3,
     habitaciones: 2, banos: 1, deposito: 0, parqueaderos: 0,
-    precio: '', estado_ocupacion: 'disponible'
+    precio: ''
 };
 
 const estadoPagoConfig = {
@@ -69,10 +83,10 @@ const Inmuebles = () => {
         setFormData({
             direccion: inm.direccion || '', departamento: inm.departamento || '',
             municipio: inm.municipio || '', barrio: inm.barrio || '',
-            tipo_inmueble: inm.tipo_inmueble || 'Apartamento', area_m2: inm.area_m2 || '',
+            tipo: inm.tipo || 'apartamento', area_m2: inm.area_m2 || '',
             estrato: inm.estrato || 3, habitaciones: inm.habitaciones || 2,
             banos: inm.banos || 1, deposito: inm.deposito || 0,
-            parqueaderos: inm.parqueaderos || 0, precio: '', estado_ocupacion: inm.estado_ocupacion || 'disponible'
+            parqueaderos: inm.parqueaderos || 0, precio: ''
         });
         setShowModal(true);
     };
@@ -93,8 +107,8 @@ const Inmuebles = () => {
 
     if (loading) return <div className="loading">Cargando inmuebles...</div>;
 
-    const disponibles  = inmuebles.filter(i => i.estado_ocupacion === 'disponible').length;
-    const arrendados   = inmuebles.filter(i => i.estado_ocupacion !== 'disponible').length;
+    const disponibles  = inmuebles.filter(i => i.estado === 'disponible').length;
+    const arrendados   = inmuebles.filter(i => i.estado !== 'disponible').length;
 
     return (
         <div className="fade-in">
@@ -145,7 +159,7 @@ const Inmuebles = () => {
                     const ultimoPago  = contrato ? getUltimoPago(contrato.id_contrato) : null;
                     const estadoPago  = ultimoPago ? estadoPagoConfig[ultimoPago.estado] : null;
                     const abierto     = expandido === inm.id_inmueble;
-                    const disponible  = inm.estado_ocupacion === 'disponible';
+                    const disponible  = inm.estado === 'disponible';
 
                     return (
                         <div key={inm.id_inmueble} style={{
@@ -180,7 +194,7 @@ const Inmuebles = () => {
                                     <div style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.1rem' }}>
                                         <MapPin size={11} />
                                         {[inm.barrio, inm.municipio].filter(Boolean).join(', ')}
-                                        {inm.tipo_inmueble && <span style={{ marginLeft: '0.25rem' }}>· {inm.tipo_inmueble}</span>}
+                                        {inm.tipo && <span style={{ marginLeft: '0.25rem' }}>· {etiquetaDeTipo(inm.tipo)}</span>}
                                         {inm.estrato && <span>· E{inm.estrato}</span>}
                                     </div>
                                 </div>
@@ -336,8 +350,8 @@ const Inmuebles = () => {
                                 </div>
                                 <div>
                                     <label className="form-label">Tipo</label>
-                                    <select className="form-control" name="tipo_inmueble" value={formData.tipo_inmueble} onChange={handleChange}>
-                                        {['Apartamento','Casa','Local','Apartaestudio','Finca'].map(t => <option key={t}>{t}</option>)}
+                                    <select className="form-control" name="tipo" value={formData.tipo} onChange={handleChange}>
+                                        {TIPOS_INMUEBLE.map(t => <option key={t} value={t}>{etiquetaDeTipo(t)}</option>)}
                                     </select>
                                 </div>
                                 <div>

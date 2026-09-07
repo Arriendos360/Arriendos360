@@ -71,10 +71,9 @@ services:
 
   # MS-Inmuebles — inmuebles del propietario y su estado de ocupacion.
   #
-  # Todavia NO esta cableado: MS_INMUEBLES_URL del gateway sigue vacia, asi que
-  # la costura resuelve /api/inmuebles en local. Este contenedor levanta, migra
-  # su esquema `inmuebles` y sirve, pero nadie le pide nada. El PR siguiente
-  # voltea el gateway; hasta entonces conviven las dos tablas, la de aqui vacia.
+  # Ya esta cableado: MS_INMUEBLES_URL apunta aqui, asi que la costura del
+  # gateway reenvia /api/inmuebles a este servicio. Su tabla vive en el esquema
+  # `inmuebles`; el gateway ya no la tiene.
   ms-inmuebles:
     build:
       context: ..
@@ -105,6 +104,16 @@ services:
     volumes:
       - ../services/ms-inmuebles:/repo/services/ms-inmuebles
       - /repo/services/ms-inmuebles/node_modules
+    # El servicio solo escucha DESPUES de aplicar sus migraciones, asi que
+    # responder aqui significa «ya adopte los inmuebles que estaban en el
+    # esquema del gateway». Es lo que permite que la migracion del gateway que
+    # retira `public.inmuebles` no pueda adelantarse a la copia.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3012/ || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
 
   # Servidor Backend
   backend:
@@ -128,9 +137,9 @@ services:
       - SERVICIO_NOMBRE=gateway
       # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
       # aqui hace que el gateway reenvie ese prefijo al microservicio.
-      # Cableado: los dos prefijos de identidad pasan a remotos por la costura.
+      # Cableados: identidad (dos prefijos) e inmuebles.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
-      - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-}
+      - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
       - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-}
       - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-}
       - CHOKIDAR_USEPOLLING=true
@@ -142,6 +151,11 @@ services:
       # esta en pie, arranca con la cache vacia y un aviso en el log.
       ms-identidad:
         condition: service_started
+      # Aqui SI es service_healthy, y no por comodidad: la migracion
+      # `dominio/002` retira `public.inmuebles`, y no puede correr antes de que
+      # ms-inmuebles haya copiado las filas a su esquema. Sano = ya migro.
+      ms-inmuebles:
+        condition: service_healthy
     volumes:
       # Recarga en caliente del codigo del gateway. `packages/` y `database/`
       # NO se montan: viven dentro de la imagen, asi que tocarlos exige

@@ -24,6 +24,7 @@ const { after, before, describe, it } = require('node:test');
 
 const GATEWAY = process.env.URL_GATEWAY || 'http://localhost:3001';
 const IDENTIDAD = process.env.URL_IDENTIDAD || 'http://localhost:3011';
+const INMUEBLES = process.env.URL_INMUEBLES || 'http://localhost:3012';
 
 /** Sufijo único por ejecución: la suite corre contra una base que no se resetea. */
 const SELLO = Date.now().toString().slice(-9);
@@ -60,7 +61,8 @@ describe('Caminos críticos', () => {
         // error más probable de esta suite y el más confuso si no se explica.
         for (const [nombre, url] of [
             ['gateway', `${GATEWAY}/`],
-            ['ms-identidad', `${IDENTIDAD}/`]
+            ['ms-identidad', `${IDENTIDAD}/`],
+            ['ms-inmuebles', `${INMUEBLES}/`]
         ]) {
             try {
                 await fetch(url, { signal: AbortSignal.timeout(2000) });
@@ -126,11 +128,17 @@ describe('Caminos críticos', () => {
                 direccion: 'Calle Integración 1',
                 barrio: 'Centro',
                 municipio: 'Bogota',
-                tipo_inmueble: 'Apartamento'
+                tipo: 'apartamento'
             }
         });
-        assert.equal(inmueble.estado, 201);
+        assert.equal(inmueble.estado, 201, JSON.stringify(inmueble.datos));
         idInmueble = inmueble.datos.inmueble.id_inmueble;
+
+        // El inmueble nace disponible. Lo comprueba aquí y no en la suite del
+        // servicio porque lo que interesa es el ESTADO INICIAL del camino: la
+        // aserción de después —que pasa a arrendado— no dice nada si no se sabe
+        // de dónde venía.
+        assert.equal(inmueble.datos.inmueble.estado, 'disponible');
 
         const contrato = await pedir('POST', '/api/contratos', {
             token: tokenPropietario,
@@ -154,6 +162,43 @@ describe('Caminos críticos', () => {
         assert.ok(suyo, 'el contrato debería aparecer en el listado');
         assert.equal(suyo.Inquilino.nombres, 'Inqui');
         assert.equal(suyo.Inquilino.documento, `Q${SELLO}`);
+
+        // Y el inmueble tampoco: viene de ms-inmuebles por el mismo camino.
+        assert.equal(suyo.Inmueble.direccion, 'Calle Integración 1');
+        assert.equal(suyo.Inmueble.tipo, 'apartamento');
+    });
+
+    it('firmar el contrato dejó el inmueble arrendado, en el otro servicio', async () => {
+        // Es LA prueba que ningún doble puede dar. El gateway guardó el contrato
+        // en su base y llamó por HTTP a ms-inmuebles para mover el estado; que
+        // esas dos escrituras, ya sin transacción que las abarque, acaben
+        // coherentes es justo lo que el ADR 0011 deja en el aire y esto verifica.
+        const detalle = await pedir('GET', `/api/inmuebles/${idInmueble}`, {
+            token: tokenPropietario
+        });
+
+        assert.equal(detalle.estado, 200);
+        assert.equal(detalle.datos.estado, 'arrendado');
+
+        // Y la auditoría guarda a la persona, no al servicio que transmitió.
+        assert.match(detalle.datos.actualizado_por, /^[0-9a-f-]{36}$/);
+    });
+
+    it('no se puede borrar un inmueble con contrato activo', async () => {
+        // El veto vive en el gateway porque depende de contratos, que ms-inmuebles
+        // no puede consultar sin invertir la dirección de las dependencias.
+        const borrado = await pedir('DELETE', `/api/inmuebles/${idInmueble}`, {
+            token: tokenPropietario
+        });
+
+        // 409 y no 403: no es un problema de permisos sino de estado del recurso.
+        assert.equal(borrado.estado, 409, JSON.stringify(borrado.datos));
+        assert.match(borrado.datos.mensaje, /contrato activo/);
+
+        const sigue = await pedir('GET', `/api/inmuebles/${idInmueble}`, {
+            token: tokenPropietario
+        });
+        assert.equal(sigue.estado, 200);
     });
 
     it('registrar un pago funciona de punta a punta', async () => {

@@ -4,18 +4,21 @@
  * Un solo middleware decide, peticion por peticion, si el prefijo se atiende con
  * el codigo local del monolito o se reenvia por HTTP al microservicio extraido.
  *
- * Hoy las cuatro variables `MS_*_URL` estan vacias, asi que siempre llama a
- * `next()` y la peticion sigue el mismo camino de siempre: parsers de cuerpo y
- * routers de Express. Esta costura no cambia nada observable todavia; existe
- * para que el paso 3 solo tenga que poner una URL en el entorno.
+ * `/api/auth`, `/api/usuarios` e `/api/inmuebles` estan cableados a sus
+ * servicios; el resto sigue resolviendo en local, en el codigo del monolito.
  *
- * Orden de montaje (importa): va DESPUES de `cors()` y del control de acceso, y
- * ANTES de `express.json()`. Que el RBAC vaya primero no es un detalle: una
- * peticion denegada no debe llegar a la red interna. Ver el comentario de
- * `proxy.js` sobre streaming del cuerpo.
+ * Orden de montaje (importa): va DESPUES de `cors()`, del control de acceso y de
+ * los guardias, y ANTES de `express.json()`. Que el RBAC vaya primero no es un
+ * detalle: una peticion denegada no debe llegar a la red interna. Los guardias
+ * van entre medias porque deciden si la peticion llega a salir. Ver el
+ * comentario de `proxy.js` sobre streaming del cuerpo.
  */
 
 const { reenviar } = require('./proxy');
+const {
+    MENSAJE_CON_CONTRATO,
+    crearGuardiaDeBorrado
+} = require('./guardias');
 const {
     AUTENTICADO,
     MATRIZ,
@@ -75,6 +78,7 @@ module.exports = {
     CODIGO_CAMBIO_PENDIENTE,
     MENSAJE_CAMBIO_PENDIENTE,
     MATRIZ,
+    MENSAJE_CON_CONTRATO,
     MENSAJE_NO_DECLARADA,
     MODO_LOCAL,
     MODO_REMOTO,
@@ -82,6 +86,7 @@ module.exports = {
     TABLA_RUTAS,
     crearControlDeAcceso,
     crearEnrutadorGateway,
+    crearGuardiaDeBorrado,
     describirMatriz,
     esRutaDeApi,
     lineasMatriz,

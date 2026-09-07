@@ -45,7 +45,7 @@ beforeAll(async () => {
         .set(...conToken(tokenOwner1))
         .send({
             direccion: 'Calle Falsa 123',
-            tipo_inmueble: 'Casa'
+            tipo: 'casa'
         });
     idInmuebleOwner1 = resInm.body.inmueble.id_inmueble;
 });

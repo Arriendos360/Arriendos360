@@ -56,11 +56,21 @@ describe('Ciclo de vida del temporizador', () => {
     expect(llamadas).toBe(trasIniciar);
   });
 
-  // El `unref()` del temporizador no tiene prueba propia a proposito: lo que
-  // comprueba es que el proceso pueda salir, y eso no se puede afirmar desde
-  // dentro del mismo proceso sin montar un subproceso entero. Lo verifica esta
-  // suite por omision — corre sin `--forceExit`, asi que si el temporizador
-  // retuviera el bucle de eventos, jest colgaria aqui.
+  test('el temporizador no impide que el proceso termine', async () => {
+    // `iniciar` devuelve el temporizador justamente para poder comprobarlo. Sin
+    // `unref()`, un servicio que solo tuviera esta cache pendiente no podria
+    // salir, y jest necesitaria `--forceExit` para taparlo.
+    const cache = crearCacheInvalidacion({
+      obtener: async (): Promise<Invalidaciones> => ({}),
+      intervaloMs: 60000,
+      registrar: silencio,
+    });
+
+    const temporizador = await cache.iniciar();
+    expect(temporizador.hasRef()).toBe(false);
+
+    cache.detener();
+  });
 
   test('`detener` dos veces no falla', () => {
     const cache = crearCacheInvalidacion({

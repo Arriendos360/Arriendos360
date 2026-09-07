@@ -6,7 +6,6 @@ const { sequelize } = require('./config/database');
 require('./models'); // Importar modelos para registrar sus asociaciones
 
 // Importar rutas
-const inmuebleRoutes = require('./routes/inmueble.routes');
 const contratoRoutes = require('./routes/contrato.routes');
 const pagoRoutes = require('./routes/pago.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
@@ -14,6 +13,7 @@ const { iniciarMotorFinanciero } = require('./services/financialEngine');
 const {
     crearControlDeAcceso,
     crearEnrutadorGateway,
+    crearGuardiaDeBorrado,
     describirEnrutamiento,
     describirMatriz
 } = require('./routing');
@@ -41,10 +41,16 @@ app.use(cors());
 // cuerpo.
 app.use(crearControlDeAcceso({ tokenInvalidado: cacheRevocados.tokenInvalidado }));
 
+// Guardias: reglas que ningún servicio puede aplicar solo porque dependen de
+// datos de otro contexto. Hoy solo una — no borrar un inmueble con contrato
+// activo. Van después del RBAC, que ya dijo quién pregunta, y antes de la
+// costura, porque deciden si la petición llega a salir a la red.
+app.use(crearGuardiaDeBorrado());
+
 // Costura de enrutamiento: reenvía a ms-identidad los prefijos /api/auth y
-// /api/usuarios, y deja pasar el resto al código local de abajo. Va antes de
-// express.json() a propósito, para que el cuerpo llegue sin parsear al reenvío
-// y multipart/form-data (anexos) funcione.
+// /api/usuarios, a ms-inmuebles /api/inmuebles, y deja pasar el resto al código
+// local de abajo. Va antes de express.json() a propósito, para que el cuerpo
+// llegue sin parsear al reenvío y multipart/form-data (anexos) funcione.
 app.use(crearEnrutadorGateway());
 
 app.use(express.json());
@@ -65,9 +71,9 @@ app.get('/', (req, res) => {
     });
 });
 
-// Rutas locales. `/api/auth` y `/api/usuarios` ya no aparecen: los sirve
-// ms-identidad y la costura los reenvía antes de llegar hasta aquí.
-app.use('/api/inmuebles', inmuebleRoutes);
+// Rutas locales. `/api/auth`, `/api/usuarios` e `/api/inmuebles` ya no
+// aparecen: los sirven ms-identidad y ms-inmuebles, y la costura los reenvía
+// antes de llegar hasta aquí.
 app.use('/api/contratos', contratoRoutes);
 app.use('/api/pagos', pagoRoutes);
 app.use('/api/dashboard', dashboardRoutes);

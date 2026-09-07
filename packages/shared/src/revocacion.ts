@@ -74,8 +74,15 @@ export interface CacheInvalidacion {
   tokenInvalidado: TokenInvalidado;
   /** Trae la lista y reemplaza la copia local. `false` si no pudo. */
   refrescar: () => Promise<boolean>;
-  /** Primera carga y arranque del refresco periodico. */
-  iniciar: () => Promise<void>;
+  /**
+   * Primera carga y arranque del refresco periodico.
+   *
+   * Devuelve el temporizador para que se pueda comprobar desde fuera que lleva
+   * `unref()`. Sin el, un servicio que solo tuviera esta cache pendiente no
+   * podria salir, y eso no se puede afirmar de otro modo desde dentro del mismo
+   * proceso.
+   */
+  iniciar: () => Promise<NodeJS.Timeout>;
   detener: () => void;
   estado: () => EstadoCache;
 }
@@ -142,7 +149,7 @@ export function crearCacheInvalidacion(opciones: OpcionesCache): CacheInvalidaci
     return desde !== undefined && claims.iat !== undefined && claims.iat * 1000 < desde;
   };
 
-  const iniciar = async (): Promise<void> => {
+  const iniciar = async (): Promise<NodeJS.Timeout> => {
     // Una primera carga inmediata, para no arrancar con la copia vacia.
     await refrescar();
 
@@ -153,6 +160,8 @@ export function crearCacheInvalidacion(opciones: OpcionesCache): CacheInvalidaci
     // No debe mantener vivo el proceso: si lo unico pendiente es este
     // temporizador, Node tiene que poder salir.
     temporizador.unref?.();
+
+    return temporizador;
   };
 
   const detener = (): void => {
