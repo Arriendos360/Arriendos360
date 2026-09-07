@@ -80,9 +80,15 @@ desarrollo se lleva por delante una demo entera.
 `database/` no entra en la imagen Docker: el build del gateway usa contexto
 `apps/gateway`. Los `.sql` llegan por volumen (`../database:/database:ro`) y la
 ruta se configura con `RUTA_MIGRACIONES`. Funciona en desarrollo, donde el código
-también entra por volumen, pero **la imagen por sí sola no puede migrar**. Se
-resuelve en el paso 8, cuando los Dockerfiles pasen a construir desde el contexto
-raíz (decisión abierta «Lockfiles anidados» de CLAUDE.md).
+también entra por volumen, pero **la imagen por sí sola no puede migrar**.
+
+> **Actualización (2026-09-06).** Cuando se escribió este ADR, el cambio de contexto
+> estaba previsto para el paso 8 junto con la limpieza de lockfiles. Se adelantó: el
+> **PR de contexto de build**, previo al 3b, mueve el build al contexto raíz, y a partir
+> de ahí `database/` entra por `COPY`. El motivo es que el 3b necesita que
+> `ms-identidad` y el gateway compartan la verificación del JWT de `packages/shared`, y
+> eso exige el mismo cambio. Del paso 8 queda solo la limpieza de los
+> `package-lock.json` anidados.
 
 ## Alternativas descartadas
 
