@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';
 import { FileText, Plus, ExternalLink, X, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
 
+import { useSesion } from '../auth/sesion';
+import api from '../services/api';
+import { urlArchivoSubido } from '../services/descargas';
+
 const Contratos = () => {
-    const usuario = JSON.parse(localStorage.getItem('usuario') || '{}');
-    const esPropietario = usuario.rol === 'propietario';
+    const { esPropietario } = useSesion();
     const [contratos, setContratos] = useState([]);
     const [inmuebles, setInmuebles] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -15,7 +17,9 @@ const Contratos = () => {
 
     // Form state
     const [idInmueble, setIdInmueble] = useState('');
-    const [idInquilino, setIdInquilino] = useState('');
+    // Lo que el propietario teclea es la CÉDULA. El contrato necesita el UUID
+    // del usuario, así que hay que traducirlo antes de enviar.
+    const [documentoInquilino, setDocumentoInquilino] = useState('');
     const [fechaInicio, setFechaInicio] = useState('');
     const [fechaFin, setFechaFin] = useState('');
     const [valorMensual, setValorMensual] = useState('');
@@ -26,7 +30,7 @@ const Contratos = () => {
     const [tenantData, setTenantData] = useState({
         nombres: '',
         apellidos: '',
-        correo: '',
+        email: '',
         telefono: ''
     });
 
@@ -55,6 +59,43 @@ const Contratos = () => {
         }
     };
 
+    /**
+     * Traduce la cédula tecleada al UUID del usuario.
+     *
+     * Con identificadores enteros la cédula ERA la clave del inquilino y se
+     * mandaba tal cual. Ahora `Contratos.id_inquilino` guarda un UUID que nadie
+     * teclea, así que hace falta este paso intermedio. Devuelve `null` si esa
+     * persona todavía no está registrada, que es la señal para abrir el modal.
+     */
+    const buscarInquilino = async (documento) => {
+        try {
+            const respuesta = await api.get('/usuarios/buscar', { params: { documento } });
+            return respuesta.data.id;
+        } catch (error) {
+            if (error.response?.status === 404) return null;
+            throw error;
+        }
+    };
+
+    const enviarContrato = async (idInquilino) => {
+        const formData = new FormData();
+        formData.append('id_inmueble', idInmueble);
+        formData.append('id_inquilino', idInquilino);
+        formData.append('fecha_inicio', fechaInicio);
+        formData.append('fecha_fin', fechaFin);
+        formData.append('valor_mensual', valorMensual);
+        if (pdf) formData.append('pdf', pdf);
+
+        await api.post('/contratos', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        setShowForm(false);
+        resetForm();
+        fetchData();
+        showNotify('Contrato creado exitosamente', 'success');
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -68,46 +109,37 @@ const Contratos = () => {
             return;
         }
 
-        const formData = new FormData();
-        formData.append('id_inmueble', idInmueble);
-        formData.append('id_inquilino', idInquilino);
-        formData.append('fecha_inicio', fechaInicio);
-        formData.append('fecha_fin', fechaFin);
-        formData.append('valor_mensual', valorMensual);
-        if (pdf) formData.append('pdf', pdf);
-
         try {
-            await api.post('/contratos', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            setShowForm(false);
-            resetForm();
-            fetchData();
-            showNotify('Contrato creado exitosamente', 'success');
-        } catch (error) {
-            const errorRes = error.response?.data;
-            if (error.response?.status === 404 && errorRes?.error_code === 'TENANT_NOT_FOUND') {
-                // Si el inquilino no existe (ahora detectado por el código de error), abrimos el modal
+            const idInquilino = await buscarInquilino(documentoInquilino);
+
+            if (!idInquilino) {
+                // No existe: se pide el alta antes de poder firmar.
                 setShowTenantModal(true);
-            } else {
-                showNotify(errorRes?.mensaje || 'Error al procesar el contrato');
+                return;
             }
+
+            await enviarContrato(idInquilino);
+        } catch (error) {
+            showNotify(error.response?.data?.mensaje || 'Error al procesar el contrato');
         }
     };
 
     const handleCreateTenant = async (e) => {
         e.preventDefault();
         try {
-            await api.post('/auth/register', {
+            // Alta de inquilino: ruta propia y autenticada. El registro público
+            // quedó fijado a PROPIETARIO por el contrato de interfaz.
+            const respuesta = await api.post('/usuarios/inquilinos', {
                 ...tenantData,
-                documento: idInquilino,
-                contrasena: idInquilino, // La cédula es la contraseña inicial
-                rol: 'inquilino'
+                documento: documentoInquilino,
+                contrasena: documentoInquilino // La cédula es la contraseña inicial
             });
+
             setShowTenantModal(false);
-            showNotify('Inquilino registrado. Ahora puedes crear el contrato.', 'success');
-            // Intentamos enviar el contrato de nuevo automáticamente
-            handleSubmit({ preventDefault: () => {} });
+            showNotify('Inquilino registrado. Creando el contrato...', 'success');
+
+            // Ya tenemos su UUID, así que el contrato sale sin volver a buscar.
+            await enviarContrato(respuesta.data.usuario.id);
         } catch (error) {
             showNotify(error.response?.data?.mensaje || 'Error al registrar inquilino');
         }
@@ -115,7 +147,7 @@ const Contratos = () => {
 
     const resetForm = () => {
         setIdInmueble('');
-        setIdInquilino('');
+        setDocumentoInquilino('');
         setFechaInicio('');
         setFechaFin('');
         setValorMensual('');
@@ -183,7 +215,7 @@ const Contratos = () => {
                         
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Cédula Inquilino</label>
-                            <input type="text" placeholder="Ej: 10203040" value={idInquilino} onChange={(e) => setIdInquilino(e.target.value)} required />
+                            <input type="text" placeholder="Ej: 10203040" value={documentoInquilino} onChange={(e) => setDocumentoInquilino(e.target.value)} required />
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -231,7 +263,7 @@ const Contratos = () => {
                             <X size={20} style={{ cursor: 'pointer' }} onClick={() => setShowTenantModal(false)} />
                         </div>
                         <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-                            El inquilino con documento <b>{idInquilino}</b> no está registrado. Por favor completa sus datos para continuar:
+                            El inquilino con documento <b>{documentoInquilino}</b> no está registrado. Por favor completa sus datos para continuar:
                         </p>
                         <form onSubmit={handleCreateTenant}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -245,7 +277,7 @@ const Contratos = () => {
                                 </div>
                                 <div>
                                     <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Correo Electrónico</label>
-                                    <input type="email" value={tenantData.correo} onChange={(e) => setTenantData({...tenantData, correo: e.target.value})} required />
+                                    <input type="email" value={tenantData.email} onChange={(e) => setTenantData({...tenantData, email: e.target.value})} required />
                                 </div>
                                 <div>
                                     <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Teléfono</label>
@@ -280,7 +312,7 @@ const Contratos = () => {
                                         <div style={{ fontWeight: '500' }}>{contrato.Inmueble?.direccion}</div>
                                         <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{contrato.Inmueble?.municipio}</div>
                                     </td>
-                                    <td style={{ padding: '1rem' }}>{contrato.id_inquilino}</td>
+                                    <td style={{ padding: '1rem' }}>{contrato.Inquilino ? `${contrato.Inquilino.nombres} ${contrato.Inquilino.apellidos}` : '—'}</td>
                                     <td style={{ padding: '1rem' }}>
                                         <div style={{ fontSize: '0.9rem' }}>
                                             {formatDate(contrato.fecha_inicio)} - {formatDate(contrato.fecha_fin)}
@@ -296,7 +328,7 @@ const Contratos = () => {
                                     </td>
                                     {esPropietario && <td style={{ padding: '1rem', textAlign: 'center', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                                         {contrato.url_pdf && (
-                                            <a href={`http://localhost:3001${contrato.url_pdf}?token=${localStorage.getItem('token')}`} target="_blank" rel="noopener noreferrer" className="btn" style={{ color: '#2563eb', padding: '0.4rem' }}>
+                                            <a href={urlArchivoSubido(contrato.url_pdf)} target="_blank" rel="noopener noreferrer" className="btn" style={{ color: '#2563eb', padding: '0.4rem' }}>
                                                 <ExternalLink size={18} />
                                             </a>
                                         )}

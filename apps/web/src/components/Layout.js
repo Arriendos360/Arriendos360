@@ -2,15 +2,29 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Home, FileText, CreditCard, LogOut, Receipt } from 'lucide-react';
 
+import { limpiarSesion, useSesion } from '../auth/sesion';
+import api from '../services/api';
+
 const Layout = ({ children }) => {
     const navigate = useNavigate();
-    const usuario = JSON.parse(localStorage.getItem('usuario') || '{}');
-    const esPropietario = usuario.rol === 'propietario';
+    const { usuario, esPropietario } = useSesion();
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('usuario');
-        navigate('/login');
+    /**
+     * Cerrar sesión ya no es sólo olvidar el token en el cliente: avisa al
+     * servidor para que anote el `jti` en TokensRevocados. Si no se avisara, el
+     * token seguiría siendo válido hasta su expiración natural y bastaría con
+     * haberlo copiado antes para seguir usándolo.
+     */
+    const handleLogout = async () => {
+        try {
+            await api.post('/auth/logout');
+        } catch (error) {
+            // Si la llamada falla (sin red, o el token ya venció) igual se cierra
+            // la sesión local: dejar al usuario dentro sería peor.
+        } finally {
+            limpiarSesion();
+            navigate('/login');
+        }
     };
 
     return (
@@ -76,9 +90,9 @@ const Layout = ({ children }) => {
                 <div style={{ marginTop: 'auto' }}>
                     <div style={{ padding: '0.75rem 0.5rem', borderTop: '1px solid #f1f5f9', marginBottom: '0.5rem' }}>
                         <p style={{ fontSize: '0.875rem', fontWeight: '600', color: '#1e293b' }}>
-                            {usuario.nombres} {usuario.apellidos}
+                            {usuario?.nombres} {usuario?.apellidos}
                         </p>
-                        <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{usuario.correo}</p>
+                        <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{usuario?.email}</p>
                     </div>
                     <button onClick={handleLogout} className="nav-link"
                         style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444' }}>
@@ -89,9 +103,9 @@ const Layout = ({ children }) => {
 
             <main className="main-content">
                 <header className="navbar">
-                    <h2>Bienvenido, {usuario.nombres}</h2>
+                    <h2>Bienvenido, {usuario?.nombres}</h2>
                     <span className={`badge ${esPropietario ? 'badge-success' : 'badge-pending'}`}>
-                        {usuario.rol}
+                        {usuario?.rol}
                     </span>
                 </header>
                 {children}

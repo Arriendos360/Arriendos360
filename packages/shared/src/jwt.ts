@@ -1,13 +1,19 @@
 /**
  * Verificacion local del JWT.
  *
- * Replica exactamente la logica de `apps/gateway/src/middlewares/auth.middleware.js`,
+ * Replica la logica de `apps/gateway/src/middlewares/auth.middleware.js`,
  * incluidos sus mensajes y codigos de estado, para que al extraer los servicios
  * el comportamiento observable no cambie.
  *
  * "Local" significa que cada servicio verifica la firma con el secreto
- * compartido, sin llamar a MS-Identidad en cada peticion. Esa es la decision que
- * el Capitulo 2 fija para el paso 3 de la migracion.
+ * compartido, sin llamar a MS-Identidad en cada peticion. Esa es la decision del
+ * Capitulo 2: sin ella, MS-Identidad seria un punto unico de fallo para toda
+ * peticion autenticada del sistema.
+ *
+ * Verificar la firma en local NO exime de consultar la lista de revocados: un
+ * token cuya firma es valida puede corresponder a una sesion ya cerrada. Por eso
+ * `verificarTokenConRevocacion` existe aparte, y por eso la consulta se inyecta
+ * en vez de traerse aqui una dependencia de base de datos.
  */
 
 import jwt from 'jsonwebtoken';
@@ -19,55 +25,69 @@ import {
   crearError,
 } from './errores';
 
+/** Nombres de rol tal como viajan en los claims: en mayusculas. */
+export const ROL_PROPIETARIO = 'PROPIETARIO';
+export const ROL_INQUILINO = 'INQUILINO';
+
 /**
- * Claims que el monolito firma hoy en `auth.controller.js`.
+ * Claims que emite `services/tokenService.js`, segun el Capitulo 2.
  *
- * `id` e `id_perfil` estan tipados de forma laxa a proposito: hoy son enteros de
- * Sequelize y el modelo canonico los migra a UUID. Cerrar el tipo a `number`
- * obligaria a tocarlo de nuevo en el paso 3.
+ * `roles` es un arreglo porque `RolesUsuario` es muchos a muchos: un usuario
+ * puede ser propietario e inquilino a la vez. `jti` es lo que hace posible la
+ * revocacion; sin el, cerrar sesion no tendria efecto hasta que el token
+ * expirara solo.
  */
 export interface ClaimsUsuario {
-  id: number | string;
-  correo: string;
-  rol: string;
-  id_perfil: number | string | null;
+  /** UUID del usuario. Sustituye al antiguo par `id` + `id_perfil`. */
+  sub: string;
+  email: string;
+  roles: string[];
+  /** UUID unico de este token. */
+  jti: string;
   /** Emitido en, en segundos desde epoch. Lo agrega `jsonwebtoken`. */
   iat?: number;
   /** Expira en, en segundos desde epoch. Lo agrega `jsonwebtoken`. */
   exp?: number;
 }
 
-/** Mensajes literales del middleware actual. No los cambies sin migrar el frontend. */
+/** Mensajes literales del middleware. No los cambies sin migrar el frontend. */
 export const MENSAJE_SIN_TOKEN = 'Acceso denegado. No se proporcionó un token.';
 export const MENSAJE_TOKEN_INVALIDO = 'Token no válido o expirado.';
+export const MENSAJE_TOKEN_REVOCADO = 'Sesión cerrada. Inicia sesión de nuevo.';
 export const MENSAJE_ROL_INSUFICIENTE =
   'Acceso restringido. Se requiere rol de propietario.';
 
-/** De donde puede venir el token en una peticion entrante. */
+/**
+ * De donde puede venir el token en una peticion entrante.
+ *
+ * Solo la cabecera. El fallback por `?token=` desaparecio en el paso 3a: existia
+ * para `window.open`, que no puede poner cabeceras, y las descargas de PDF pasan
+ * ahora por `fetch` + blob. Un token en la query string queda en los logs del
+ * servidor, en el historial del navegador y en la cabecera `Referer`.
+ */
 export interface FuenteToken {
-  /** Cabecera `Authorization`, tipicamente `"Bearer <token>"`. */
+  /** Cabecera `Authorization`, en la forma `"Bearer <token>"`. */
   authorization?: string | undefined;
-  /**
-   * Parametro `?token=` de la query string.
-   *
-   * Existe porque las descargas de PDF se abren con `window.open`, que no puede
-   * poner cabeceras. Esta registrado como trampa conocida: queda en los logs del
-   * servidor y en el historial del navegador, y se reemplaza por URLs firmadas
-   * al pasar a HTTPS.
-   */
-  tokenQuery?: string | undefined;
 }
 
 /**
- * Extrae el token de la cabecera o, si no esta, de la query string.
+ * Extrae el token del esquema `Bearer`.
  *
- * Reproduce `(authHeader && authHeader.split(' ')[1]) || req.query.token`,
- * incluida la peculiaridad de que una cabecera sin espacio (`"abc"` en vez de
- * `"Bearer abc"`) no produce token y hace caer el fallback a la query.
+ * Devuelve `undefined` si falta la cabecera, si el esquema no es `Bearer` o si
+ * no hay valor despues del esquema.
  */
 export function extraerToken(fuente: FuenteToken): string | undefined {
-  const desdeCabecera = fuente.authorization?.split(' ')[1];
-  return desdeCabecera || fuente.tokenQuery || undefined;
+  const cabecera = fuente.authorization;
+  if (!cabecera) {
+    return undefined;
+  }
+
+  const [esquema, valor] = cabecera.split(' ');
+  if (!valor || esquema === undefined || esquema.toLowerCase() !== 'bearer') {
+    return undefined;
+  }
+
+  return valor;
 }
 
 /** Resultado de verificar un token: valido con claims, o invalido con su error listo. */
@@ -75,15 +95,29 @@ export type ResultadoVerificacion =
   | { valido: true; claims: ClaimsUsuario }
   | { valido: false; estado: number; error: ErrorRespuesta };
 
+/** ¿Tiene esto la forma de los claims que emitimos hoy? */
+function tieneFormaDeClaims(valor: unknown): valor is ClaimsUsuario {
+  if (typeof valor !== 'object' || valor === null) {
+    return false;
+  }
+
+  const posible = valor as Record<string, unknown>;
+
+  return (
+    typeof posible['sub'] === 'string' &&
+    typeof posible['jti'] === 'string' &&
+    Array.isArray(posible['roles'])
+  );
+}
+
 /**
- * Verifica la firma y la vigencia del token.
+ * Verifica firma, vigencia y forma del token.
  *
- * Devuelve un resultado en vez de lanzar, para que quien llame decida si
- * responde HTTP, corta un flujo interno o registra el fallo.
- *
- * Correspondencia con el middleware actual:
- * - sin token  -> `401` con {@link MENSAJE_SIN_TOKEN}
+ * Correspondencia con el middleware del gateway:
+ * - sin token             -> `401` con {@link MENSAJE_SIN_TOKEN}
  * - firma mala o expirado -> `403` con {@link MENSAJE_TOKEN_INVALIDO}
+ * - sin `jti` o sin `roles` -> `403`, porque es un token de la forma anterior al
+ *   paso 3a y no se puede revocar.
  */
 export function verificarToken(
   fuente: FuenteToken,
@@ -99,12 +133,9 @@ export function verificarToken(
     };
   }
 
-  // El middleware actual pasa `process.env.JWT_SECRET` sin comprobarlo; si falta,
-  // `jwt.verify` lanza y termina en el mismo 403. Se replica ese comportamiento
-  // en vez de introducir un 500 que hoy no existe.
+  let verificado: unknown;
   try {
-    const verificado = jwt.verify(token, secreto as jwt.Secret);
-    return { valido: true, claims: verificado as unknown as ClaimsUsuario };
+    verificado = jwt.verify(token, secreto as jwt.Secret);
   } catch {
     return {
       valido: false,
@@ -112,15 +143,81 @@ export function verificarToken(
       error: crearError(MENSAJE_TOKEN_INVALIDO),
     };
   }
+
+  if (!tieneFormaDeClaims(verificado)) {
+    return {
+      valido: false,
+      estado: ESTADO_PROHIBIDO,
+      error: crearError(MENSAJE_TOKEN_INVALIDO),
+    };
+  }
+
+  return { valido: true, claims: verificado };
 }
 
 /**
- * Replica `esPropietario` del middleware actual.
+ * Consulta si un `jti` esta revocado.
  *
- * Se queda con la comparacion literal contra `'propietario'`. En el modelo
- * canonico el rol pasa a vivir en `RolesUsuario` y esto habra que revisarlo en
- * el paso 3.
+ * Se inyecta en vez de implementarse aqui porque cada servicio la resuelve
+ * distinto: el gateway consulta `tokens_revocados` directamente, y un servicio
+ * ya extraido preguntara a MS-Identidad o leera su copia en memoria. Lo unico
+ * que este paquete fija es que la consulta filtre por `expira_en > NOW()`, de
+ * modo que una fila vencida deje de tener efecto sin necesidad de barrido.
+ */
+export type ConsultaRevocacion = (jti: string) => Promise<boolean>;
+
+/**
+ * Verificacion completa: firma, forma y revocacion.
+ *
+ * Confianza cero (regla dura 7): un servicio hace esto aunque la peticion venga
+ * del gateway y el gateway ya lo haya hecho.
+ */
+export async function verificarTokenConRevocacion(
+  fuente: FuenteToken,
+  secreto: string | undefined,
+  estaRevocado: ConsultaRevocacion,
+): Promise<ResultadoVerificacion> {
+  const resultado = verificarToken(fuente, secreto);
+
+  if (!resultado.valido) {
+    return resultado;
+  }
+
+  if (await estaRevocado(resultado.claims.jti)) {
+    return {
+      valido: false,
+      estado: ESTADO_SIN_TOKEN,
+      error: crearError(MENSAJE_TOKEN_REVOCADO),
+    };
+  }
+
+  return resultado;
+}
+
+/** ¿Tiene el usuario alguno de estos roles? */
+export function tieneRol(
+  claims: ClaimsUsuario | undefined | null,
+  ...roles: string[]
+): boolean {
+  if (claims === undefined || claims === null || !Array.isArray(claims.roles)) {
+    return false;
+  }
+
+  return roles.some((rol) => claims.roles.includes(rol));
+}
+
+/**
+ * ¿Es propietario?
+ *
+ * Consulta el arreglo `roles`, no una columna `rol`. Un usuario que sea
+ * propietario e inquilino a la vez devuelve `true`, que es justo lo que el
+ * modelo canonico permite y el anterior no podia representar.
  */
 export function esPropietario(claims: ClaimsUsuario | undefined | null): boolean {
-  return claims !== undefined && claims !== null && claims.rol === 'propietario';
+  return tieneRol(claims, ROL_PROPIETARIO);
+}
+
+/** ¿Es inquilino? */
+export function esInquilino(claims: ClaimsUsuario | undefined | null): boolean {
+  return tieneRol(claims, ROL_INQUILINO);
 }

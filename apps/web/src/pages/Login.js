@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+
+import { guardarSesion } from '../auth/sesion';
 import api from '../services/api';
 
 const Login = () => {
@@ -7,14 +9,14 @@ const Login = () => {
     const navigate = useNavigate();
 
     // Login
-    const [correo, setCorreo] = useState('');
+    const [email, setEmail] = useState('');
     const [contrasena, setContrasena] = useState('');
     const [error, setError] = useState('');
 
     // Registro
     const [regData, setRegData] = useState({
         nombres: '', apellidos: '', documento: '',
-        correo: '', telefono: '', contrasena: '', confirmar: ''
+        email: '', telefono: '', contrasena: '', confirmar: ''
     });
     const [regError, setRegError] = useState('');
     const [regExito, setRegExito] = useState(false);
@@ -23,9 +25,10 @@ const Login = () => {
         e.preventDefault();
         setError('');
         try {
-            const response = await api.post('/auth/login', { correo, contrasena });
-            localStorage.setItem('token', response.data.token);
-            localStorage.setItem('usuario', JSON.stringify(response.data.usuario));
+            const response = await api.post('/auth/login', { email, contrasena });
+            // El token queda en memoria, no en localStorage: recargar la página
+            // cierra la sesión, y es a propósito.
+            guardarSesion({ token: response.data.token, usuario: response.data.usuario });
             navigate('/');
         } catch (err) {
             setError(err.response?.data?.mensaje || 'Correo o contraseña incorrectos');
@@ -44,14 +47,15 @@ const Login = () => {
             return;
         }
         try {
-            await api.post('/auth/register', {
+            // El registro publico siempre crea PROPIETARIO: el contrato de
+            // interfaz no lleva campo `rol` y la asignacion se maneja dentro.
+            await api.post('/auth/registro', {
                 nombres: regData.nombres,
                 apellidos: regData.apellidos,
                 documento: regData.documento,
-                correo: regData.correo,
+                email: regData.email,
                 telefono: regData.telefono,
-                contrasena: regData.contrasena,
-                rol: 'propietario'
+                contrasena: regData.contrasena
             });
             setRegExito(true);
         } catch (err) {
@@ -114,7 +118,7 @@ const Login = () => {
                         <form onSubmit={handleLogin} style={{ maxWidth: 'none', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                             <div>
                                 <label style={{ fontSize: '0.875rem', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '0.4rem' }}>Correo Electrónico</label>
-                                <input type="email" value={correo} onChange={e => setCorreo(e.target.value)} required
+                                <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
                                     placeholder="tu@correo.com"
                                     style={{ width: '100%', padding: '0.65rem 0.875rem', borderRadius: '0.5rem', border: '1.5px solid #e2e8f0', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box' }} />
                             </div>
@@ -190,7 +194,7 @@ const Login = () => {
                                     </div>
                                     <div>
                                         <label style={{ fontSize: '0.8rem', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '0.3rem' }}>Correo Electrónico</label>
-                                        <input type="email" value={regData.correo} onChange={e => setRegData({...regData, correo: e.target.value})} required placeholder="tu@correo.com"
+                                        <input type="email" value={regData.email} onChange={e => setRegData({...regData, email: e.target.value})} required placeholder="tu@correo.com"
                                             style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '0.5rem', border: '1.5px solid #e2e8f0', fontSize: '0.875rem', boxSizing: 'border-box' }} />
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>

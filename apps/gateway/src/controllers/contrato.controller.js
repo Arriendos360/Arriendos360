@@ -1,30 +1,46 @@
+const { Op } = require('sequelize');
+
 const { sequelize } = require('../config/database');
 const Contrato = require('../models/Contrato');
 const Inmueble = require('../models/Inmueble');
-const Inquilino = require('../models/Inquilino');
+const RolUsuario = require('../models/RolUsuario');
+const Usuario = require('../models/Usuario');
+const { ROLES } = require('../models/constantes');
+const { esUuid } = require('../models/uuid');
 
-// Obtener todos los contratos
+/**
+ * Datos del inquilino que se devuelven junto al contrato. Salen de `usuarios`
+ * con alias `Inquilino`, así que la forma de la respuesta cambia: donde antes
+ * había `Inquilino.Usuario.nombres` ahora hay `Inquilino.nombres`, y la cédula
+ * dejó de ser `Inquilino.id_inquilino` para ser `Inquilino.documento`.
+ */
+const conInquilino = {
+    model: Usuario,
+    as: 'Inquilino',
+    attributes: ['id_usuario', 'nombres', 'apellidos', 'documento', 'telefono', 'email']
+};
+
+/**
+ * Un contrato es visible para el dueño del inmueble O para su inquilino.
+ *
+ * Antes esto era un if/else sobre el rol único del token. Con `roles` como
+ * arreglo un usuario puede ser las dos cosas a la vez, así que la condición pasa
+ * a ser una disyunción sobre la pertenencia real del recurso, no sobre el rol
+ * declarado. Para un usuario de un solo rol el resultado es idéntico al
+ * anterior: nadie figura como inquilino de un contrato sin serlo.
+ */
+const visiblePara = (sub) => ({
+    [Op.or]: [{ '$Inmueble.id_propietario$': sub }, { id_inquilino: sub }]
+});
+
+// Obtener todos los contratos en los que el usuario es parte
 const obtenerTodos = async (req, res) => {
     try {
-        const { rol, id_perfil } = req.usuario;
-        let whereContrato = {};
-        let whereInmueble = {};
-
-        if (rol === 'propietario') {
-            whereInmueble.id_propietario = id_perfil;
-        } else if (rol === 'inquilino') {
-            whereContrato.id_inquilino = id_perfil;
-        }
+        const { sub } = req.usuario;
 
         const contratos = await Contrato.findAll({
-            where: whereContrato,
-            include: [
-                { 
-                    model: Inmueble,
-                    where: Object.keys(whereInmueble).length > 0 ? whereInmueble : undefined
-                },
-                { model: Inquilino }
-            ]
+            where: visiblePara(sub),
+            include: [{ model: Inmueble, required: true }, conInquilino]
         });
         res.json(contratos);
     } catch (error) {
@@ -36,31 +52,23 @@ const obtenerTodos = async (req, res) => {
 const obtenerPorId = async (req, res) => {
     try {
         const { id } = req.params;
-        const { rol, id_perfil } = req.usuario;
+        const { sub } = req.usuario;
 
-        const contrato = await Contrato.findByPk(id, {
-            include: [
-                { model: Inmueble },
-                { model: Inquilino }
-            ]
-        });
-        
+        const contrato = esUuid(id)
+            ? await Contrato.findByPk(id, { include: [{ model: Inmueble }, conInquilino] })
+            : null;
+
         if (!contrato) {
             return res.status(404).json({ mensaje: 'Contrato no encontrado' });
         }
 
-        // Validar permisos
-        const esDuenioInmueble = contrato.Inmueble.id_propietario === id_perfil;
-        const esInquilinoContrato = contrato.id_inquilino === id_perfil;
+        const esDuenioInmueble = contrato.Inmueble && contrato.Inmueble.id_propietario === sub;
+        const esInquilinoContrato = contrato.id_inquilino === sub;
 
-        if (rol === 'propietario' && !esDuenioInmueble) {
+        if (!esDuenioInmueble && !esInquilinoContrato) {
             return res.status(403).json({ mensaje: 'No tienes permisos para ver este contrato' });
         }
 
-        if (rol === 'inquilino' && !esInquilinoContrato) {
-            return res.status(403).json({ mensaje: 'No tienes permisos para ver este contrato' });
-        }
-        
         res.json(contrato);
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener contrato', error: error.message });
@@ -70,15 +78,17 @@ const obtenerPorId = async (req, res) => {
 const crear = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
         const { id_inmueble, id_inquilino, fecha_inicio, fecha_fin, valor_mensual } = req.body;
-        const contratoData = { ...req.body };
-        
+
+        // Las columnas de auditoría no se aceptan del cliente: las pone el hook.
+        const { creado_por, actualizado_por, ...contratoData } = req.body;
+
         // 0. Verificar que el inmueble pertenece al propietario autenticado
         const inmueble = await Inmueble.findOne({
             where: {
                 id_inmueble: id_inmueble,
-                id_propietario: id_perfil
+                id_propietario: sub
             }
         });
 
@@ -98,16 +108,23 @@ const crear = async (req, res) => {
             return res.status(400).json({ mensaje: 'El valor mensual debe ser un número positivo' });
         }
 
-        // 2. Verificar que el inquilino existe
-        const InquilinoModel = require('../models/Inquilino');
-        let inquilino = await InquilinoModel.findByPk(id_inquilino);
-        
+        // 2. Verificar que el inquilino existe y que efectivamente es inquilino.
+        //    `id_inquilino` ya no es una cédula sino el UUID del usuario; la SPA
+        //    lo obtiene de GET /api/usuarios/buscar?documento=... El código de
+        //    error se conserva porque el frontend lo usa para abrir el modal de
+        //    alta cuando la persona todavía no está registrada.
+        const inquilino = esUuid(id_inquilino)
+            ? await RolUsuario.findOne({
+                where: { id_usuario: id_inquilino, id_rol: ROLES.INQUILINO }
+            })
+            : null;
+
         if (!inquilino) {
             await t.rollback();
-            return res.status(404).json({ 
-                mensaje: 'Inquilino no encontrado', 
+            return res.status(404).json({
+                mensaje: 'Inquilino no encontrado',
                 error_code: 'TENANT_NOT_FOUND',
-                id_inquilino 
+                id_inquilino
             });
         }
 
@@ -124,21 +141,25 @@ const crear = async (req, res) => {
             }
         }
 
-        const nuevoContrato = await Contrato.create(contratoData, { transaction: t });
-        
+        const nuevoContrato = await Contrato.create(contratoData, {
+            transaction: t,
+            usuarioAuditor: sub
+        });
+
         // 4. Actualizar estado del inmueble
         await Inmueble.update(
             { estado_ocupacion: 'arrendado' },
-            { 
+            {
                 where: { id_inmueble: id_inmueble },
-                transaction: t 
+                transaction: t,
+                usuarioAuditor: sub
             }
         );
-        
+
         await t.commit();
-        res.status(201).json({ 
-            mensaje: 'Contrato creado exitosamente', 
-            contrato: nuevoContrato 
+        res.status(201).json({
+            mensaje: 'Contrato creado exitosamente',
+            contrato: nuevoContrato
         });
     } catch (error) {
         if (t) await t.rollback();
@@ -151,17 +172,19 @@ const crear = async (req, res) => {
 const actualizar = async (req, res) => {
     try {
         const { id } = req.params;
-        const { id_perfil } = req.usuario;
-        
-        const contrato = await Contrato.findByPk(id, {
-            include: [{ model: Inmueble }]
-        });
-        
-        if (!contrato || contrato.Inmueble.id_propietario !== id_perfil) {
+        const { sub } = req.usuario;
+
+        const contrato = esUuid(id)
+            ? await Contrato.findByPk(id, { include: [{ model: Inmueble }] })
+            : null;
+
+        if (!contrato || !contrato.Inmueble || contrato.Inmueble.id_propietario !== sub) {
             return res.status(404).json({ mensaje: 'Contrato no encontrado o no tienes permisos' });
         }
-        
-        await contrato.update(req.body);
+
+        const { creado_por, actualizado_por, ...cambios } = req.body;
+
+        await contrato.update(cambios, { usuarioAuditor: sub });
         res.json({ mensaje: 'Contrato actualizado', contrato });
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al actualizar contrato', error: error.message });
@@ -173,29 +196,30 @@ const finalizar = async (req, res) => {
     const t = await sequelize.transaction();
     try {
         const { id } = req.params;
-        const { id_perfil } = req.usuario;
-        
-        const contrato = await Contrato.findByPk(id, {
-            include: [{ model: Inmueble }]
-        });
-        
-        if (!contrato || contrato.Inmueble.id_propietario !== id_perfil) {
+        const { sub } = req.usuario;
+
+        const contrato = esUuid(id)
+            ? await Contrato.findByPk(id, { include: [{ model: Inmueble }] })
+            : null;
+
+        if (!contrato || !contrato.Inmueble || contrato.Inmueble.id_propietario !== sub) {
             await t.rollback();
             return res.status(404).json({ mensaje: 'Contrato no encontrado o no tienes permisos' });
         }
-        
+
         // Cambiar estado a finalizado (2)
-        await contrato.update({ estado: 2 }, { transaction: t });
-        
+        await contrato.update({ estado: 2 }, { transaction: t, usuarioAuditor: sub });
+
         // Liberar inmueble
         await Inmueble.update(
             { estado_ocupacion: 'disponible' },
-            { 
+            {
                 where: { id_inmueble: contrato.id_inmueble },
-                transaction: t 
+                transaction: t,
+                usuarioAuditor: sub
             }
         );
-        
+
         await t.commit();
         res.json({ mensaje: 'Contrato finalizado', contrato });
     } catch (error) {

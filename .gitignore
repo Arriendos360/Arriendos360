@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Build de produccion de la SPA (react-scripts build)
+apps/web/build/
+
 # Variables de entorno (CONTRASEÑAS)
 .env
 .env.local

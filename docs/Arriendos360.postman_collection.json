@@ -1,620 +1,813 @@
 {
-	"info": {
-		"_postman_id": "a1b2c3d4-e5f6-4a5b-bcde-1234567890ab",
-		"name": "Arriendos360 API",
-		"description": "Colección para probar todos los endpoints de la plataforma de gestión de arrendamientos.\n\nNota: El sistema incluye un MOTOR FINANCIERO automático que genera recibos (RF-14), envía alertas (RF-15) y calcula mora (RF-16) diariamente a la medianoche.",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"item": [
-		{
-			"name": "Autenticación",
-			"item": [
-				{
-					"name": "Registro de Usuario",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"correo\": \"propietario@test.com\",\n    \"contrasena\": \"password123\",\n    \"rol\": \"propietario\",\n    \"nombres\": \"Juan\",\n    \"apellidos\": \"Perez\",\n    \"telefono\": \"3001234567\",\n    \"documento\": \"123456789\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/auth/register",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"auth",
-								"register"
-							]
-						}
-					}
-				},
-				{
-					"name": "Login",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"var jsonData = pm.response.json();",
-									"if (jsonData.token) {",
-									"    pm.collectionVariables.set(\"token\", jsonData.token);",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"correo\": \"propietario@test.com\",\n    \"contrasena\": \"password123\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/auth/login",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"auth",
-								"login"
-							]
-						}
-					}
-				}
-			]
-		},
-		{
-			"name": "Admin (Mantenimiento)",
-			"item": [
-				{
-					"name": "Forzar Ejecución Motor Financiero",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/admin/ejecutar-motor",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"ejecutar-motor"
-							]
-						},
-						"description": "RF-14/15/16: Dispara manualmente el proceso de generación de recibos, alertas y cálculo de mora sin esperar a la medianoche."
-					}
-				}
-			]
-		},
-		{
-			"name": "Inmuebles",
-			"item": [
-				{
-					"name": "Listar Inmuebles",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/inmuebles",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"inmuebles"
-							]
-						}
-					}
-				},
-				{
-					"name": "Ver Detalle Inmueble",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/inmuebles/1",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"inmuebles",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Crear Inmueble",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"departamento\": \"Antioquia\",\n    \"municipio\": \"Medellín\",\n    \"barrio\": \"El Poblado\",\n    \"direccion\": \"Calle 10 # 43-21\",\n    \"tipo_inmueble\": \"Apartamento\",\n    \"area_m2\": 75.5,\n    \"habitaciones\": 3,\n    \"banos\": 2,\n    \"deposito\": 1,\n    \"parqueaderos\": 1,\n    \"estrato\": 5\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/inmuebles",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"inmuebles"
-							]
-						},
-						"description": "Nota: El id_propietario se asigna automáticamente desde el token del usuario autenticado."
-					}
-				},
-				{
-					"name": "Actualizar Inmueble",
-					"request": {
-						"method": "PUT",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"habitaciones\": 4,\n    \"direccion\": \"Nueva Direccion 123\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/inmuebles/1",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"inmuebles",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Eliminar Inmueble",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/inmuebles/1",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"inmuebles",
-								"1"
-							]
-						}
-					}
-				}
-			]
-		},
-		{
-			"name": "Contratos",
-			"item": [
-				{
-					"name": "Listar MIS Contratos",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/contratos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"contratos"
-							]
-						}
-					}
-				},
-				{
-					"name": "Ver Contrato por ID",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/contratos/1",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"contratos",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Crear Contrato (Multiform)",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "formdata",
-							"formdata": [
-								{
-									"key": "id_inmueble",
-									"value": "1",
-									"type": "text"
-								},
-								{
-									"key": "id_inquilino",
-									"value": "987654321",
-									"type": "text"
-								},
-								{
-									"key": "fecha_inicio",
-									"value": "2023-01-01",
-									"type": "text"
-								},
-								{
-									"key": "fecha_fin",
-									"value": "2024-01-01",
-									"type": "text"
-								},
-								{
-									"key": "valor_mensual",
-									"value": "1500000",
-									"type": "text"
-								},
-								{
-									"key": "pdf",
-									"type": "file",
-									"src": []
-								}
-							]
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/contratos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"contratos"
-							]
-						}
-					}
-				},
-				{
-					"name": "Finalizar Contrato",
-					"request": {
-						"method": "PUT",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/contratos/1/finalizar",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"contratos",
-								"1",
-								"finalizar"
-							]
-						}
-					}
-				}
-			]
-		},
-		{
-			"name": "Pagos",
-			"item": [
-				{
-					"name": "Listar Historial de Pagos",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos"
-							]
-						}
-					}
-				},
-				{
-					"name": "Pagos PENDIENTES",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/pendientes",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"pendientes"
-							]
-						}
-					}
-				},
-				{
-					"name": "Pagos por Contrato",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/contrato/1",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"contrato",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Generar Cobro Mensual",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"id_contrato\": 1,\n    \"monto_total\": 1500000,\n    \"mes_correspondiente\": \"2023-06-01\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos"
-							]
-						}
-					}
-				},
-				{
-					"name": "Registrar Pago o Abono",
-					"request": {
-						"method": "PUT",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"monto_pagado\": 500000,\n    \"tipo_transaccion\": \"Transferencia Bancaria\",\n    \"observaciones\": \"Primer abono del mes\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/1/pagar",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"1",
-								"pagar"
-							]
-						},
-						"description": "RF-17: Permite pagos totales o parciales. Valida que no se exceda el saldo pendiente."
-					}
-				},
-				{
-					"name": "Ver Historial de Abonos",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/1/abonos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"1",
-								"abonos"
-							]
-						},
-						"description": "Lista todos los abonos realizados a un recibo mensual específico."
-					}
-				},
-				{
-					"name": "Obtener Comprobante de Abono",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/abono/1",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"abono",
-								"1"
-							]
-						},
-						"description": "RF-18: Genera un comprobante en formato PDF por cada abono registrado."
-					}
-				},
-				{
-					"name": "Verificar Mora",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/verificar-mora",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"verificar-mora"
-							]
-						}
-					}
-				},
-				{
-					"name": "Obtener Recibo PDF (Simulado)",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/pagos/1/recibo",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"pagos",
-								"1",
-								"recibo"
-							]
-						}
-					}
-				}
-			]
-		},
-		{
-			"name": "Dashboard",
-			"item": [
-				{
-					"name": "Resumen General",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/dashboard/resumen",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"dashboard",
-								"resumen"
-							]
-						}
-					}
-				},
-				{
-					"name": "Reporte de Mora",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/dashboard/mora",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"dashboard",
-								"mora"
-							]
-						}
-					}
-				},
-				{
-					"name": "Ingresos Totales",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/dashboard/ingresos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"dashboard",
-								"ingresos"
-							]
-						}
-					}
-				},
-				{
-					"name": "Contratos Activos",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/dashboard/contratos-activos",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"dashboard",
-								"contratos-activos"
-							]
-						}
-					}
-				}
-			]
-		}
-	],
-	"auth": {
-		"type": "bearer",
-		"bearer": [
-			{
-				"key": "token",
-				"value": "{{token}}",
-				"type": "string"
-			}
-		]
-	},
-	"variable": [
-		{
-			"key": "baseUrl",
-			"value": "http://localhost:3001",
-			"type": "string"
-		},
-		{
-			"key": "token",
-			"value": "",
-			"type": "string"
-		}
-	]
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-4a5b-bcde-1234567890ab",
+    "name": "Arriendos360 API",
+    "description": "Colección para probar todos los endpoints de la plataforma de gestión de arrendamientos.\n\nNota: El sistema incluye un MOTOR FINANCIERO automático que genera recibos (RF-14), envía alertas (RF-15) y calcula mora (RF-16) diariamente a la medianoche.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Autenticación",
+      "item": [
+        {
+          "name": "Registro de Propietario",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"nombres\": \"Juan\",\n    \"apellidos\": \"Perez\",\n    \"email\": \"propietario@test.com\",\n    \"contrasena\": \"password123\",\n    \"telefono\": \"3001234567\",\n    \"documento\": \"123456789\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/registro",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "registro"
+              ]
+            },
+            "description": "El contrato de interfaz del Capitulo 2 no lleva campo `rol`: el registro publico crea siempre PROPIETARIO."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.token) { pm.collectionVariables.set(\"token\", d.token); }",
+                  "if (d.usuario) { pm.collectionVariables.set(\"id_usuario\", d.usuario.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"propietario@test.com\",\n    \"contrasena\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Logout (revoca el token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Cuerpo vacio. Anota el `jti` del token en TokensRevocados hasta su expiracion natural. A partir de aqui el mismo token responde 401."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Usuarios",
+      "item": [
+        {
+          "name": "Buscar inquilino por documento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.id) { pm.collectionVariables.set(\"id_inquilino\", d.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/usuarios/buscar?documento=10000002",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "usuarios"
+              ],
+              "query": [
+                {
+                  "key": "documento",
+                  "value": "10000002"
+                }
+              ]
+            },
+            "description": "Traduce cedula -> UUID. Hace falta porque `Contratos.id_inquilino` guarda ahora el UUID del usuario y nadie teclea un UUID."
+          }
+        },
+        {
+          "name": "Dar de alta un inquilino",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.usuario) { pm.collectionVariables.set(\"id_inquilino\", d.usuario.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"nombres\": \"Maria\",\n    \"apellidos\": \"Gomez\",\n    \"email\": \"inquilino@test.com\",\n    \"contrasena\": \"password123\",\n    \"telefono\": \"3009876543\",\n    \"documento\": \"987654321\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/usuarios/inquilinos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "inquilinos"
+              ]
+            },
+            "description": "Exige propietario autenticado. Crea el usuario con rol INQUILINO."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin (Mantenimiento)",
+      "item": [
+        {
+          "name": "Forzar Ejecución Motor Financiero",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/ejecutar-motor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "ejecutar-motor"
+              ]
+            },
+            "description": "RF-14/15/16: Dispara manualmente el proceso de generación de recibos, alertas y cálculo de mora sin esperar a la medianoche."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inmuebles",
+      "item": [
+        {
+          "name": "Listar Inmuebles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inmuebles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inmuebles"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ver Detalle Inmueble",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inmuebles/{{id_inmueble}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inmuebles",
+                "{{id_inmueble}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear Inmueble",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"departamento\": \"Antioquia\",\n    \"municipio\": \"Medellín\",\n    \"barrio\": \"El Poblado\",\n    \"direccion\": \"Calle 10 # 43-21\",\n    \"tipo_inmueble\": \"Apartamento\",\n    \"area_m2\": 75.5,\n    \"habitaciones\": 3,\n    \"banos\": 2,\n    \"deposito\": 1,\n    \"parqueaderos\": 1,\n    \"estrato\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/inmuebles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inmuebles"
+              ]
+            },
+            "description": "Nota: El id_propietario se asigna automáticamente desde el token del usuario autenticado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.inmueble && d.inmueble.id_inmueble) { pm.collectionVariables.set(\"id_inmueble\", d.inmueble.id_inmueble); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Inmueble",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"habitaciones\": 4,\n    \"direccion\": \"Nueva Direccion 123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/inmuebles/{{id_inmueble}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inmuebles",
+                "{{id_inmueble}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Eliminar Inmueble",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inmuebles/{{id_inmueble}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inmuebles",
+                "{{id_inmueble}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contratos",
+      "item": [
+        {
+          "name": "Listar MIS Contratos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ver Contrato por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear Contrato (Multiform)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "id_inmueble",
+                  "value": "{{id_inmueble}}",
+                  "type": "text"
+                },
+                {
+                  "key": "id_inquilino",
+                  "value": "{{id_inquilino}}",
+                  "type": "text"
+                },
+                {
+                  "key": "fecha_inicio",
+                  "value": "2023-01-01",
+                  "type": "text"
+                },
+                {
+                  "key": "fecha_fin",
+                  "value": "2024-01-01",
+                  "type": "text"
+                },
+                {
+                  "key": "valor_mensual",
+                  "value": "1500000",
+                  "type": "text"
+                },
+                {
+                  "key": "pdf",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.contrato && d.contrato.id_contrato) { pm.collectionVariables.set(\"id_contrato\", d.contrato.id_contrato); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finalizar Contrato",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/finalizar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "finalizar"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pagos",
+      "item": [
+        {
+          "name": "Listar Historial de Pagos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Pagos PENDIENTES",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/pendientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "pendientes"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Pagos por Contrato",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/contrato/{{id_contrato}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "contrato",
+                "{{id_contrato}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generar Cobro Mensual",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"id_contrato\": \"{{id_contrato}}\",\n    \"monto_total\": 1500000,\n    \"mes_correspondiente\": \"2023-06-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.pago && d.pago.id_pago) { pm.collectionVariables.set(\"id_pago\", d.pago.id_pago); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar Pago o Abono",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"monto_pagado\": 500000,\n    \"tipo_transaccion\": \"Transferencia Bancaria\",\n    \"observaciones\": \"Primer abono del mes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/{{id_pago}}/pagar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "{{id_pago}}",
+                "pagar"
+              ]
+            },
+            "description": "RF-17: Permite pagos totales o parciales. Valida que no se exceda el saldo pendiente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.abono && d.abono.id_abono) { pm.collectionVariables.set(\"id_abono\", d.abono.id_abono); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver Historial de Abonos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/{{id_pago}}/abonos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "{{id_pago}}",
+                "abonos"
+              ]
+            },
+            "description": "Lista todos los abonos realizados a un recibo mensual específico."
+          }
+        },
+        {
+          "name": "Obtener Comprobante de Abono",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/abono/{{id_abono}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "abono",
+                "{{id_abono}}"
+              ]
+            },
+            "description": "RF-18: Genera un comprobante en formato PDF por cada abono registrado."
+          }
+        },
+        {
+          "name": "Verificar Mora",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/verificar-mora",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "verificar-mora"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener Recibo PDF (Simulado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/{{id_pago}}/recibo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "{{id_pago}}",
+                "recibo"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Resumen General",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/resumen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "resumen"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reporte de Mora",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/mora",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "mora"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ingresos Totales",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/ingresos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "ingresos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Contratos Activos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/contratos-activos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "contratos-activos"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "id_usuario",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "id_inquilino",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "id_inmueble",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "id_contrato",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "id_pago",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "id_abono",
+      "value": "",
+      "type": "string"
+    }
+  ]
 }

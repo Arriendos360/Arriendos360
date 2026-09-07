@@ -1,3 +1,11 @@
+/**
+ * Dashboard. Vive en el gateway y no tiene tablas propias: agrega lo que ya
+ * guardan Contratos, Inmuebles y Pagos (regla dura 5).
+ *
+ * Todas sus rutas exigen PROPIETARIO en `dashboard.routes.js`, así que aquí el
+ * `sub` del token es siempre el del dueño y filtra por `id_propietario`. Antes
+ * ese valor era la cédula que venía en `id_perfil`; ahora es el UUID del usuario.
+ */
 const { Sequelize } = require('sequelize');
 const Pago = require('../models/Pago');
 const Contrato = require('../models/Contrato');
@@ -6,7 +14,7 @@ const Inmueble = require('../models/Inmueble');
 // Obtener ingresos totales (suma de pagos realizados)
 const obtenerIngresos = async (req, res) => {
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
         
         const resultado = await Pago.findAll({
             where: { estado: 2 }, // 2 = Pagado
@@ -22,7 +30,7 @@ const obtenerIngresos = async (req, res) => {
                     model: Inmueble,
                     attributes: [],
                     required: true,
-                    where: { id_propietario: id_perfil }
+                    where: { id_propietario: sub }
                 }]
             }],
             raw: true
@@ -40,7 +48,7 @@ const obtenerIngresos = async (req, res) => {
 // Obtener pagos en mora (vencidos o pendientes con fecha pasada)
 const obtenerMora = async (req, res) => {
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
         const hoy = new Date();
         
         const pagosEnMora = await Pago.findAll({
@@ -57,7 +65,7 @@ const obtenerMora = async (req, res) => {
                 model: Contrato,
                 include: [{
                     model: Inmueble,
-                    where: { id_propietario: id_perfil }
+                    where: { id_propietario: sub }
                 }]
             }]
         });
@@ -81,13 +89,13 @@ const obtenerMora = async (req, res) => {
 // Obtener contratos activos
 const obtenerContratosActivos = async (req, res) => {
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
         
         const contratosActivos = await Contrato.findAll({
             where: { estado: 1 }, // 1 = Activo
             include: [{ 
                 model: Inmueble,
-                where: { id_propietario: id_perfil }
+                where: { id_propietario: sub }
             }]
         });
         
@@ -103,7 +111,7 @@ const obtenerContratosActivos = async (req, res) => {
 // Resumen general del Dashboard
 const obtenerResumen = async (req, res) => {
     try {
-        const { id_perfil } = req.usuario;
+        const { sub } = req.usuario;
 
         // Total ingresos
         const ingresos = await Pago.findAll({
@@ -117,7 +125,7 @@ const obtenerResumen = async (req, res) => {
                     model: Inmueble,
                     attributes: [],
                     required: true,
-                    where: { id_propietario: id_perfil }
+                    where: { id_propietario: sub }
                 }]
             }],
             raw: true
@@ -126,23 +134,23 @@ const obtenerResumen = async (req, res) => {
         // Contratos activos
         const contratosActivos = await Contrato.count({ 
             where: { estado: 1 },
-            include: [{ model: Inmueble, where: { id_propietario: id_perfil } }]
+            include: [{ model: Inmueble, where: { id_propietario: sub } }]
         });
         
         // Contratos finalizados
         const contratosFinalizados = await Contrato.count({ 
             where: { estado: 2 },
-            include: [{ model: Inmueble, where: { id_propietario: id_perfil } }]
+            include: [{ model: Inmueble, where: { id_propietario: sub } }]
         });
         
         // Inmuebles disponibles
         const inmueblesDisponibles = await Inmueble.count({ 
-            where: { estado_ocupacion: 'disponible', id_propietario: id_perfil } 
+            where: { estado_ocupacion: 'disponible', id_propietario: sub } 
         });
         
         // Inmuebles arrendados
         const inmueblesArrendados = await Inmueble.count({ 
-            where: { estado_ocupacion: 'arrendado', id_propietario: id_perfil } 
+            where: { estado_ocupacion: 'arrendado', id_propietario: sub } 
         });
         
         // Pagos pendientes
@@ -154,7 +162,7 @@ const obtenerResumen = async (req, res) => {
                 include: [{
                     model: Inmueble,
                     required: true,
-                    where: { id_propietario: id_perfil }
+                    where: { id_propietario: sub }
                 }]
             }]
         });
