@@ -56,10 +56,15 @@ claims nuevos (`sub`/`email`/`roles`/`jti`), `logout` con `TokensRevocados`, tok
 memoria en la SPA y descargas por blob. Después llegaron el build en contexto raíz y la
 matriz RBAC. Falta el 3b: extraer `ms-identidad`.
 
-El 3a se apartó de la línea base en dos puntos, ambos con ADR: el alta de inquilinos
-por `POST /api/usuarios/inquilinos` (`docs/adr/0004`, **pendiente de incorporar al
-Capítulo 2**) y el filtro de pertenencia de Inmuebles, que pasó a aplicarse siempre
-(`docs/adr/0005`, cambio de comportamiento observable).
+Desviaciones de la línea base acumuladas, todas con ADR y **todas pendientes de
+incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
+
+| ADR | Desviación |
+|---|---|
+| `0004` | Alta de inquilinos por `POST /api/usuarios/inquilinos`, que el documento no contempla. |
+| `0005` | El filtro de pertenencia de Inmuebles se aplica siempre. Cambio de comportamiento observable. |
+| `0006` | Registrar un abono es exclusivo del propietario; el documento no marca ese componente como tal. |
+| `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. Pendiente de implementar en el 3b. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -345,6 +350,9 @@ remoto lo ya extraído.
      obliga a resolver la caché de revocados del gateway, la composición por HTTP de
      los datos de usuario que hoy viajan embebidos, y la infraestructura de pruebas:
      7 de las 9 suites fabrican sus datos llamando a `/api/auth` y `/api/usuarios`.
+     Incluye además la contraseña temporal de `docs/adr/0007`: generación en el
+     servicio, indicador de cambio obligatorio, bloqueo de todo salvo el cambio, y
+     endpoint `POST /api/auth/cambiar-contrasena`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
    validación ABAC de pertenencia.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
@@ -442,12 +450,32 @@ en una sola carpeta de migraciones porque todavía no hay servicios que las sepa
 extraer cada uno se parte en `database/inmuebles/`, `database/contratos/` y
 `database/financiero/`, y cada carpeta se va con su servicio. Ver `docs/adr/0003`.
 
+**Reemisión de la contraseña temporal.** `docs/adr/0007` la devuelve una sola vez. Si el
+propietario la pierde antes de entregarla, no hay forma de generar otra. Hace falta un
+`POST /api/usuarios/:id/contrasena-temporal` restringido a quien creó al usuario y
+registrado en la auditoría. Decidir al implementar el 3b o justo después.
+
+**Recuperación de contraseña.** No existe para ningún rol, ni siquiera para
+propietarios. Depende de que el correo salga de Ethereal y llegue de verdad, así que se
+resuelve con `ms-notificaciones` (paso 7).
+
+**Autoservicio de pago del inquilino.** `docs/adr/0006` deja el registro de abonos en
+manos del propietario porque el sistema no puede verificar un pago. Si el producto
+quiere autoservicio, hace falta otro diseño: reporte del inquilino + confirmación del
+propietario, o pasarela que dispare el asiento. Paso 6.
+
 **Comprobantes.** El frontend tiene una pantalla que no aparece entre las cinco del
 documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
 
 ---
 
 ## Trampas conocidas
+
+**La cédula es la contraseña inicial de un inquilino.** El modal de alta no pide
+contraseña, así que el frontend manda `contrasena: documentoInquilino`. La cédula no es
+un secreto —el propietario acaba de teclearla y `GET /api/usuarios/buscar` la devuelve—,
+y además nadie le dice al inquilino que puede entrar ni con qué. Se reemplaza por una
+contraseña temporal generada en el servidor en el paso 3b: ver `docs/adr/0007`.
 
 **`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
 cualquier middleware de token, así que los PDF de contrato son públicos para quien

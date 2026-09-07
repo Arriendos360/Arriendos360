@@ -69,12 +69,15 @@ const MATRIZ = [
     // ── Financiero ─────────────────────────────────────────────────────────
     { metodo: 'GET', patron: '/api/pagos/**', acceso: AMBOS },
     { metodo: 'POST', patron: '/api/pagos/**', acceso: SOLO_PROPIETARIO },
-    // FILA AÑADIDA sobre lo pedido. El enunciado sólo nombraba GET y POST para
-    // pagos, pero `PUT /api/pagos/:id/pagar` es la ruta con la que se registra
-    // un abono y hoy la usan LOS DOS roles: la pantalla de Pagos ofrece el botón
-    // al inquilino. Dejarla sin declarar la habría denegado por defecto y roto
-    // el flujo de pago entero, para propietario e inquilino por igual.
-    { metodo: 'PUT', patron: '/api/pagos/:id/pagar', acceso: AMBOS },
+    // El enunciado de la matriz sólo nombraba GET y POST para pagos. Sin esta
+    // fila, `PUT /api/pagos/:id/pagar` caería en la denegación por defecto y el
+    // registro de abonos dejaría de funcionar para todo el mundo.
+    //
+    // Es del propietario, no de los dos roles: quien lleva la contabilidad del
+    // arriendo es él, y un inquilino registrando su propio pago sería declararlo
+    // sin contrapartida. La API lo permitía —la ruta sólo exigía token— aunque
+    // la SPA nunca ofreció el botón al inquilino. Ver docs/adr/0006.
+    { metodo: 'PUT', patron: '/api/pagos/:id/pagar', acceso: SOLO_PROPIETARIO },
 
     // ── Dashboard ──────────────────────────────────────────────────────────
     // Vive en el gateway y agrega datos del propietario (regla dura 5).
