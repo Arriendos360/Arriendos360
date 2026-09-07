@@ -195,30 +195,6 @@
       ]
     },
     {
-      "name": "Admin (Mantenimiento)",
-      "item": [
-        {
-          "name": "Forzar Ejecución Motor Financiero",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/admin/ejecutar-motor",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "admin",
-                "ejecutar-motor"
-              ]
-            },
-            "description": "RF-14/15/16: Dispara manualmente el proceso de generación de recibos, alertas y cálculo de mora sin esperar a la medianoche."
-          }
-        }
-      ]
-    },
-    {
       "name": "Inmuebles",
       "item": [
         {

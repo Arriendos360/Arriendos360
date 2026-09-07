@@ -117,6 +117,16 @@ propietario, y el guardián de ruta ahora exige el rol PROPIETARIO para llegar a
 único consumidor que notaría la diferencia es una petición hecha a mano con un token de
 inquilino, que es exactamente el caso que se quería cerrar.
 
+> **Actualización (2026-09-06).** Con la matriz RBAC del gateway, un inquilino ya no
+> llega al controlador de Inmuebles: `todo /api/inmuebles` está declarado como
+> PROPIETARIO, así que la respuesta pasó de `200` con lista vacía a `403`. Las dos
+> filas de la tabla que hablan del token de inquilino quedan superadas por ese motivo.
+>
+> El filtro que decide este ADR **no** queda obsoleto: es el segundo nivel de la regla
+> dura 8 y es el que separa a un propietario de otro, cosa que la matriz no puede hacer
+> porque el rol de los dos es el mismo. Los dos niveles conviven y ninguno reemplaza al
+> otro; hay una prueba por cada uno en `security.test.js`.
+
 ## Alternativas descartadas
 
 **Preservar el comportamiento y anotarlo como deuda.** Habría mantenido la línea base

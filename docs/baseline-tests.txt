@@ -3,10 +3,10 @@
 > cross-env NODE_ENV=test jest --detectOpenHandles --forceExit --runInBand
 
 
-Test Suites: 8 passed, 8 total
-Tests:       62 passed, 62 total
+Test Suites: 9 passed, 9 total
+Tests:       137 passed, 137 total
 Snapshots:   0 total
-Time:        4.517 s
+Time:        4.71 s, estimated 5 s
 Ran all test suites.
 
 > arriendos360-frontend@0.1.0 test

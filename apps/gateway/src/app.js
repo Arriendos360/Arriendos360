@@ -11,10 +11,14 @@ const inmuebleRoutes = require('./routes/inmueble.routes');
 const contratoRoutes = require('./routes/contrato.routes');
 const pagoRoutes = require('./routes/pago.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
-const adminRoutes = require('./routes/admin.routes');
 const usuarioRoutes = require('./routes/usuario.routes');
 const { iniciarMotorFinanciero } = require('./services/financialEngine');
-const { crearEnrutadorGateway, describirEnrutamiento } = require('./routing');
+const {
+    crearControlDeAcceso,
+    crearEnrutadorGateway,
+    describirEnrutamiento,
+    describirMatriz
+} = require('./routing');
 const { aplicarMigraciones } = require('./database/migraciones');
 
 // Crear aplicación Express
@@ -22,6 +26,12 @@ const app = express();
 
 // Middlewares
 app.use(cors());
+
+// Control de acceso (Capa 2 del módulo de seguridad): la matriz RBAC decide si
+// la petición sigue viva. Va ANTES de la costura para que una petición denegada
+// nunca llegue a la red interna, y antes de express.json() para no consumir el
+// cuerpo.
+app.use(crearControlDeAcceso());
 
 // Costura de enrutamiento: reenvía al microservicio los prefijos que ya se
 // extrajeron y deja pasar el resto al código local de abajo. Va antes de
@@ -53,7 +63,6 @@ app.use('/api/inmuebles', inmuebleRoutes);
 app.use('/api/contratos', contratoRoutes);
 app.use('/api/pagos', pagoRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/admin', adminRoutes);
 
 // Puerto
 const PORT = process.env.PORT || 3001;
@@ -82,6 +91,7 @@ if (process.env.NODE_ENV !== 'test') {
             iniciarMotorFinanciero();
 
             console.log(`🔀 ${describirEnrutamiento()}`);
+            console.log(`🛡️  ${describirMatriz()}`);
 
             app.listen(PORT, () => {
                 console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);

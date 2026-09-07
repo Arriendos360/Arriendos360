@@ -38,6 +38,16 @@ const { estaRevocado } = require('../services/tokenService');
  *   403  firma inválida, token expirado o claims con forma antigua
  */
 const verificarToken = async (req, res, next) => {
+    // El control de acceso ya verificó el token de esta petición y dejó los
+    // claims en `req.usuario`. Repetirlo aquí significaría una segunda consulta
+    // a `tokens_revocados` por petición sin ganar nada: es el mismo proceso, el
+    // mismo token y el mismo instante. Se conserva el middleware porque los
+    // routers lo declaran y porque sigue siendo la puerta correcta el día que
+    // uno de ellos se monte fuera del gateway.
+    if (req.usuario) {
+        return next();
+    }
+
     const resultado = await verificarTokenConRevocacion(
         { authorization: req.headers['authorization'] },
         process.env.JWT_SECRET,

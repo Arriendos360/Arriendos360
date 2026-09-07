@@ -114,6 +114,28 @@ Crea tres usuarios, todos con contrasena `Prueba123`:
 El tercero existe para ejercitar el caso que el modelo anterior no podia
 representar: una misma persona que arrienda un inmueble propio y vive en otro.
 
+## Motor financiero
+
+Genera las cuentas de cobro del mes y marca la mora. Corre solo a las 00:01 por
+`node-cron`; para una demostracion se puede disparar a mano:
+
+```bash
+npm run motor --workspace=apps/gateway
+# o, con el stack levantado:
+docker exec arriendos360_api npm run motor
+```
+
+Antes existia `POST /api/admin/ejecutar-motor`, que se elimino: el motor
+pertenece a ms-financiero y no al gateway, y aquel endpoint importaba
+`esPropietario` sin aplicarlo, asi que cualquier autenticado podia lanzarlo.
+
+## Control de acceso
+
+El gateway declara una matriz RBAC junto a la costura de enrutamiento
+(`apps/gateway/src/routing/matriz.js`) que cruza metodo, ruta y rol. **Deniega por
+defecto**: una ruta bajo `/api` que no este declarada responde 403. La matriz se
+imprime al arrancar, junto al mapa de prefijos locales y remotos.
+
 ## Nota sobre la sesion
 
 El token vive **en memoria** en la SPA, no en `localStorage`. Recargar la pagina

@@ -96,7 +96,6 @@ beforeAll(async () => {
     app.post('/api/auth/login', (req, res) => res.json({ desde: 'local', recibido: req.body }));
     app.get('/api/pagos', (req, res) => res.json({ desde: 'local' }));
     app.get('/api/dashboard/resumen', (req, res) => res.json({ desde: 'local' }));
-    app.get('/api/admin/ejecutar-motor', (req, res) => res.json({ desde: 'local' }));
     app.get('/', (req, res) => res.json({ desde: 'local-raiz' }));
 });
 
@@ -116,13 +115,6 @@ describe('Costura de enrutamiento: modo local', () => {
 
     test('/api/dashboard es siempre local: vive en el gateway por diseno', async () => {
         const respuesta = await request(app).get('/api/dashboard/resumen');
-
-        expect(respuesta.status).toBe(200);
-        expect(respuesta.body.desde).toBe('local');
-    });
-
-    test('/api/admin es siempre local: no tiene microservicio propio', async () => {
-        const respuesta = await request(app).get('/api/admin/ejecutar-motor');
 
         expect(respuesta.status).toBe(200);
         expect(respuesta.body.desde).toBe('local');
@@ -228,7 +220,7 @@ describe('Descripcion del enrutamiento para el arranque', () => {
         const entorno = { MS_INMUEBLES_URL: 'http://ms-inmuebles:3012' };
         const descripcion = describirEnrutamiento(entorno);
 
-        // Aparecen los siete prefijos de la tabla.
+        // Aparecen los seis prefijos de la tabla.
         for (const entrada of TABLA_RUTAS) {
             expect(descripcion).toContain(entrada.prefijo);
         }
@@ -241,10 +233,10 @@ describe('Descripcion del enrutamiento para el arranque', () => {
         // Los locales dicen por que lo son.
         expect(descripcion).toContain('MS_IDENTIDAD_URL sin definir');
         expect(descripcion).toContain('siempre local, no tiene servicio propio');
-        expect(descripcion).toContain('7 prefijos, 1 remoto');
+        expect(descripcion).toContain('6 prefijos, 1 remoto');
     });
 
-    test('sin variables definidas, los siete prefijos resuelven en local', () => {
+    test('sin variables definidas, los seis prefijos resuelven en local', () => {
         // Es el estado de hoy: la costura no cambia nada observable.
         const entorno = {};
 
@@ -253,6 +245,6 @@ describe('Descripcion del enrutamiento para el arranque', () => {
             expect(urlDestino(entrada, entorno)).toBeNull();
         }
 
-        expect(describirEnrutamiento(entorno)).toContain('7 prefijos, 0 remotos');
+        expect(describirEnrutamiento(entorno)).toContain('6 prefijos, 0 remotos');
     });
 });
