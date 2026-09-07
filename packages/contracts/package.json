@@ -2,5 +2,14 @@
   "name": "arriendos360-contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "DTOs compartidos en TypeScript (contratos JSON del Anexo de Microservicios). Pendiente de implementar: ver CLAUDE.md, seccion 'TypeScript incremental'."
+  "description": "DTOs compartidos en TypeScript: traduccion literal de los contratos de interfaz del Capitulo 2 del Documento Principal.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
 }

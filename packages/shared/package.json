@@ -2,5 +2,17 @@
   "name": "arriendos360-shared",
   "version": "0.0.0",
   "private": true,
-  "description": "Utilidades compartidas entre servicios: verificacion de JWT, errores, logger, cliente HTTP. Pendiente de implementar: ver CLAUDE.md."
+  "description": "Utilidades compartidas entre servicios: verificacion local del JWT, forma estandar de error y cliente HTTP minimo.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.3"
+  }
 }

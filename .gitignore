@@ -1,6 +1,10 @@
 # Dependencias
 node_modules/
 
+# Salida de compilacion de TypeScript (packages/*)
+dist/
+*.tsbuildinfo
+
 # Variables de entorno (CONTRASEÑAS)
 .env
 .env.local
