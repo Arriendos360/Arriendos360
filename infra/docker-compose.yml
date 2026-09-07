@@ -69,6 +69,43 @@ services:
       - ../services/ms-identidad:/repo/services/ms-identidad
       - /repo/services/ms-identidad/node_modules
 
+  # MS-Inmuebles — inmuebles del propietario y su estado de ocupacion.
+  #
+  # Todavia NO esta cableado: MS_INMUEBLES_URL del gateway sigue vacia, asi que
+  # la costura resuelve /api/inmuebles en local. Este contenedor levanta, migra
+  # su esquema `inmuebles` y sirve, pero nadie le pide nada. El PR siguiente
+  # voltea el gateway; hasta entonces conviven las dos tablas, la de aqui vacia.
+  ms-inmuebles:
+    build:
+      context: ..
+      dockerfile: services/ms-inmuebles/Dockerfile
+    container_name: arriendos360_inmuebles
+    command: npm run dev
+    ports:
+      - "3012:3012"
+    environment:
+      - PORT=3012
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=arriendos360_db
+      - DB_NAME_TEST=arriendos360_test
+      # Identico al del gateway: los tres verifican la misma firma.
+      - JWT_SECRET=${JWT_SECRET}
+      - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
+      - SERVICIO_NOMBRE=ms-inmuebles
+      # De donde saca la lista de revocados. Sin esto el servicio arranca pero
+      # NO comprueba revocacion, y lo avisa en el log.
+      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
+    depends_on:
+      db:
+        condition: service_healthy
+      ms-identidad:
+        condition: service_started
+    volumes:
+      - ../services/ms-inmuebles:/repo/services/ms-inmuebles
+      - /repo/services/ms-inmuebles/node_modules
+
   # Servidor Backend
   backend:
     # Contexto en la raiz del monorepo: el gateway depende de packages/shared

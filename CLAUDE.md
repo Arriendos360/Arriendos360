@@ -42,15 +42,24 @@ identidad del Capítulo 2 ya implementado:
   no llegue a la red interna.
 - `apps/web/` — el antiguo `frontend/`. React 18 con CRA. **Sin Tailwind**, aunque el
   PMP lo declara.
-- `packages/contracts/` — DTOs en TypeScript de los endpoints documentados.
-- `packages/shared/` — verificación local del JWT y de revocados, error estándar,
-  cliente HTTP. **El gateway ya lo consume**: su middleware de autenticación es un
-  adaptador de Express sobre este paquete, no una segunda implementación.
+- `packages/contracts/` — DTOs en TypeScript de los endpoints documentados. Casi
+  todo son tipos, salvo los **catálogos cerrados** de `inmuebles.ts` (`tipo`,
+  `estado`), que emiten JavaScript porque los comparten el servicio, el frontend
+  y el `CHECK` de la migración.
+- `packages/shared/` — verificación local del JWT y de revocados, autenticación
+  entre servicios, caché de invalidación, error estándar, cliente HTTP. **El
+  gateway ya lo consume**: su middleware de autenticación es un adaptador de
+  Express sobre este paquete, no una segunda implementación.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
-  (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
+  (`identidad/`, `inmuebles/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver
+  `docs/adr/0003`.
 - `services/ms-identidad/` — primer microservicio real y **ya en producción de la
   demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
   Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
+- `services/ms-inmuebles/` — segundo servicio. TypeScript `strict`, puerto 3012,
+  esquema propio (`inmuebles`). Existe, levanta, migra y sirve, pero **el gateway
+  todavía no lo usa**: `MS_INMUEBLES_URL` sigue vacía y `/api/inmuebles` resuelve
+  local. Ver "Migración: en qué orden", paso 4.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
 
 El gateway ya no tiene tablas ni modelos de identidad. Lo que necesita de un usuario
@@ -77,6 +86,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 | `0009` | Autenticación entre servicios para `/interno`. Resuelve una decisión abierta; el documento no la contempla pero tampoco la contradice. |
 | `0010` | Recuperación de contraseña: endpoints, tabla de tokens, columna `contrasena_cambiada_en` y envío de correo desde `ms-identidad`. Esto último **debe desaparecer** en el paso 7, no documentarse. |
+| `0011` | El estado del inmueble deja de moverse dentro de la transacción del contrato. No se aparta del modelo; registra una **garantía que se pierde**. Provisional: lo reemplaza el evento `ContratoFormalizado` en el paso 5. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -362,8 +372,18 @@ remoto lo ya extraído.
      `database/identidad/`, el gateway pasó a componer por HTTP y a cachear los
      revocados, y las pruebas se reestructuraron sobre dobles.
    - ~~**3c.** Contraseña temporal del inquilino.~~ **Hecho.** Ver `docs/adr/0007`.
-4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
-   validación ABAC de pertenencia.
+4. **`ms-inmuebles`.** Se parte en dos PRs, cada uno verde:
+   - ~~**4a.** Crear el servicio.~~ **Hecho.** `services/ms-inmuebles/` con su
+     esquema, sus migraciones en `database/inmuebles/`, el catálogo cerrado de
+     `tipo` en `packages/contracts`, el `/interno` de estado y sus pruebas. Es
+     **puramente aditivo**: el gateway no lo consume todavía, así que durante
+     este PR conviven dos tablas de inmuebles y la del servicio está vacía.
+   - **4b.** Voltear el gateway. Activar `MS_INMUEBLES_URL`, borrar modelo,
+     controlador y rutas, y **reescribir los 29 sitios** que hoy alcanzan
+     `inmuebles` por asociación de Sequelize. Eso adelanta la composición que
+     este archivo programaba para el paso 6 (ver "Decisiones abiertas"): no hay
+     forma de extraer el servicio y dejar los JOIN en pie. También el `estado` y
+     el `tipo` en el frontend, y la fila de `dominio/` que deja de usarse.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
 6. **`ms-contratos`** y **`ms-financiero`.** El trabajo duro: separar `Pago`/`Abono` en
    `Cuentas_cobro`/`Transacciones`, mover el motor de mora a Financiero, obtener datos
@@ -392,6 +412,11 @@ remoto lo ya extraído.
 - **Errores:** `{ mensaje: "..." }` en el body. 401 sin token o token revocado, 403 rol
   insuficiente o recurso ajeno, 400 validación, 404 no encontrado.
 - **Roles en mayúsculas** en claims y respuestas: `PROPIETARIO`, `INQUILINO`.
+- **Catálogos cerrados en `packages/contracts`, en minúsculas.** `tipo` y `estado`
+  de Inmuebles son listas fijas que comparten el servicio, el frontend y el
+  `CHECK` de la migración. Van en minúsculas, a diferencia de los roles: un rol
+  viaja en los claims y el Capítulo 2 lo fija en mayúsculas; esto es un atributo
+  de negocio. Si agregas un valor, tócalo en los dos sitios — nada los sincroniza.
 - **Dinero:** pesos colombianos. `NUMERIC` en PostgreSQL, nunca `float`.
 - **Fechas:** guardar en UTC, presentar en `America/Bogota`. El cálculo de mora depende
   de esto y hoy usa `new Date()` local, que es una fuente latente de errores.
@@ -467,6 +492,7 @@ suite de integración gana un camino sólo si es crítico para la demostración.
 docker compose -f infra/docker-compose.yml up --build     # levantar todo
 docker compose -f infra/docker-compose.yml down -v        # reinicio limpio
 npm test --workspace=services/ms-identidad                # pruebas de un servicio
+npm test --workspace=services/ms-inmuebles                # idem
 npm test --workspaces --if-present                        # todas, contra dobles
 npm run test:integracion                                  # caminos criticos, stack arriba
 npm run seed --workspace=services/ms-identidad            # usuarios de prueba
@@ -519,16 +545,27 @@ Contratos como filtro; para Financiero, encadenar un salto más. Decidir entonce
 gateway pagina o si Contratos acepta una lista de IDs, y qué pasa cuando un propietario
 tiene tantos inmuebles que la lista no cabe en una query string.
 
-**`database/dominio/` es provisional.** Hoy agrupa inmuebles, contratos, pagos y abonos
-en una sola carpeta de migraciones porque todavía no hay servicios que las separen. Al
-extraer cada uno se parte en `database/inmuebles/`, `database/contratos/` y
-`database/financiero/`, y cada carpeta se va con su servicio. Ver `docs/adr/0003`.
+**`database/dominio/` es provisional.** Agrupaba inmuebles, contratos, pagos y abonos
+en una sola carpeta porque todavía no había servicios que las separaran.
+`database/inmuebles/` ya salió de ahí; faltan `database/contratos/` y
+`database/financiero/`, que se van en el paso 6. Mientras tanto, la tabla
+`inmuebles` está **declarada en los dos sitios**: en `dominio/` para el gateway,
+en `inmuebles/` para el servicio. Esa duplicación termina en el PR 4b, cuando el
+gateway deje de leerla. Ver `docs/adr/0003`.
 
 **Clave por servicio para las llamadas internas.** Hoy todos comparten
 `SERVICIO_JWT_SECRET`, así que comprometer un servicio permite suplantar a los demás. El
 arreglo son claves asimétricas por servicio; el verificador ya resuelve la clave por
 emisor, así que es cambiar configuración y no rediseñar. Reconsiderar en el paso 8, donde
 la identidad administrada de Azure puede hacerlo innecesario. Ver `docs/adr/0009`.
+
+**La caché de invalidación está por duplicado.** `packages/shared/src/revocacion.ts`
+generaliza lo que `apps/gateway/src/routing/cacheRevocados.js` hacía en JavaScript solo
+para el gateway; se hizo genérica al necesitarla `ms-inmuebles`, porque copiarla habría
+dejado dos implementaciones de una regla de seguridad. Hoy conviven: el servicio usa la
+de `shared` y el gateway sigue con la suya. **Se resuelve en el PR 4b**, que hace al
+gateway consumir la compartida y borra su copia. Hasta entonces, cualquier cambio en el
+comportamiento de la caché hay que hacerlo en los dos sitios.
 
 **Limitación de tasa.** No existe en ninguna ruta. `POST /api/auth/recuperar` y
 `POST /api/auth/login` son las que más la piden —nada impide mil intentos— pero el
