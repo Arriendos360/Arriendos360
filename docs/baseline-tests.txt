@@ -6,7 +6,7 @@
 Test Suites: 8 passed, 8 total
 Tests:       62 passed, 62 total
 Snapshots:   0 total
-Time:        4.265 s, estimated 5 s
+Time:        4.517 s
 Ran all test suites.
 
 > arriendos360-frontend@0.1.0 test

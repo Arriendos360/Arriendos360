@@ -1,0 +1,38 @@
+# Contexto de build: la raiz del monorepo.
+#
+# Este archivo importa mas de lo que parece. Al mover el contexto de
+# `apps/gateway` a la raiz, TODO el repositorio viaja al daemon de Docker en cada
+# build. Sin estas exclusiones se enviarian cientos de MB de node_modules y, peor,
+# los .env con las credenciales acabarian dentro de la imagen.
+
+# Dependencias: las instala `npm ci` dentro de la imagen, con los binarios de
+# Linux que corresponden. Copiar los del host romperia cualquier modulo nativo.
+node_modules/
+**/node_modules/
+
+# Artefactos de compilacion: la imagen los reconstruye.
+**/dist/
+*.tsbuildinfo
+apps/web/build/
+
+# SECRETOS. Nunca dentro de una imagen.
+.env
+**/.env
+**/.env.local
+**/.env.production
+
+# Historia y herramientas del repositorio.
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/
+
+# Archivos subidos en tiempo de ejecucion: entran por volumen, no por imagen.
+apps/gateway/uploads/
+
+# Ruido.
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

@@ -95,7 +95,19 @@ export type ResultadoVerificacion =
   | { valido: true; claims: ClaimsUsuario }
   | { valido: false; estado: number; error: ErrorRespuesta };
 
-/** ¿Tiene esto la forma de los claims que emitimos hoy? */
+/** Cadena presente y no vacia. */
+function esCadenaConValor(valor: unknown): valor is string {
+  return typeof valor === 'string' && valor.length > 0;
+}
+
+/**
+ * ¿Tiene esto la forma de los claims que emitimos hoy?
+ *
+ * `sub` y `jti` deben ser cadenas NO VACIAS. Lo de "no vacias" no es celo: un
+ * `jti` de cadena vacia pasaria la comprobacion de tipo y luego la consulta de
+ * revocacion lo trataria como ausente, de modo que el token quedaria fuera de la
+ * lista de revocados para siempre. Rechazarlo aqui cierra ese camino.
+ */
 function tieneFormaDeClaims(valor: unknown): valor is ClaimsUsuario {
   if (typeof valor !== 'object' || valor === null) {
     return false;
@@ -104,8 +116,8 @@ function tieneFormaDeClaims(valor: unknown): valor is ClaimsUsuario {
   const posible = valor as Record<string, unknown>;
 
   return (
-    typeof posible['sub'] === 'string' &&
-    typeof posible['jti'] === 'string' &&
+    esCadenaConValor(posible['sub']) &&
+    esCadenaConValor(posible['jti']) &&
     Array.isArray(posible['roles'])
   );
 }

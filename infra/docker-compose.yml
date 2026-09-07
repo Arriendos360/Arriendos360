@@ -17,10 +17,24 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    # Sin esto, `depends_on` solo espera a que el CONTENEDOR arranque, no a que
+    # Postgres acepte conexiones. Con un volumen recien creado la inicializacion
+    # tarda ~10 s, el gateway intenta migrar antes de tiempo y nodemon se cae con
+    # ECONNREFUSED. Dejaba `up` desde cero dependiendo de un `restart` manual.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d arriendos360_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 
   # Servidor Backend
   backend:
-    build: ../apps/gateway
+    # Contexto en la raiz del monorepo: el gateway depende de packages/shared
+    # como workspace y database/ tiene que entrar en la imagen.
+    build:
+      context: ..
+      dockerfile: apps/gateway/Dockerfile
     container_name: arriendos360_api
     command: npm run dev
     ports:
@@ -32,10 +46,6 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=arriendos360_db
       - JWT_SECRET=${JWT_SECRET}
-      # Las migraciones viven en database/, fuera del contexto de build del
-      # gateway, asi que entran por volumen y no por COPY. Cuando el paso 8
-      # mueva el build al contexto raiz esto podra ser un COPY normal.
-      - RUTA_MIGRACIONES=/database
       # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
       # aqui hace que el gateway reenvie ese prefijo al microservicio.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-}
@@ -45,15 +55,23 @@ services:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
-      - ../apps/gateway:/app
-      - ../database:/database:ro
-      - /app/node_modules
+      # Recarga en caliente del codigo del gateway. `packages/` y `database/`
+      # NO se montan: viven dentro de la imagen, asi que tocarlos exige
+      # reconstruir. Es el precio de que la imagen sea autosuficiente.
+      - ../apps/gateway:/repo/apps/gateway
+      # Evita que el node_modules del host (binarios de Windows) tape al de la
+      # imagen. Hoy npm iza todo a /repo/node_modules y este queda vacio, pero
+      # basta un conflicto de versiones para que deje de estarlo.
+      - /repo/apps/gateway/node_modules
 
   # Aplicación Frontend
   frontend:
-    build: ../apps/web
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
     container_name: arriendos360_ui
     command: npm start
     ports:
@@ -65,8 +83,8 @@ services:
     depends_on:
       - backend
     volumes:
-      - ../apps/web:/app
-      - /app/node_modules
+      - ../apps/web:/repo/apps/web
+      - /repo/apps/web/node_modules
 
 volumes:
   db_data:
