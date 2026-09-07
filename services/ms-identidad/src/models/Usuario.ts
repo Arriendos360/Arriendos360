@@ -20,6 +20,8 @@ export class Usuario extends Model {
   declare contrasena: string;
   declare telefono: string | null;
   declare documento: string;
+  /** Marca a quien no eligio su propia contrasena. Ver docs/adr/0007. */
+  declare debe_cambiar_contrasena: boolean;
   declare creado_por: string;
   declare actualizado_por: string;
 }
@@ -33,6 +35,11 @@ Usuario.init(
     contrasena: { type: DataTypes.STRING(255), allowNull: false },
     telefono: { type: DataTypes.STRING(15) },
     documento: { type: DataTypes.STRING(20), allowNull: false, unique: true },
+    debe_cambiar_contrasena: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     ...columnasAuditoria,
   },
   { sequelize, tableName: 'usuarios', ...opcionesAuditoria },

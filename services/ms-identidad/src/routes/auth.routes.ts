@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { login, logout, registrar } from '../controllers/auth.controller';
+import { cambiarContrasena, login, logout, registrar } from '../controllers/auth.controller';
 import { verificarToken } from '../middlewares/auth.middleware';
 
 const router: Router = Router();
@@ -13,5 +13,9 @@ router.post('/login', login);
 
 // POST /api/auth/logout — protegida, cuerpo vacio.
 router.post('/logout', verificarToken, logout);
+
+// POST /api/auth/cambiar-contrasena — protegida. Unica ruta que un usuario con
+// cambio obligatorio puede usar, aparte de login y logout.
+router.post('/cambiar-contrasena', verificarToken, cambiarContrasena);
 
 export default router;

@@ -9,7 +9,7 @@ import { ConsultaDocumento } from '../models/ConsultaDocumento';
 import { ROL_INQUILINO } from '../models/constantes';
 import { Rol } from '../models/Rol';
 import { Usuario } from '../models/Usuario';
-import { campoFaltante, crearUsuarioConRol } from './auth.controller';
+import { CAMPOS_SIN_CONTRASENA, campoFaltante, crearUsuarioConRol } from './auth.controller';
 
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -79,18 +79,26 @@ export const buscarPorDocumento = async (req: Request, res: Response): Promise<R
  *
  * Queda registrado en la auditoria quien lo creo: `creado_por` lleva el `sub`
  * del propietario, no el UUID del propio inquilino.
+ *
+ * La contrasena la GENERA el servicio y la devuelve una sola vez, para que el
+ * propietario se la entregue al inquilino por fuera del sistema. Antes el
+ * frontend rellenaba el hueco con la cedula, que no es un secreto. Ver
+ * docs/adr/0007.
  */
 export const crearInquilino = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const faltante = campoFaltante(req.body);
+    // No se pide contrasena: la genera el servicio. Si el cliente manda una, se
+    // ignora — el propietario no elige la credencial de otra persona.
+    const faltante = campoFaltante(req.body, CAMPOS_SIN_CONTRASENA);
     if (faltante) {
       return res.status(400).json(crearError(`El campo ${faltante} es obligatorio`));
     }
 
-    const { error, usuario } = await crearUsuarioConRol({
+    const { error, usuario, contrasenaTemporal } = await crearUsuarioConRol({
       cuerpo: req.body,
       rol: ROL_INQUILINO,
       idAutor: req.usuario!.sub,
+      generarContrasena: true,
     });
 
     if (error) {
@@ -99,6 +107,10 @@ export const crearInquilino = async (req: Request, res: Response): Promise<Respo
 
     return res.status(201).json({
       mensaje: 'Inquilino registrado exitosamente',
+      // UNICA vez que la contrasena viaja en claro. No se guarda, no se registra
+      // y no hay endpoint que la devuelva despues: si el propietario cierra la
+      // ventana sin anotarla, se perdio. Ver docs/adr/0007.
+      contrasena_temporal: contrasenaTemporal,
       usuario: {
         id: usuario!.id_usuario,
         email: usuario!.email,
@@ -106,6 +118,7 @@ export const crearInquilino = async (req: Request, res: Response): Promise<Respo
         nombres: usuario!.nombres,
         apellidos: usuario!.apellidos,
         documento: usuario!.documento,
+        debe_cambiar_contrasena: true,
       },
     });
   } catch (error) {

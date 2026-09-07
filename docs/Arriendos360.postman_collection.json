@@ -100,6 +100,51 @@
             },
             "description": "Cuerpo vacio. Anota el `jti` del token en TokensRevocados hasta su expiracion natural. A partir de aqui el mismo token responde 401."
           }
+        },
+        {
+          "name": "Cambiar contrasena",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.token) { pm.collectionVariables.set(\"token\", d.token); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"contrasena_actual\": \"{{contrasena_temporal}}\",\n    \"contrasena_nueva\": \"MiClaveNueva1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/cambiar-contrasena",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "cambiar-contrasena"
+              ]
+            },
+            "description": "Unica ruta accesible con la contrasena temporal sin cambiar. Revoca el token en curso y emite otro. Ver docs/adr/0007."
+          }
         }
       ]
     },
@@ -155,7 +200,8 @@
               "script": {
                 "exec": [
                   "var d = pm.response.json();",
-                  "if (d.usuario) { pm.collectionVariables.set(\"id_inquilino\", d.usuario.id); }"
+                  "if (d.usuario) { pm.collectionVariables.set(\"id_inquilino\", d.usuario.id); }",
+                  "if (d.contrasena_temporal) { pm.collectionVariables.set(\"contrasena_temporal\", d.contrasena_temporal); }"
                 ],
                 "type": "text/javascript"
               }
@@ -171,7 +217,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"nombres\": \"Maria\",\n    \"apellidos\": \"Gomez\",\n    \"email\": \"inquilino@test.com\",\n    \"contrasena\": \"password123\",\n    \"telefono\": \"3009876543\",\n    \"documento\": \"987654321\"\n}",
+              "raw": "{\n    \"nombres\": \"Maria\",\n    \"apellidos\": \"Gomez\",\n    \"email\": \"inquilino@test.com\",\n    \"telefono\": \"3009876543\",\n    \"documento\": \"987654321\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -189,7 +235,7 @@
                 "inquilinos"
               ]
             },
-            "description": "Exige propietario autenticado. Crea el usuario con rol INQUILINO."
+            "description": "No se manda contrasena: la genera ms-identidad y la devuelve UNA vez en contrasena_temporal."
           }
         }
       ]
@@ -782,6 +828,11 @@
     },
     {
       "key": "id_abono",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contrasena_temporal",
       "value": "",
       "type": "string"
     }

@@ -15,6 +15,7 @@ const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 const {
+    CODIGO_CAMBIO_PENDIENTE,
     MATRIZ,
     MENSAJE_NO_DECLARADA,
     crearControlDeAcceso,
@@ -26,13 +27,14 @@ const SECRETO = 'secreto-de-pruebas-rbac';
 let app;
 
 /** Token con la forma que emite el proyecto: sub, email, roles, jti y exp. */
-const tokenCon = (roles) =>
+const tokenCon = (roles, extra = {}) =>
     jwt.sign(
         {
             sub: '11111111-1111-4111-8111-111111111111',
             email: 'prueba@arriendos360.test',
             roles,
-            jti: '22222222-2222-4222-8222-222222222222'
+            jti: '22222222-2222-4222-8222-222222222222',
+            ...extra
         },
         SECRETO,
         { expiresIn: '1h' }
@@ -42,6 +44,8 @@ const PROPIETARIO = () => tokenCon(['PROPIETARIO']);
 const INQUILINO = () => tokenCon(['INQUILINO']);
 const AMBOS_ROLES = () => tokenCon(['PROPIETARIO', 'INQUILINO']);
 const SIN_ROLES = () => tokenCon([]);
+/** Usuario que entró con una temporal y todavía no la cambió. */
+const CAMBIO_PENDIENTE = () => tokenCon(['PROPIETARIO'], { debe_cambiar: true });
 
 /** Lanza la petición del método indicado contra la ruta, con token opcional. */
 const pedir = (metodo, ruta, token) => {
@@ -199,12 +203,13 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
             })
         );
 
-        // Las tres de /api/auth se comprueban en sus propios describe, porque no
+        // Las de /api/auth se comprueban en sus propios describe, porque no
         // encajan en el eje rol correcto / rol equivocado.
         const enOtroSitio = new Set([
             'POST /api/auth/registro',
             'POST /api/auth/login',
-            'POST /api/auth/logout'
+            'POST /api/auth/logout',
+            'POST /api/auth/cambiar-contrasena'
         ]);
 
         const sinCubrir = MATRIZ.map((p) => `${p.metodo} ${p.patron}`).filter(
@@ -267,6 +272,63 @@ describe('El inquilino consulta pagos pero no los asienta', () => {
 
     test('no puede registrar un abono', async () => {
         const respuesta = await pedir('PUT', '/api/pagos/abc/pagar', INQUILINO());
+        expect(respuesta.status).toBe(403);
+    });
+});
+
+describe('Cambio de contraseña pendiente', () => {
+    // Condición transversal del sujeto: no depende del rol ni del recurso, así
+    // que se aplica fuera de la matriz. Ver docs/adr/0007.
+
+    test('con el indicador activo, todo lo demás responde 403', async () => {
+        for (const [metodo, ruta] of [
+            ['GET', '/api/inmuebles'],
+            ['POST', '/api/inmuebles'],
+            ['GET', '/api/contratos'],
+            ['GET', '/api/pagos'],
+            ['GET', '/api/dashboard/resumen'],
+            ['GET', '/api/usuarios/buscar']
+        ]) {
+            const respuesta = await pedir(metodo, ruta, CAMBIO_PENDIENTE());
+            expect(respuesta.status).toBe(403);
+            expect(respuesta.body.error_code).toBe(CODIGO_CAMBIO_PENDIENTE);
+        }
+    });
+
+    test('el código es legible por máquina, para que la SPA redirija', async () => {
+        // Un 403 genérico dejaría al usuario mirando un error sin salida.
+        const respuesta = await pedir('GET', '/api/inmuebles', CAMBIO_PENDIENTE());
+
+        expect(respuesta.body.error_code).toBe('CAMBIO_CONTRASENA_REQUERIDO');
+        expect(typeof respuesta.body.mensaje).toBe('string');
+    });
+
+    test('sí puede cambiar la contraseña', async () => {
+        const respuesta = await pedir('POST', '/api/auth/cambiar-contrasena', CAMBIO_PENDIENTE());
+        expect(respuesta.status).toBe(200);
+    });
+
+    test('sí puede cerrar sesión: poder salir no depende de nada más', async () => {
+        const respuesta = await pedir('POST', '/api/auth/logout', CAMBIO_PENDIENTE());
+        expect(respuesta.status).toBe(200);
+    });
+
+    test('el login sigue siendo público, indicador o no', async () => {
+        const respuesta = await pedir('POST', '/api/auth/login');
+        expect(respuesta.status).toBe(200);
+    });
+
+    test('sin el indicador, el mismo rol pasa con normalidad', async () => {
+        // La restricción es del sujeto, no de la ruta: quitando el claim, todo
+        // vuelve a funcionar sin tocar la matriz.
+        expect((await pedir('GET', '/api/inmuebles', PROPIETARIO())).status).toBe(200);
+    });
+
+    test('el rol se sigue comprobando: el indicador no lo sustituye', async () => {
+        // Un inquilino con cambio pendiente recibe 403 igual, pero por el
+        // motivo que se evalúe primero; lo que no puede es colarse.
+        const token = tokenCon(['INQUILINO'], { debe_cambiar: true });
+        const respuesta = await pedir('GET', '/api/inmuebles', token);
         expect(respuesta.status).toBe(403);
     });
 });

@@ -8,6 +8,14 @@
  *   roles  arreglo de strings en mayusculas
  *   jti    UUID unico del token, necesario para poder revocarlo
  *   exp    expiracion, 3600 segundos
+ *
+ * Y uno mas, que el Capitulo 2 no contempla todavia:
+ *
+ *   debe_cambiar  true mientras el usuario no haya elegido su contrasena
+ *
+ * Viaja en el token para que el gateway pueda bloquear la API sin preguntarle a
+ * este servicio en cada peticion, igual que hace con los roles. Ver
+ * docs/adr/0007.
  */
 
 import crypto from 'crypto';
@@ -43,7 +51,13 @@ export const emitirToken = (usuario: Usuario, roles: string[]): TokenEmitido => 
   const jti = crypto.randomUUID();
 
   const token = jwt.sign(
-    { sub: usuario.id_usuario, email: usuario.email, roles, jti },
+    {
+      sub: usuario.id_usuario,
+      email: usuario.email,
+      roles,
+      jti,
+      debe_cambiar: usuario.debe_cambiar_contrasena === true,
+    },
     process.env['JWT_SECRET'] as jwt.Secret,
     { expiresIn: VIGENCIA_TOKEN_SEGUNDOS },
   );

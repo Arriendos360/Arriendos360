@@ -29,7 +29,9 @@ const Login = () => {
             // El token queda en memoria, no en localStorage: recargar la página
             // cierra la sesión, y es a propósito.
             guardarSesion({ token: response.data.token, usuario: response.data.usuario });
-            navigate('/');
+            // Quien entro con una temporal no puede ir a ningun otro sitio: la
+            // API se lo denegaria igual. Ver docs/adr/0007.
+            navigate(response.data.usuario?.debe_cambiar_contrasena ? '/cambiar-contrasena' : '/');
         } catch (err) {
             setError(err.response?.data?.mensaje || 'Correo o contraseña incorrectos');
         }

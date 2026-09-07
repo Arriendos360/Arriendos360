@@ -25,7 +25,12 @@ const {
     lineasMatriz,
     resolverPolitica
 } = require('./matriz');
-const { MENSAJE_NO_DECLARADA, crearControlDeAcceso } = require('./rbac');
+const {
+    CODIGO_CAMBIO_PENDIENTE,
+    MENSAJE_CAMBIO_PENDIENTE,
+    MENSAJE_NO_DECLARADA,
+    crearControlDeAcceso
+} = require('./rbac');
 const {
     MODO_LOCAL,
     MODO_REMOTO,
@@ -67,6 +72,8 @@ const crearEnrutadorGateway = (opciones = {}) => {
 
 module.exports = {
     AUTENTICADO,
+    CODIGO_CAMBIO_PENDIENTE,
+    MENSAJE_CAMBIO_PENDIENTE,
     MATRIZ,
     MENSAJE_NO_DECLARADA,
     MODO_LOCAL,

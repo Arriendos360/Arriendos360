@@ -73,7 +73,8 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0004` | Alta de inquilinos por `POST /api/usuarios/inquilinos`, que el documento no contempla. |
 | `0005` | El filtro de pertenencia de Inmuebles se aplica siempre. Cambio de comportamiento observable. |
 | `0006` | Registrar un abono es exclusivo del propietario; el documento no marca ese componente como tal. |
-| `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. Pendiente de implementar en el 3b. |
+| `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. |
+| `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -358,10 +359,7 @@ remoto lo ya extraído.
    - ~~**3b.** Extraer físicamente `ms-identidad`.~~ **Hecho.** Se llevó
      `database/identidad/`, el gateway pasó a componer por HTTP y a cachear los
      revocados, y las pruebas se reestructuraron sobre dobles.
-   - **3c.** Contraseña temporal del inquilino: `docs/adr/0007` está escrito y
-     pendiente de implementar. Generación en el servicio, indicador de cambio
-     obligatorio, bloqueo de todo salvo el cambio, y
-     `POST /api/auth/cambiar-contrasena`.
+   - ~~**3c.** Contraseña temporal del inquilino.~~ **Hecho.** Ver `docs/adr/0007`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
    validación ABAC de pertenencia.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
@@ -506,12 +504,6 @@ documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
 ---
 
 ## Trampas conocidas
-
-**La cédula es la contraseña inicial de un inquilino.** El modal de alta no pide
-contraseña, así que el frontend manda `contrasena: documentoInquilino`. La cédula no es
-un secreto —el propietario acaba de teclearla y `GET /api/usuarios/buscar` la devuelve—,
-y además nadie le dice al inquilino que puede entrar ni con qué. Se reemplaza por una
-contraseña temporal generada en el servidor en el paso 3b: ver `docs/adr/0007`.
 
 **`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
 cualquier middleware de token, así que los PDF de contrato son públicos para quien

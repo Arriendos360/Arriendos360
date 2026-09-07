@@ -33,7 +33,13 @@ const {
     verificarTokenConRevocacion
 } = require('arriendos360-shared');
 
-const { AUTENTICADO, PUBLICO, esRutaDeApi, resolverPolitica } = require('./matriz');
+const {
+    AUTENTICADO,
+    PUBLICO,
+    esRutaDeApi,
+    permitidaConCambioPendiente,
+    resolverPolitica
+} = require('./matriz');
 
 /**
  * Respuesta para una ruta que no figura en la matriz.
@@ -42,6 +48,17 @@ const { AUTENTICADO, PUBLICO, esRutaDeApi, resolverPolitica } = require('./matri
  * para no convertir el 403 en un mapa de la API para quien vaya probando rutas.
  */
 const MENSAJE_NO_DECLARADA = 'Acceso denegado.';
+
+/**
+ * Denegación por tener el cambio de contraseña pendiente.
+ *
+ * Lleva `error_code` además del mensaje para que la SPA pueda llevar a la
+ * pantalla de cambio en vez de mostrar un error genérico. Hay precedente del
+ * patrón en `TENANT_NOT_FOUND`.
+ */
+const CODIGO_CAMBIO_PENDIENTE = 'CAMBIO_CONTRASENA_REQUERIDO';
+const MENSAJE_CAMBIO_PENDIENTE =
+    'Debes cambiar tu contraseña temporal antes de usar la aplicación.';
 
 /** Denegación por rol cuando la política admite varios roles. */
 const MENSAJE_ROL_NO_AUTORIZADO = 'Acceso restringido. Tu rol no cubre esta operación.';
@@ -104,6 +121,19 @@ const crearControlDeAcceso = (opciones = {}) => {
         // que volver a verificar el token en la misma petición.
         req.usuario = resultado.claims;
 
+        // Condición transversal: quien entró con una contraseña que no eligió
+        // no puede hacer nada más que cambiarla. Va aquí y no en la matriz
+        // porque no depende del rol ni del recurso. Ver docs/adr/0007.
+        if (
+            resultado.claims.debe_cambiar === true &&
+            !permitidaConCambioPendiente(req.method, req.path)
+        ) {
+            return res.status(403).json({
+                ...crearError(MENSAJE_CAMBIO_PENDIENTE),
+                error_code: CODIGO_CAMBIO_PENDIENTE
+            });
+        }
+
         if (politica.acceso === AUTENTICADO) {
             return next();
         }
@@ -117,6 +147,8 @@ const crearControlDeAcceso = (opciones = {}) => {
 };
 
 module.exports = {
+    CODIGO_CAMBIO_PENDIENTE,
+    MENSAJE_CAMBIO_PENDIENTE,
     MENSAJE_NO_DECLARADA,
     MENSAJE_ROL_NO_AUTORIZADO,
     crearControlDeAcceso,

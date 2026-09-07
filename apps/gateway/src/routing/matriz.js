@@ -45,6 +45,7 @@ const MATRIZ = [
     { metodo: 'POST', patron: '/api/auth/registro', acceso: PUBLICO },
     { metodo: 'POST', patron: '/api/auth/login', acceso: PUBLICO },
     { metodo: 'POST', patron: '/api/auth/logout', acceso: AUTENTICADO },
+    { metodo: 'POST', patron: '/api/auth/cambiar-contrasena', acceso: AUTENTICADO },
 
     // Buscar personas por documento y dar de alta inquilinos son operaciones de
     // un propietario en curso de firmar un contrato.
@@ -83,6 +84,27 @@ const MATRIZ = [
     // Vive en el gateway y agrega datos del propietario (regla dura 5).
     { metodo: 'GET', patron: '/api/dashboard/**', acceso: SOLO_PROPIETARIO }
 ];
+
+/**
+ * Lo único que puede hacer un usuario con cambio de contraseña obligatorio.
+ *
+ * No es una fila de la matriz sino una condición transversal del sujeto: la
+ * matriz cruza método, ruta y rol, y esto no depende de ninguno de los tres.
+ * Meterlo ahí obligaría a duplicar las dieciocho filas. Se aplica en `rbac.js`,
+ * después de autenticar. Ver docs/adr/0007.
+ *
+ * Las tres son imprescindibles: `login` es como entra, `cambiar-contrasena` es
+ * lo que se le pide, y poder salir nunca debe depender de otra cosa.
+ */
+const RUTAS_CON_CAMBIO_PENDIENTE = [
+    'POST /api/auth/login',
+    'POST /api/auth/cambiar-contrasena',
+    'POST /api/auth/logout'
+];
+
+/** ¿Puede esta petición seguir adelante con el cambio de contraseña pendiente? */
+const permitidaConCambioPendiente = (metodo, ruta) =>
+    RUTAS_CON_CAMBIO_PENDIENTE.includes(`${metodo} ${ruta}`);
 
 /** Escapa lo que en una ruta podría interpretarse como sintaxis de expresión regular. */
 const escapar = (texto) => texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -167,11 +189,13 @@ module.exports = {
     AUTENTICADO,
     MATRIZ,
     PUBLICO,
+    RUTAS_CON_CAMBIO_PENDIENTE,
     SOLO_PROPIETARIO,
     compilarPatron,
     describirAcceso,
     describirMatriz,
     esRutaDeApi,
     lineasMatriz,
+    permitidaConCambioPendiente,
     resolverPolitica
 };
