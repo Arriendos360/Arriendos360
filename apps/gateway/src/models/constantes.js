@@ -3,16 +3,19 @@
  *
  * Están replicados en `database/identidad/002_roles_base.sql`. Si cambias uno,
  * cambia el otro: no hay nada que los sincronice automáticamente.
+ *
+ * Los NOMBRES de rol no se declaran aquí: vienen de `packages/shared`, que es
+ * quien los usa para leer los claims. Definirlos en los dos sitios era pedir que
+ * se desincronizaran.
  */
+
+const { ROL_INQUILINO, ROL_PROPIETARIO } = require('arriendos360-shared');
 
 /** UUID de los roles del catálogo. Los nombres van en mayúsculas, como los claims. */
 const ROLES = {
     PROPIETARIO: 'c84027dc-3334-4e4c-a4a8-73b88a7eaa23',
     INQUILINO: '29032002-315b-4bcf-8c1c-221616e9eb58'
 };
-
-const ROL_PROPIETARIO = 'PROPIETARIO';
-const ROL_INQUILINO = 'INQUILINO';
 
 /**
  * Autor de los cambios que no nacen de una petición autenticada: el motor

@@ -1,76 +1,56 @@
-const jwt = require('jsonwebtoken');
+/**
+ * Adaptador Express sobre la verificación de token de `packages/shared`.
+ *
+ * Hasta este PR aquí vivía una segunda implementación completa de la
+ * verificación del JWT, duplicando la de `packages/shared`. No era por gusto: el
+ * Dockerfile del gateway construía con contexto `apps/gateway`, así que
+ * `packages/` no entraba en la imagen y declarar la dependencia rompía
+ * `docker compose up --build`. Con el build en el contexto raíz esa razón
+ * desaparece y la duplicación con ella.
+ *
+ * Lo que queda aquí es sólo lo que es propio de Express: leer la cabecera de
+ * `req`, traducir el resultado a `res.status(...).json(...)` y colgar los claims
+ * de `req.usuario`. La decisión de si un token vale —firma, vigencia, forma y
+ * revocación— vive en `packages/shared` y es la misma que usarán los
+ * microservicios cuando se extraigan (regla dura 7, confianza cero).
+ *
+ * La consulta de revocados se inyecta: el paquete fija que debe filtrar por
+ * `expira_en > NOW()`, pero no cómo se resuelve. Hoy la resuelve
+ * `tokenService.estaRevocado()` contra `tokens_revocados`; un servicio extraído
+ * la resolverá preguntando a MS-Identidad o leyendo su copia en memoria.
+ */
 
-const { ROL_PROPIETARIO } = require('../models/constantes');
+const {
+    MENSAJE_ROL_INSUFICIENTE,
+    ROL_PROPIETARIO,
+    crearError,
+    esPropietario: claimsSonDePropietario,
+    verificarTokenConRevocacion
+} = require('arriendos360-shared');
+
 const { estaRevocado } = require('../services/tokenService');
 
-const MENSAJE_SIN_TOKEN = 'Acceso denegado. No se proporcionó un token.';
-const MENSAJE_TOKEN_INVALIDO = 'Token no válido o expirado.';
-const MENSAJE_TOKEN_REVOCADO = 'Sesión cerrada. Inicia sesión de nuevo.';
-const MENSAJE_ROL_INSUFICIENTE = 'Acceso restringido. Se requiere rol de propietario.';
-
 /**
- * Extrae el token del esquema `Authorization: Bearer <token>`.
- *
- * Ya NO acepta `?token=`. Ese atajo existía para `window.open`, que no puede
- * poner cabeceras; ahora las descargas de PDF se piden con `fetch` y se
- * disparan como blob, así que el parámetro sobra. Es una mejora de seguridad
- * real: un token en la query string queda en los logs del servidor, en el
- * historial del navegador y en la cabecera `Referer`.
- */
-const extraerToken = (req) => {
-    const cabecera = req.headers['authorization'];
-    if (!cabecera) {
-        return null;
-    }
-
-    const [esquema, valor] = cabecera.split(' ');
-    if (!valor || esquema.toLowerCase() !== 'bearer') {
-        return null;
-    }
-
-    return valor;
-};
-
-/**
- * Valida firma, vigencia y revocación del token.
+ * Valida firma, vigencia, forma y revocación del token.
  *
  * Códigos, según la convención del proyecto:
  *   401  no hay token, o el token está revocado
- *   403  firma inválida o token expirado
+ *   403  firma inválida, token expirado o claims con forma antigua
  */
 const verificarToken = async (req, res, next) => {
-    const token = extraerToken(req);
+    const resultado = await verificarTokenConRevocacion(
+        { authorization: req.headers['authorization'] },
+        process.env.JWT_SECRET,
+        estaRevocado
+    );
 
-    if (!token) {
-        return res.status(401).json({ mensaje: MENSAJE_SIN_TOKEN });
+    if (!resultado.valido) {
+        return res.status(resultado.estado).json(resultado.error);
     }
 
-    let verificado;
-    try {
-        verificado = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (error) {
-        return res.status(403).json({ mensaje: MENSAJE_TOKEN_INVALIDO });
-    }
-
-    // Un token sin `jti` es de la forma anterior a este paso: no se puede
-    // revocar, así que no se acepta. Todos los tokens vivos caducan en una hora.
-    if (!verificado.jti || !Array.isArray(verificado.roles)) {
-        return res.status(403).json({ mensaje: MENSAJE_TOKEN_INVALIDO });
-    }
-
-    if (await estaRevocado(verificado.jti)) {
-        return res.status(401).json({ mensaje: MENSAJE_TOKEN_REVOCADO });
-    }
-
-    req.usuario = verificado;
+    req.usuario = resultado.claims;
     next();
 };
-
-/** ¿Tiene el usuario autenticado alguno de estos roles? */
-const tieneRol = (usuario, ...roles) =>
-    Boolean(usuario) &&
-    Array.isArray(usuario.roles) &&
-    roles.some((rol) => usuario.roles.includes(rol));
 
 /**
  * Exige el rol PROPIETARIO.
@@ -80,20 +60,11 @@ const tieneRol = (usuario, ...roles) =>
  * usuario que sea propietario e inquilino a la vez pasa por aquí.
  */
 const esPropietario = (req, res, next) => {
-    if (tieneRol(req.usuario, ROL_PROPIETARIO)) {
+    if (claimsSonDePropietario(req.usuario)) {
         return next();
     }
 
-    return res.status(403).json({ mensaje: MENSAJE_ROL_INSUFICIENTE });
+    return res.status(403).json(crearError(MENSAJE_ROL_INSUFICIENTE));
 };
 
-module.exports = {
-    MENSAJE_ROL_INSUFICIENTE,
-    MENSAJE_SIN_TOKEN,
-    MENSAJE_TOKEN_INVALIDO,
-    MENSAJE_TOKEN_REVOCADO,
-    esPropietario,
-    extraerToken,
-    tieneRol,
-    verificarToken
-};
+module.exports = { ROL_PROPIETARIO, esPropietario, verificarToken };

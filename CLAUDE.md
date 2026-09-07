@@ -42,9 +42,8 @@ identidad del Capítulo 2 ya implementado:
   PMP lo declara.
 - `packages/contracts/` — DTOs en TypeScript de los endpoints documentados.
 - `packages/shared/` — verificación local del JWT y de revocados, error estándar,
-  cliente HTTP. Todavía sin consumir: el build del gateway usa contexto
-  `apps/gateway` y `packages/` no entra en la imagen. Se conecta en el **PR de
-  contexto de build**, previo al 3b (ver "Trampas conocidas").
+  cliente HTTP. **El gateway ya lo consume**: su middleware de autenticación es un
+  adaptador de Express sobre este paquete, no una segunda implementación.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
@@ -334,11 +333,9 @@ remoto lo ya extraído.
 2. ~~**Gateway.** Costura de enrutamiento y paquetes compartidos.~~ **Hecho.**
 3. **Identidad y seguridad.** Se parte en tres PRs:
    - ~~**3a.** Rehacer el modelo de identidad dentro del gateway.~~ **Hecho.**
-   - **Contexto de build.** Mover el build de Docker al contexto raíz para que
-     `apps/gateway` pueda depender de `packages/shared` y `packages/contracts`, y que
-     `database/` entre por `COPY` en vez de por volumen. Elimina la doble
-     implementación del JWT. Va **antes** del 3b, que sin esto no puede compartir la
-     verificación del token con el servicio extraído.
+   - ~~**Contexto de build.** Mover el build de Docker al contexto raíz.~~ **Hecho.**
+     Los Dockerfiles construyen desde la raíz con `npm ci --workspace=...`, `database/`
+     entra por `COPY` y el gateway consume `packages/shared`.
    - **3b.** Extraer físicamente `ms-identidad` y montar la matriz RBAC en el gateway.
      Se lleva `database/identidad/`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
@@ -413,13 +410,6 @@ hosting. Hoy los archivos van a disco local, que no sobrevive a scale-to-zero.
 **Frecuencia de refresco de la caché de revocados en el gateway.** Ventana entre el
 logout y su efecto real en las demás réplicas.
 
-**Lockfiles anidados.** `apps/gateway` y `apps/web` conservan `package-lock.json`, pero
-npm en modo workspaces los ignora: manda el de la raíz. Los Dockerfiles deben construir
-desde el contexto raíz con `npm ci --workspace=...` y esos lockfiles deben borrarse. El
-cambio de contexto lo adelanta el PR de contexto de build (antes del 3b), porque sin él
-no se pueden consumir los paquetes compartidos; lo que queda para el paso 8 es la
-limpieza de los lockfiles y el `npm ci` reproducible en CI.
-
 **Listados de un usuario con doble rol.** `contrato.controller.js` y
 `pago.controller.js` deciden la visibilidad con una disyunción: eres el dueño del
 inmueble **o** el inquilino del contrato. El criterio es correcto —la pertenencia manda
@@ -455,17 +445,6 @@ no lo aplica: cualquier usuario autenticado puede ejecutarlo. Pertenece a
 ---
 
 ## Trampas conocidas
-
-**Hay dos implementaciones de la verificación del JWT.** Una en `packages/shared/src/jwt.ts`
-y otra en `apps/gateway/src/middlewares/auth.middleware.js`. No es duplicación por
-descuido: el Dockerfile del gateway construye con contexto `apps/gateway`, así que
-`packages/` no entra en la imagen y declarar la dependencia rompe
-`docker compose up --build`. Mientras convivan, **todo cambio en una hay que replicarlo
-en la otra** —mensajes, códigos de estado, orden de las comprobaciones— o el gateway y
-los microservicios acabarán autorizando distinto, que es justo lo que el paquete existe
-para evitar. Se elimina en el **PR de contexto de build**, que hace el build consciente
-del monorepo y **va antes del 3b**: a partir de ahí manda `packages/shared` y el
-middleware del gateway pasa a ser un envoltorio.
 
 **`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
 cualquier middleware de token, así que los PDF de contrato son públicos para quien

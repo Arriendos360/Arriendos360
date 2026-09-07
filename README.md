@@ -24,7 +24,7 @@ Arriendos360/
 ├─ database/        Migraciones SQL versionadas, una carpeta por esquema.
 │  ├─ identidad/    Usuarios, Roles, RolesUsuario, TokensRevocados.
 │  └─ dominio/      Inmuebles, Contratos, Pagos, Abonos.
-├─ infra/           docker-compose.yml y, mas adelante, Dockerfiles y Bicep de Azure.
+├─ infra/           docker-compose.yml y, mas adelante, Bicep de Azure.
 ├─ docs/            ADRs, coleccion de Postman, notas de verificacion.
 └─ package.json     Raiz del monorepo (npm workspaces: apps/*, services/*, packages/*).
 ```
@@ -73,6 +73,14 @@ Las pruebas del gateway corren con `NODE_ENV=test` contra la base
 `arriendos360_test`, que se recrea al inicio de cada suite aplicando las mismas
 migraciones que produccion.
 
+Ojo: `down -v` borra el volumen y con el la base de pruebas, que Compose no crea
+porque solo declara `arriendos360_db`. Despues de un reinicio limpio hay que
+recrearla una vez:
+
+```bash
+docker exec arriendos360_db psql -U postgres -c "CREATE DATABASE arriendos360_test"
+```
+
 ## Esquema de la base
 
 El esquema NO lo crea `sequelize.sync()`: son migraciones SQL versionadas en
@@ -83,9 +91,9 @@ El esquema NO lo crea `sequelize.sync()`: son migraciones SQL versionadas en
 npm run migrate --workspace=apps/gateway
 ```
 
-Dentro de Docker las migraciones llegan por volumen (`../database:/database:ro`)
-y la ruta se indica con `RUTA_MIGRACIONES=/database`, porque el build del gateway
-usa contexto `apps/gateway` y no alcanza la raiz del monorepo.
+Las migraciones viajan dentro de la imagen: los Dockerfiles construyen desde el
+contexto raiz del monorepo y `database/` entra por `COPY`. La ruta se resuelve
+relativa al codigo, asi que es la misma dentro y fuera del contenedor.
 
 ## Datos de prueba
 

@@ -11,14 +11,14 @@
  *   - Los `.sql` son DATOS y viven en `database/<esquema>/`, en la raíz del
  *     monorepo, donde CLAUDE.md los ubica y donde el paso 3b podrá llevárselos
  *     junto con ms-identidad.
- *   - Este runner es CÓDIGO y viaja con el gateway, porque la imagen Docker se
- *     construye hoy con contexto `apps/gateway` y no alcanza la raíz. Cuando el
- *     paso 8 mueva el build al contexto raíz, esto podrá subir a
- *     `packages/shared` y compartirse con los servicios.
+ *   - Este runner es CÓDIGO y viaja con el gateway. Cuando haya un segundo
+ *     servicio que necesite migrar, subirá a `packages/shared`.
  *
- * La ruta de los `.sql` se resuelve por `RUTA_MIGRACIONES` para que el mismo
- * código funcione en el host (ruta relativa) y dentro del contenedor (volumen
- * montado en `/database`).
+ * La ruta se resuelve relativa a este archivo y punto. Antes había una variable
+ * `RUTA_MIGRACIONES` que la sobrescribía, porque el build usaba contexto
+ * `apps/gateway` y los `.sql` tenían que entrar por volumen en `/database`. Con
+ * el build en el contexto raíz, `database/` entra por COPY y queda en el mismo
+ * sitio relativo dentro y fuera del contenedor, así que el parche sobra.
  */
 
 const fs = require('fs');
@@ -28,8 +28,8 @@ const path = require('path');
  *  fijar el orden hace reproducible el resultado. */
 const ESQUEMAS = ['identidad', 'dominio'];
 
-const RUTA_BASE =
-    process.env.RUTA_MIGRACIONES || path.resolve(__dirname, '../../../../database');
+/** `<raiz del monorepo>/database`, desde `apps/gateway/src/database/`. */
+const RUTA_BASE = path.resolve(__dirname, '../../../../database');
 
 const TABLA_CONTROL = 'migraciones_aplicadas';
 
