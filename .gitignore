@@ -15,7 +15,7 @@ Thumbs.db
 npm-debug.log*
 
 # Archivos subidos por usuarios (contratos, comprobantes)
-backend/uploads/
+apps/gateway/uploads/
 
 # IDE
 .vscode/

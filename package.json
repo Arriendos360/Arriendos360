@@ -1,0 +1,14 @@
+{
+  "name": "arriendos360",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Arriendos360 - monorepo (apps, services, packages) para la migracion del monolito a microservicios",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present"
+  }
+}

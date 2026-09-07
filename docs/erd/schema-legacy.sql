@@ -3,6 +3,10 @@
 -- Base de datos: PostgreSQL
 -- Fecha: Mayo 2026
 
+-- '-- HISTORICO: modelo anterior (propietarios/inquilinos, IDs enteros, FK cruzadas).
+-- Superado por el modelo canonico de 8 tablas del Capitulo 2 del Protocolo de desarrollo.
+-- No usar como referencia para la migracion.\n\n' | cat - docs/erd/schema-legacy.sql > tmp && mv tmp docs/erd/schema-legacy.sql
+
 -- Tabla USUARIOS
 CREATE TABLE usuarios (
     id_usuario SERIAL PRIMARY KEY,

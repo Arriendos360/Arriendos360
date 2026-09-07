@@ -1,3 +1,8 @@
+# El nombre de proyecto se fija a "arriendos360" para que los volumenes y la red
+# conserven el mismo prefijo aunque este archivo viva en infra/ (si no, Compose usaria
+# el nombre de la carpeta, "infra").
+name: arriendos360
+
 services:
   # Base de Datos Relacional
   db:
@@ -15,7 +20,7 @@ services:
 
   # Servidor Backend
   backend:
-    build: ./backend
+    build: ../apps/gateway
     container_name: arriendos360_api
     command: npm run dev
     ports:
@@ -32,12 +37,12 @@ services:
     depends_on:
       - db
     volumes:
-      - ./backend:/app
+      - ../apps/gateway:/app
       - /app/node_modules
 
   # Aplicación Frontend
   frontend:
-    build: ./frontend
+    build: ../apps/web
     container_name: arriendos360_ui
     command: npm start
     ports:
@@ -49,7 +54,7 @@ services:
     depends_on:
       - backend
     volumes:
-      - ./frontend:/app
+      - ../apps/web:/app
       - /app/node_modules
 
 volumes:
