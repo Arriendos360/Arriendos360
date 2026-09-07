@@ -51,10 +51,19 @@ export const rolPrincipal = (roles: string[]): string | null =>
 /**
  * Firma un token para un usuario ya autenticado.
  *
- * `noAntesDe` fija el `iat` en lugar de dejar que lo ponga el reloj. Lo usa el
- * cambio de contrasena: acaba de dejar una marca que invalida todo token
- * anterior, y sin anclar el `iat` a esa misma marca el token que emite a
- * continuacion se invalidaria a si mismo.
+ * NINGUN TOKEN NACE INVALIDADO. El `iat` de un JWT viene en segundos enteros y
+ * se redondea hacia ABAJO, mientras que `contrasena_cambiada_en` se redondea
+ * hacia ARRIBA (ver `marcaDeCambio`). Un token emitido en el mismo segundo que
+ * un cambio de contrasena caeria del lado malo de esa comparacion y se
+ * invalidaria a si mismo: quien restablece su contrasena y entra en seguida
+ * recibiria un token que el siguiente `verificarToken` rechaza con 401.
+ *
+ * Por eso el `iat` nunca es menor que la marca del propio usuario. Cubre los
+ * dos caminos —el login normal y el cambio de contrasena— sin que ninguno
+ * tenga que acordarse.
+ *
+ * `noAntesDe` sigue existiendo para el cambio de contrasena, donde la marca
+ * acaba de escribirse y la instancia en memoria puede no reflejarla todavia.
  */
 export const emitirToken = (
   usuario: Usuario,
@@ -62,9 +71,14 @@ export const emitirToken = (
   opciones: { noAntesDe?: Date } = {},
 ): TokenEmitido => {
   const jti = crypto.randomUUID();
-  const iat = opciones.noAntesDe
-    ? Math.ceil(opciones.noAntesDe.getTime() / 1000)
-    : Math.floor(Date.now() / 1000);
+
+  const enSegundosHaciaArriba = (fecha: Date): number => Math.ceil(fecha.getTime() / 1000);
+
+  const iat = Math.max(
+    Math.floor(Date.now() / 1000),
+    opciones.noAntesDe ? enSegundosHaciaArriba(opciones.noAntesDe) : 0,
+    usuario.contrasena_cambiada_en ? enSegundosHaciaArriba(usuario.contrasena_cambiada_en) : 0,
+  );
 
   const token = jwt.sign(
     {

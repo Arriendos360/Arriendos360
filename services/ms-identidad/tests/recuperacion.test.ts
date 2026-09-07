@@ -257,6 +257,49 @@ describe('Al restablecer caen las sesiones abiertas', () => {
     expect(despues.status).toBe(401);
   });
 
+  test('el que entra JUSTO DESPUÉS de restablecer recibe un token que sirve', async () => {
+    // Regresión. La marca de cambio se redondea hacia ARRIBA y el `iat` de un
+    // JWT hacia ABAJO, así que un login en el mismo segundo que el
+    // restablecimiento nacía del lado malo de la comparación y se invalidaba a
+    // sí mismo: 200 al entrar y 401 en la petición siguiente.
+    //
+    // Se hacía visible como una suite intermitente —fallaba cuando login y
+    // restablecimiento caían en el mismo segundo— pero el fallo era del
+    // producto: es exactamente lo que hace una persona tras restablecer.
+    const usuario = await registrarPropietario({
+      email: 'entra-rapido@test.com',
+      nombres: 'Entra',
+      apellidos: 'Rapido',
+      documento: '80000005',
+    });
+    expect(usuario.login.status).toBe(200);
+
+    buzon.enviadas.length = 0;
+    await request(app).post('/api/auth/recuperar').send({ email: 'entra-rapido@test.com' });
+    await request(app)
+      .post('/api/auth/restablecer')
+      .send({ token: tokenDelUltimoCorreo(), contrasena_nueva: 'RecienPuesta1' });
+
+    // Sin pausa a propósito: el mismo segundo es justo el caso que falla.
+    const sesion = await iniciarSesion('entra-rapido@test.com', 'RecienPuesta1');
+    expect(sesion.status).toBe(200);
+
+    const claims = jwt.decode(sesion.body.token) as { sub: string; jti: string; iat: number };
+    expect(await tokenInvalidado(claims as never)).toBe(false);
+
+    // Y la comprobación que muerde SIEMPRE, caiga donde caiga el reloj: el
+    // `iat` del token nuevo nunca queda por detrás de la marca de su usuario.
+    // Sin esto la prueba solo fallaría cuando login y restablecimiento cayeran
+    // en el mismo segundo, que es como se coló el fallo la primera vez.
+    const fila = await Usuario.findOne({ where: { email: 'entra-rapido@test.com' } });
+    expect(claims.iat * 1000).toBeGreaterThanOrEqual(fila!.contrasena_cambiada_en!.getTime());
+
+    const usando = await request(app)
+      .get('/api/usuarios?documento=80000005')
+      .set(...conToken(sesion.body.token));
+    expect(usando.status).toBe(200);
+  });
+
   test('la marca aparece en la lista que consume el gateway', async () => {
     const respuesta = await request(app).get('/interno/revocados').set(...conServicio());
 
