@@ -160,8 +160,51 @@ const adjuntarInquilinosEInmuebles = async (contratos) => {
     }));
 };
 
+/**
+ * Adjunta `Inmueble` al contrato ANIDADO de una lista.
+ *
+ * Existe porque los pagos y los abonos no llevan `id_inmueble` propio: cuelgan
+ * de un contrato, y es ese contrato el que sabe de qué inmueble se trata. Antes
+ * lo resolvía un `include` anidado —`Pago -> Contrato -> Inmueble`, y para los
+ * abonos un nivel más— y la pantalla de Pagos lee esa ruta tal cual
+ * (`pago.Contrato.Inmueble.direccion`).
+ *
+ * `camino` dice dónde está el contrato dentro de cada elemento. Un solo lote
+ * para toda la lista, como el resto.
+ *
+ * @param {Array} elementos pagos o abonos
+ * @param {(elemento: object) => object|null|undefined} camino cómo llegar al contrato
+ */
+const adjuntarInmuebleAlContratoAnidado = async (elementos, camino) => {
+    const lista = (elementos || []).map(aPlano);
+
+    const inmuebles = await inmueblesPorIds(
+        lista.map((elemento) => camino(elemento)).filter(Boolean).map((c) => c.id_inmueble)
+    );
+
+    return lista.map((elemento) => {
+        const contrato = camino(elemento);
+        if (!contrato) {
+            return elemento;
+        }
+
+        contrato.Inmueble = inmuebles.get(contrato.id_inmueble) || null;
+        return elemento;
+    });
+};
+
+/** `pago.Contrato.Inmueble`. */
+const adjuntarInmuebleAPagos = (pagos) =>
+    adjuntarInmuebleAlContratoAnidado(pagos, (pago) => pago.Contrato);
+
+/** `abono.Pago.Contrato.Inmueble`. */
+const adjuntarInmuebleAAbonos = (abonos) =>
+    adjuntarInmuebleAlContratoAnidado(abonos, (abono) => abono.Pago && abono.Pago.Contrato);
+
 module.exports = {
     adjuntarInmueble,
+    adjuntarInmuebleAAbonos,
+    adjuntarInmuebleAPagos,
     adjuntarInmuebles,
     adjuntarInquilino,
     adjuntarInquilinos,
