@@ -76,6 +76,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. |
 | `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 | `0009` | Autenticación entre servicios para `/interno`. Resuelve una decisión abierta; el documento no la contempla pero tampoco la contradice. |
+| `0010` | Recuperación de contraseña: endpoints, tabla de tokens, columna `contrasena_cambiada_en` y envío de correo desde `ms-identidad`. Esto último **debe desaparecer** en el paso 7, no documentarse. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -529,14 +530,10 @@ arreglo son claves asimétricas por servicio; el verificador ya resuelve la clav
 emisor, así que es cambiar configuración y no rediseñar. Reconsiderar en el paso 8, donde
 la identidad administrada de Azure puede hacerlo innecesario. Ver `docs/adr/0009`.
 
-**Reemisión de la contraseña temporal.** `docs/adr/0007` la devuelve una sola vez. Si el
-propietario la pierde antes de entregarla, no hay forma de generar otra. Hace falta un
-`POST /api/usuarios/:id/contrasena-temporal` restringido a quien creó al usuario y
-registrado en la auditoría. Decidir al implementar el 3b o justo después.
-
-**Recuperación de contraseña.** No existe para ningún rol, ni siquiera para
-propietarios. Depende de que el correo salga de Ethereal y llegue de verdad, así que se
-resuelve con `ms-notificaciones` (paso 7).
+**Limitación de tasa.** No existe en ninguna ruta. `POST /api/auth/recuperar` y
+`POST /api/auth/login` son las que más la piden —nada impide mil intentos— pero el
+problema es de toda la API, no de un endpoint. Decidir antes del paso 8: en Container
+Apps puede resolverse en el ingreso en vez de en código.
 
 **Autoservicio de pago del inquilino.** `docs/adr/0006` deja el registro de abonos en
 manos del propietario porque el sistema no puede verificar un pago. Si el producto
@@ -549,6 +546,11 @@ documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
 ---
 
 ## Trampas conocidas
+
+**El correo no llega a nadie.** Con `EMAIL_USER` sin definir, el mailer apunta a un
+buzón de pruebas (Ethereal). El enlace de recuperación se genera y se envía, pero para
+verlo en desarrollo hay que leerlo del log o de `identidad.tokens_recuperacion`. Es la
+misma razón por la que la contraseña temporal del ADR 0007 se entrega en mano.
 
 **`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
 cualquier middleware de token, así que los PDF de contrato son públicos para quien

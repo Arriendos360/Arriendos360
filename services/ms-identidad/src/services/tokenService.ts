@@ -22,6 +22,8 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
 
+import type { ClaimsUsuario } from 'arriendos360-shared';
+
 import { PRECEDENCIA_ROLES, TIPO_TOKEN, VIGENCIA_TOKEN_SEGUNDOS } from '../models/constantes';
 import { TokenRevocado } from '../models/TokenRevocado';
 import { Usuario } from '../models/Usuario';
@@ -46,9 +48,23 @@ export interface TokenEmitido {
 export const rolPrincipal = (roles: string[]): string | null =>
   PRECEDENCIA_ROLES.find((candidato) => roles.includes(candidato)) ?? roles[0] ?? null;
 
-/** Firma un token para un usuario ya autenticado. */
-export const emitirToken = (usuario: Usuario, roles: string[]): TokenEmitido => {
+/**
+ * Firma un token para un usuario ya autenticado.
+ *
+ * `noAntesDe` fija el `iat` en lugar de dejar que lo ponga el reloj. Lo usa el
+ * cambio de contrasena: acaba de dejar una marca que invalida todo token
+ * anterior, y sin anclar el `iat` a esa misma marca el token que emite a
+ * continuacion se invalidaria a si mismo.
+ */
+export const emitirToken = (
+  usuario: Usuario,
+  roles: string[],
+  opciones: { noAntesDe?: Date } = {},
+): TokenEmitido => {
   const jti = crypto.randomUUID();
+  const iat = opciones.noAntesDe
+    ? Math.ceil(opciones.noAntesDe.getTime() / 1000)
+    : Math.floor(Date.now() / 1000);
 
   const token = jwt.sign(
     {
@@ -57,6 +73,7 @@ export const emitirToken = (usuario: Usuario, roles: string[]): TokenEmitido => 
       roles,
       jti,
       debe_cambiar: usuario.debe_cambiar_contrasena === true,
+      iat,
     },
     process.env['JWT_SECRET'] as jwt.Secret,
     { expiresIn: VIGENCIA_TOKEN_SEGUNDOS },
@@ -83,6 +100,24 @@ export const revocarToken = async (jti: string, expiraEn: Date): Promise<void> =
 };
 
 /**
+ * Marca de cambio de contrasena, redondeada HACIA ARRIBA al segundo.
+ *
+ * El redondeo no es cosmetico, y la direccion importa. El `iat` de un JWT viene
+ * en segundos enteros, asi que no se puede distinguir un token emitido 100 ms
+ * antes del cambio de uno emitido 100 ms despues. Hay que elegir a quien
+ * favorece el empate.
+ *
+ * Se redondea hacia arriba para que el empate lo pierda el token viejo: si
+ * alguien restablece su contrasena porque sospecha que hay otra sesion abierta,
+ * una sesion que sobreviva un segundo mas es peor que ninguna otra cosa que
+ * pueda pasar aqui.
+ *
+ * El token que se emite JUSTO DESPUES no se invalida a si mismo porque no se
+ * deja al azar: `emitirToken` lo ancla a esta misma marca con `noAntesDe`.
+ */
+export const marcaDeCambio = (): Date => new Date(Math.ceil(Date.now() / 1000) * 1000);
+
+/**
  * Esta revocado este `jti`?
  *
  * El filtro por `expira_en > NOW()` es lo que permite prescindir del barrido
@@ -99,6 +134,54 @@ export const estaRevocado = async (jti: string): Promise<boolean> => {
   });
 
   return revocado !== null;
+};
+
+/**
+ * Este token dejo de valer, por el motivo que sea?
+ *
+ * Dos motivos, y hacen falta los dos:
+ *
+ * - Su `jti` esta revocado: alguien cerro esa sesion concreta.
+ * - Se emitio ANTES de que el usuario cambiara su contrasena: entonces caen
+ *   todas sus sesiones de golpe. Es lo que hace util restablecer una contrasena
+ *   cuando no se sabe cuantas sesiones ajenas hay abiertas.
+ */
+export const tokenInvalidado = async (claims: ClaimsUsuario): Promise<boolean> => {
+  if (await estaRevocado(claims.jti)) {
+    return true;
+  }
+
+  if (claims.iat === undefined) {
+    return false;
+  }
+
+  const usuario = await Usuario.findByPk(claims.sub, {
+    attributes: ['contrasena_cambiada_en'],
+  });
+
+  const marca = usuario?.contrasena_cambiada_en;
+  return marca !== null && marca !== undefined && claims.iat * 1000 < marca.getTime();
+};
+
+/**
+ * Sesiones invalidadas en bloque que todavia pueden afectar a algun token.
+ *
+ * Solo las de la ultima hora: un token dura 3600 segundos, asi que una marca mas
+ * antigua no puede invalidar nada que siga vivo. El mismo criterio que mantiene
+ * corta la lista de revocados.
+ */
+export const sesionesInvalidadas = async (): Promise<Array<{ sub: string; desde: string }>> => {
+  const desde = new Date(Date.now() - VIGENCIA_TOKEN_SEGUNDOS * 1000);
+
+  const usuarios = await Usuario.findAll({
+    where: { contrasena_cambiada_en: { [Op.gt]: desde } },
+    attributes: ['id_usuario', 'contrasena_cambiada_en'],
+  });
+
+  return usuarios.map((usuario) => ({
+    sub: usuario.id_usuario,
+    desde: (usuario.contrasena_cambiada_en as Date).toISOString(),
+  }));
 };
 
 /**

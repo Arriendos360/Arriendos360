@@ -10,38 +10,44 @@ const { crearCacheRevocados } = require('../src/routing/cacheRevocados');
 
 const entrada = (jti) => ({ jti, expira_en: new Date(Date.now() + 3600000).toISOString() });
 
+/** Lo que devuelve `/interno/revocados`: las dos formas de invalidar. */
+const lote = (revocados = [], sesiones = []) => ({ revocados, sesiones });
+
+/** Claims mínimos, para preguntar a la caché. */
+const claims = (jti, sub = 'u1', iat = Math.floor(Date.now() / 1000)) => ({ jti, sub, iat });
+
 describe('Refresco', () => {
     test('parte vacía y se llena al refrescar', async () => {
-        const cache = crearCacheRevocados({ obtener: async () => [entrada('a')] });
+        const cache = crearCacheRevocados({ obtener: async () => lote([entrada('a')]) });
 
-        expect(await cache.estaRevocado('a')).toBe(false);
+        expect(await cache.tokenInvalidado(claims('a'))).toBe(false);
         await cache.refrescar();
-        expect(await cache.estaRevocado('a')).toBe(true);
+        expect(await cache.tokenInvalidado(claims('a'))).toBe(true);
     });
 
     test('reemplaza la copia entera, no la acumula', async () => {
         // Es lo que hace que una fila vencida desaparezca sola de la caché: el
         // origen deja de listarla y aquí deja de existir, sin barrido.
-        let lista = [entrada('a'), entrada('b')];
+        let lista = lote([entrada('a'), entrada('b')]);
         const cache = crearCacheRevocados({ obtener: async () => lista });
 
         await cache.refrescar();
-        expect(await cache.estaRevocado('a')).toBe(true);
+        expect(await cache.tokenInvalidado(claims('a'))).toBe(true);
 
-        lista = [entrada('b')];
+        lista = lote([entrada('b')]);
         await cache.refrescar();
 
-        expect(await cache.estaRevocado('a')).toBe(false);
-        expect(await cache.estaRevocado('b')).toBe(true);
+        expect(await cache.tokenInvalidado(claims('a'))).toBe(false);
+        expect(await cache.tokenInvalidado(claims('b'))).toBe(true);
     });
 
     test('un jti que no está no cuenta como revocado', async () => {
-        const cache = crearCacheRevocados({ obtener: async () => [entrada('a')] });
+        const cache = crearCacheRevocados({ obtener: async () => lote([entrada('a')]) });
         await cache.refrescar();
 
-        expect(await cache.estaRevocado('otro')).toBe(false);
-        expect(await cache.estaRevocado(undefined)).toBe(false);
-        expect(await cache.estaRevocado('')).toBe(false);
+        expect(await cache.tokenInvalidado(claims('otro'))).toBe(false);
+        expect(await cache.tokenInvalidado(claims(undefined))).toBe(false);
+        expect(await cache.tokenInvalidado(claims(''))).toBe(false);
     });
 });
 
@@ -53,7 +59,7 @@ describe('Cuando ms-identidad no responde', () => {
         const cache = crearCacheRevocados({
             obtener: async () => {
                 if (falla) throw new Error('sin red');
-                return [entrada('a')];
+                return lote([entrada('a')]);
             }
         });
 
@@ -62,7 +68,7 @@ describe('Cuando ms-identidad no responde', () => {
         const resultado = await cache.refrescar();
 
         expect(resultado).toBe(false);
-        expect(await cache.estaRevocado('a')).toBe(true);
+        expect(await cache.tokenInvalidado(claims('a'))).toBe(true);
     });
 
     test('no propaga el error: un fallo de refresco no puede tumbar la API', async () => {
@@ -92,7 +98,7 @@ describe('Cuando ms-identidad no responde', () => {
         const cache = crearCacheRevocados({
             obtener: async () => {
                 if (falla) throw new Error('sin red');
-                return [];
+                return lote();
             }
         });
 
@@ -111,17 +117,17 @@ describe('Ciclo de vida', () => {
         // Si no, el gateway arrancaría con la caché vacía y aceptaría durante un
         // intervalo entero tokens ya cerrados.
         const cache = crearCacheRevocados({
-            obtener: async () => [entrada('a')],
+            obtener: async () => lote([entrada('a')]),
             intervaloMs: 60000
         });
 
         await cache.iniciar();
-        expect(await cache.estaRevocado('a')).toBe(true);
+        expect(await cache.tokenInvalidado(claims('a'))).toBe(true);
         cache.detener();
     });
 
     test('el temporizador no impide que el proceso termine', async () => {
-        const cache = crearCacheRevocados({ obtener: async () => [], intervaloMs: 60000 });
+        const cache = crearCacheRevocados({ obtener: async () => lote(), intervaloMs: 60000 });
         const temporizador = await cache.iniciar();
 
         // `unref` es lo que evita que el proceso se quede colgado por el timer.
@@ -134,7 +140,7 @@ describe('Ciclo de vida', () => {
         const cache = crearCacheRevocados({
             obtener: async () => {
                 veces += 1;
-                return [];
+                return lote();
             },
             intervaloMs: 5
         });
@@ -149,12 +155,81 @@ describe('Ciclo de vida', () => {
 
     test('el estado reporta cuántos hay y cada cuánto se refresca', async () => {
         const cache = crearCacheRevocados({
-            obtener: async () => [entrada('a'), entrada('b')],
+            obtener: async () => lote([entrada('a'), entrada('b')]),
             intervaloMs: 15000
         });
         await cache.refrescar();
 
         expect(cache.estado().vigentes).toBe(2);
         expect(cache.estado().intervaloMs).toBe(15000);
+    });
+});
+
+describe('Invalidación en bloque por cambio de contraseña', () => {
+    const marca = (sub, desde) => ({ sub, desde: new Date(desde).toISOString() });
+
+    test('un token emitido ANTES del cambio deja de valer', async () => {
+        const cambio = Date.now();
+        const cache = crearCacheRevocados({
+            obtener: async () => lote([], [marca('u1', cambio)])
+        });
+        await cache.refrescar();
+
+        const antes = claims('jti-1', 'u1', Math.floor(cambio / 1000) - 60);
+        expect(await cache.tokenInvalidado(antes)).toBe(true);
+    });
+
+    test('uno emitido DESPUÉS sigue valiendo', async () => {
+        const cambio = Date.now();
+        const cache = crearCacheRevocados({
+            obtener: async () => lote([], [marca('u1', cambio)])
+        });
+        await cache.refrescar();
+
+        const despues = claims('jti-2', 'u1', Math.floor(cambio / 1000) + 60);
+        expect(await cache.tokenInvalidado(despues)).toBe(false);
+    });
+
+    test('sólo afecta al usuario que cambió, no a los demás', async () => {
+        const cambio = Date.now();
+        const cache = crearCacheRevocados({
+            obtener: async () => lote([], [marca('u1', cambio)])
+        });
+        await cache.refrescar();
+
+        const deOtro = claims('jti-3', 'u2', Math.floor(cambio / 1000) - 60);
+        expect(await cache.tokenInvalidado(deOtro)).toBe(false);
+    });
+
+    test('un token emitido en el mismo segundo del cambio sobrevive', async () => {
+        // El `iat` de un JWT va en segundos enteros, y al cambiar la contraseña
+        // se emite un token nuevo justo después. Si la comparación no tolerara
+        // el mismo segundo, ese token se invalidaría a sí mismo.
+        const segundo = Math.floor(Date.now() / 1000);
+        const cache = crearCacheRevocados({
+            obtener: async () => lote([], [marca('u1', segundo * 1000)])
+        });
+        await cache.refrescar();
+
+        expect(await cache.tokenInvalidado(claims('jti-4', 'u1', segundo))).toBe(false);
+    });
+
+    test('las dos formas conviven: revocado por jti y por marca', async () => {
+        const cambio = Date.now();
+        const cache = crearCacheRevocados({
+            obtener: async () => lote([entrada('revocado')], [marca('u1', cambio)])
+        });
+        await cache.refrescar();
+
+        // Por jti, aunque el iat sea posterior al cambio.
+        expect(
+            await cache.tokenInvalidado(claims('revocado', 'u2', Math.floor(cambio / 1000) + 60))
+        ).toBe(true);
+        // Por marca, aunque el jti no esté revocado.
+        expect(
+            await cache.tokenInvalidado(claims('otro', 'u1', Math.floor(cambio / 1000) - 60))
+        ).toBe(true);
+
+        expect(cache.estado().sesionesInvalidadas).toBe(1);
     });
 });

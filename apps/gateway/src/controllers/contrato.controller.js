@@ -1,7 +1,7 @@
 const { Op } = require('sequelize');
 
 const { adjuntarInquilino, adjuntarInquilinos } = require('../clientes/composicion');
-const { usuarioPorId } = require('../clientes/identidad');
+const { reemitirContrasenaTemporal, usuarioPorId } = require('../clientes/identidad');
 const { sequelize } = require('../config/database');
 const Contrato = require('../models/Contrato');
 const Inmueble = require('../models/Inmueble');
@@ -224,4 +224,59 @@ const finalizar = async (req, res) => {
     }
 };
 
-module.exports = { obtenerTodos, obtenerPorId, crear, actualizar, finalizar };
+/**
+ * POST /api/contratos/:id/contrasena-inquilino
+ *
+ * Regenera la contrasena temporal del inquilino de un contrato y la devuelve una
+ * sola vez, para que el propietario se la entregue. Existe porque la temporal
+ * del alta se muestra una vez y no se puede volver a consultar: si se pierde
+ * antes de entregarla, hasta ahora no habia forma de generar otra.
+ *
+ * POR QUE VIVE AQUI Y NO EN ms-identidad. La regla de autorizacion es «solo
+ * sobre inquilinos con contrato en mis inmuebles», y eso son datos de contratos
+ * e inmuebles, que son del gateway. Ms-identidad es subdominio de Soporte: si
+ * tuviera que comprobarlo, dependeria de un servicio de dominio e invertiria la
+ * direccion de las dependencias. Aqui el ABAC es una consulta local y trivial, y
+ * la regeneracion en si se delega por HTTP. Ver docs/adr/0010.
+ *
+ * La ruta cuelga del contrato a proposito: el contrato ES lo que autoriza.
+ */
+const reemitirContrasenaDelInquilino = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { sub } = req.usuario;
+
+        const contrato = esUuid(id)
+            ? await Contrato.findByPk(id, { include: [{ model: Inmueble }] })
+            : null;
+
+        // ABAC de pertenencia (regla dura 8): el contrato tiene que ser sobre un
+        // inmueble de quien pide. Se responde 404 y no 403 para no confirmar que
+        // el contrato existe.
+        if (!contrato || !contrato.Inmueble || contrato.Inmueble.id_propietario !== sub) {
+            return res.status(404).json({ mensaje: 'Contrato no encontrado o no tienes permisos' });
+        }
+
+        const resultado = await reemitirContrasenaTemporal(contrato.id_inquilino, sub);
+
+        return res.json({
+            mensaje: 'Contraseña temporal regenerada',
+            // Unica vez que viaja en claro, igual que en el alta. No se guarda,
+            // no se registra y no hay forma de volver a consultarla.
+            contrasena_temporal: resultado.contrasena_temporal,
+            inquilino: resultado.usuario
+        });
+    } catch (error) {
+        console.error('Error al reemitir la contraseña del inquilino:', error.message);
+        return res.status(502).json({ mensaje: 'No se pudo regenerar la contraseña temporal' });
+    }
+};
+
+module.exports = {
+    obtenerTodos,
+    obtenerPorId,
+    crear,
+    actualizar,
+    finalizar,
+    reemitirContrasenaDelInquilino
+};

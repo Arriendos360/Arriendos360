@@ -39,7 +39,7 @@ app.use(cors());
 // la petición sigue viva. Va ANTES de la costura para que una petición denegada
 // nunca llegue a la red interna, y antes de express.json() para no consumir el
 // cuerpo.
-app.use(crearControlDeAcceso({ estaRevocado: cacheRevocados.estaRevocado }));
+app.use(crearControlDeAcceso({ tokenInvalidado: cacheRevocados.tokenInvalidado }));
 
 // Costura de enrutamiento: reenvía a ms-identidad los prefijos /api/auth y
 // /api/usuarios, y deja pasar el resto al código local de abajo. Va antes de
@@ -102,9 +102,10 @@ if (process.env.NODE_ENV !== 'test') {
             await cacheRevocados.iniciar();
             const estado = cacheRevocados.estado();
             console.log(
-                `🔑 Caché de revocados: ${estado.vigentes} vigentes, refresco cada ${
-                    estado.intervaloMs / 1000
-                }s${estado.ultimoError ? ` — ÚLTIMO INTENTO FALLÓ: ${estado.ultimoError}` : ''}`
+                `🔑 Caché de invalidación: ${estado.vigentes} tokens revocados, ` +
+                    `${estado.sesionesInvalidadas} usuarios con sesiones caídas, ` +
+                    `refresco cada ${estado.intervaloMs / 1000}s` +
+                    `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`
             );
 
             console.log(`🔀 ${describirEnrutamiento()}`);

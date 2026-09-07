@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { guardarSesion } from '../auth/sesion';
 import api from '../services/api';
@@ -140,6 +140,12 @@ const Login = () => {
                                 Ingresar
                             </button>
                         </form>
+
+                        <p style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.85rem' }}>
+                            <Link to="/recuperar" style={{ color: '#2563eb', fontWeight: '600', textDecoration: 'none' }}>
+                                ¿Olvidaste tu contraseña?
+                            </Link>
+                        </p>
 
                         <p style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.875rem', color: '#64748b' }}>
                             ¿Eres propietario y no tienes cuenta?{' '}
