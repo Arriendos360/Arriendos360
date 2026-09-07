@@ -2,17 +2,17 @@ const request = require('supertest');
 
 const {
     app,
-    cerrarBase,
+    cerrarEntorno,
     conToken,
     crearInquilino,
-    recrearBase,
+    prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
 
 let tokenProp, idContrato, idPago;
 
 beforeAll(async () => {
-    await recrearBase();
+    await prepararEntorno();
 
     // 1. Registrar Propietario
     const propietario = await registrarPropietario({
@@ -39,7 +39,7 @@ beforeAll(async () => {
     idPago = resPago.body.pago.id_pago;
 });
 
-afterAll(async () => { await cerrarBase(); });
+afterAll(async () => { await cerrarEntorno(); });
 
 describe('RF-17 & RF-18: Gestión de Abonos', () => {
     test('Debería registrar un abono parcial y cambiar estado a Pago Parcial', async () => {

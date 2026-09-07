@@ -129,7 +129,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/usuarios/buscar?documento=10000002",
+              "raw": "{{baseUrl}}/api/usuarios?documento=10000002",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -144,7 +144,7 @@
                 }
               ]
             },
-            "description": "Traduce cedula -> UUID. Hace falta porque `Contratos.id_inquilino` guarda ahora el UUID del usuario y nadie teclea un UUID."
+            "description": "Coincidencia exacta. Devuelve solo id, nombres y apellidos, y queda registrada en identidad.consultas_documento. La sirve ms-identidad; el gateway la reenvia."
           }
         },
         {

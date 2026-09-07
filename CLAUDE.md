@@ -48,18 +48,16 @@ identidad del Capítulo 2 ya implementado:
   adaptador de Express sobre este paquete, no una segunda implementación.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
-- `services/ms-identidad/` — primer microservicio real. TypeScript `strict`, puerto
-  3011, esquema PostgreSQL propio (`identidad`) en la misma instancia. **Todavía no
-  está cableado:** `MS_IDENTIDAD_URL` sigue vacía, así que el gateway resuelve
-  `/api/auth` y `/api/usuarios` en local como hasta ahora. Corre, se prueba y se
-  demuestra solo; el PR siguiente acciona el interruptor.
+- `services/ms-identidad/` — primer microservicio real y **ya en producción de la
+  demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
+  Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
 
-Mientras dure ese estado transitorio, las tablas de identidad existen dos veces: en
-`public` (las del gateway, gobernadas por `database/identidad/`) y en `identidad` (las
-del servicio, gobernadas por `services/ms-identidad/database/`). No se pisan porque
-están en esquemas distintos. Al cablear, las del gateway y su carpeta desaparecen y las
-del servicio suben a `database/identidad/`.
+El gateway ya no tiene tablas ni modelos de identidad. Lo que necesita de un usuario
+—el nombre del inquilino en un contrato, el arrendatario de un recibo, el correo al que
+avisa el motor— lo pide por HTTP a `/interno/usuarios` y lo compone
+(`apps/gateway/src/clientes/`). La revocación la resuelve una copia en memoria que
+refresca cada 15 s; ver `docs/adr/0008`.
 
 Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
@@ -357,13 +355,13 @@ remoto lo ya extraído.
    - ~~**Matriz RBAC.** Políticas declarativas en el gateway, denegar por defecto.~~
      **Hecho.** Se adelantó a la extracción: no depende de ella y vale igual cuando
      `/api/auth` pase a remoto.
-   - **3b.** Extraer físicamente `ms-identidad`. Se lleva `database/identidad/` y
-     obliga a resolver la caché de revocados del gateway, la composición por HTTP de
-     los datos de usuario que hoy viajan embebidos, y la infraestructura de pruebas:
-     7 de las 9 suites fabrican sus datos llamando a `/api/auth` y `/api/usuarios`.
-     Incluye además la contraseña temporal de `docs/adr/0007`: generación en el
-     servicio, indicador de cambio obligatorio, bloqueo de todo salvo el cambio, y
-     endpoint `POST /api/auth/cambiar-contrasena`.
+   - ~~**3b.** Extraer físicamente `ms-identidad`.~~ **Hecho.** Se llevó
+     `database/identidad/`, el gateway pasó a componer por HTTP y a cachear los
+     revocados, y las pruebas se reestructuraron sobre dobles.
+   - **3c.** Contraseña temporal del inquilino: `docs/adr/0007` está escrito y
+     pendiente de implementar. Generación en el servicio, indicador de cambio
+     obligatorio, bloqueo de todo salvo el cambio, y
+     `POST /api/auth/cambiar-contrasena`.
 4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
    validación ABAC de pertenencia.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
@@ -400,13 +398,40 @@ remoto lo ya extraído.
 
 ---
 
+## Cómo se prueba
+
+Convención para los pasos 4 al 7, fijada al extraer el primer servicio:
+
+**Cada servicio prueba su lógica contra dobles.** Nada de levantar el stack para una
+suite. El gateway no arranca `ms-identidad`: monta un doble HTTP con usuarios en memoria
+(`apps/gateway/tests/dobles/`) y apunta `MS_*_URL` a él. Las suites siguen corriendo en
+segundos y en un portátil sin Docker.
+
+Un doble, no un mock de función: la costura reenvía por red, así que para probar el
+gateway hace falta algo que escuche. Además permite simular lo incómodo — que el otro
+extremo no responda, que devuelva un usuario sin el rol esperado.
+
+**Cada servicio prueba contra su propia base.** `ms-identidad` recrea sólo el esquema
+`identidad`; el gateway sólo `public`. Comparten instancia sin pisarse.
+
+**Una suite de integración corta, aparte.** `tests/integracion/` recorre los caminos
+críticos —entrar, firmar un contrato, registrar un pago— contra el stack real levantado.
+Es lo único que comprueba que el contrato entre servicios sea cierto: un doble que se
+desvía del servicio real deja las suites en verde y el sistema roto. No duplica casos
+borde y **no** forma parte de `npm test`; se lanza con `npm run test:integracion`.
+
+Al extraer un servicio nuevo: se lleva sus pruebas, el gateway gana un doble suyo, y la
+suite de integración gana un camino sólo si es crítico para la demostración.
+
 ## Comandos
 
 ```bash
 docker compose -f infra/docker-compose.yml up --build     # levantar todo
 docker compose -f infra/docker-compose.yml down -v        # reinicio limpio
-npm test --workspace=services/ms-financiero               # pruebas de un servicio
-npm test --workspaces --if-present                        # todas
+npm test --workspace=services/ms-identidad                # pruebas de un servicio
+npm test --workspaces --if-present                        # todas, contra dobles
+npm run test:integracion                                  # caminos criticos, stack arriba
+npm run seed --workspace=services/ms-identidad            # usuarios de prueba
 ```
 
 Pruebas con `NODE_ENV=test`, apuntando a `arriendos360_test`.

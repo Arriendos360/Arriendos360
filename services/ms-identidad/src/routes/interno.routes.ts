@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { usuariosPorIds } from '../controllers/usuario.controller';
 import { revocadosVigentes } from '../services/tokenService';
 
 const router: Router = Router();
@@ -29,5 +30,13 @@ router.get('/revocados', async (_req, res) => {
     res.status(500).json({ mensaje: 'Error al listar revocados' });
   }
 });
+
+/**
+ * GET /interno/usuarios?ids=...
+ *
+ * Datos de usuario en lote para que el gateway componga sus respuestas sin
+ * cruzar la frontera con un JOIN. Ver el controlador.
+ */
+router.get('/usuarios', usuariosPorIds);
 
 export default router;

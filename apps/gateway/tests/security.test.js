@@ -2,17 +2,17 @@ const request = require('supertest');
 
 const {
     app,
-    cerrarBase,
+    cerrarEntorno,
     conToken,
     crearInquilino,
-    recrearBase,
+    prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
 
 let tokenOwner1, tokenOwner2, idInmuebleOwner1, idInquilino;
 
 beforeAll(async () => {
-    await recrearBase();
+    await prepararEntorno();
 
     const owner1 = await registrarPropietario({
         email: 'owner1@test.com',
@@ -51,7 +51,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    await cerrarBase();
+    await cerrarEntorno();
 });
 
 describe('Seguridad de Inmuebles', () => {

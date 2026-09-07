@@ -1,13 +1,13 @@
 const request = require('supertest');
 
-const { app, cerrarBase, recrearBase, registrarPropietario } = require('./utiles/entorno');
+const { app, cerrarEntorno, prepararEntorno, registrarPropietario } = require('./utiles/entorno');
 
 beforeAll(async () => {
-    await recrearBase();
+    await prepararEntorno();
 });
 
 afterAll(async () => {
-    await cerrarBase();
+    await cerrarEntorno();
 });
 
 describe('API Básica', () => {

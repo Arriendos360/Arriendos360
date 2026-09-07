@@ -1,73 +1,48 @@
 /**
- * Adaptador Express sobre la verificación de token de `packages/shared`.
+ * Guardas de ruta del gateway.
  *
- * Hasta este PR aquí vivía una segunda implementación completa de la
- * verificación del JWT, duplicando la de `packages/shared`. No era por gusto: el
- * Dockerfile del gateway construía con contexto `apps/gateway`, así que
- * `packages/` no entraba en la imagen y declarar la dependencia rompía
- * `docker compose up --build`. Con el build en el contexto raíz esa razón
- * desaparece y la duplicación con ella.
+ * La verificación del token ya no vive aquí. La hace el control de acceso
+ * (`routing/rbac.js`), que corre antes que cualquier router porque tiene que
+ * poder denegar una petición ANTES de que la costura la reenvíe a la red
+ * interna. Cuando llega hasta aquí, los claims ya están en `req.usuario`.
  *
- * Lo que queda aquí es sólo lo que es propio de Express: leer la cabecera de
- * `req`, traducir el resultado a `res.status(...).json(...)` y colgar los claims
- * de `req.usuario`. La decisión de si un token vale —firma, vigencia, forma y
- * revocación— vive en `packages/shared` y es la misma que usarán los
- * microservicios cuando se extraigan (regla dura 7, confianza cero).
+ * Lo que queda son dos guardas baratas que los routers declaran y que actúan de
+ * red de seguridad: si alguien montara un router sin política en la matriz, o
+ * cambiara el orden de los middlewares, estas cortan en vez de dejar pasar.
  *
- * La consulta de revocados se inyecta: el paquete fija que debe filtrar por
- * `expira_en > NOW()`, pero no cómo se resuelve. Hoy la resuelve
- * `tokenService.estaRevocado()` contra `tokens_revocados`; un servicio extraído
- * la resolverá preguntando a MS-Identidad o leyendo su copia en memoria.
+ * No repiten la verificación: sería un segundo `jwt.verify` y una segunda
+ * consulta de revocación por petición, sobre el mismo token y en el mismo
+ * instante.
  */
 
 const {
     MENSAJE_ROL_INSUFICIENTE,
+    MENSAJE_SIN_TOKEN,
     ROL_PROPIETARIO,
     crearError,
-    esPropietario: claimsSonDePropietario,
-    verificarTokenConRevocacion
+    esPropietario: claimsSonDePropietario
 } = require('arriendos360-shared');
 
-const { estaRevocado } = require('../services/tokenService');
-
 /**
- * Valida firma, vigencia, forma y revocación del token.
+ * Exige que el control de acceso ya haya autenticado la petición.
  *
- * Códigos, según la convención del proyecto:
- *   401  no hay token, o el token está revocado
- *   403  firma inválida, token expirado o claims con forma antigua
+ * Un `req.usuario` ausente en una ruta que declara este middleware significa que
+ * la matriz no cubre esa ruta como autenticada. Es un error de configuración,
+ * no una petición anónima legítima, y se corta igual.
  */
-const verificarToken = async (req, res, next) => {
-    // El control de acceso ya verificó el token de esta petición y dejó los
-    // claims en `req.usuario`. Repetirlo aquí significaría una segunda consulta
-    // a `tokens_revocados` por petición sin ganar nada: es el mismo proceso, el
-    // mismo token y el mismo instante. Se conserva el middleware porque los
-    // routers lo declaran y porque sigue siendo la puerta correcta el día que
-    // uno de ellos se monte fuera del gateway.
-    if (req.usuario) {
-        return next();
+const verificarToken = (req, res, next) => {
+    if (!req.usuario) {
+        return res.status(401).json(crearError(MENSAJE_SIN_TOKEN));
     }
 
-    const resultado = await verificarTokenConRevocacion(
-        { authorization: req.headers['authorization'] },
-        process.env.JWT_SECRET,
-        estaRevocado
-    );
-
-    if (!resultado.valido) {
-        return res.status(resultado.estado).json(resultado.error);
-    }
-
-    req.usuario = resultado.claims;
-    next();
+    return next();
 };
 
 /**
  * Exige el rol PROPIETARIO.
  *
- * El rol dejó de ser una columna del usuario y pasó a ser una fila en
- * `RolesUsuario`, así que la comprobación consulta el arreglo de claims. Un
- * usuario que sea propietario e inquilino a la vez pasa por aquí.
+ * La matriz ya lo comprueba para las rutas que lo declaran; esto es la Capa 3
+ * del módulo de seguridad, que debe sostenerse sola.
  */
 const esPropietario = (req, res, next) => {
     if (claimsSonDePropietario(req.usuario)) {

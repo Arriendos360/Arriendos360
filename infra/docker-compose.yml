@@ -30,11 +30,9 @@ services:
 
   # MS-Identidad — usuarios, roles, autenticacion y revocacion.
   #
-  # Ya corre, pero TODAVIA NO ESTA CABLEADO: MS_IDENTIDAD_URL sigue vacia en el
-  # gateway, asi que /api/auth y /api/usuarios se resuelven en local como hasta
-  # ahora. Este PR lo deja funcionando y probado; el siguiente acciona el
-  # interruptor. Mientras tanto sus tablas viven en el esquema `identidad` y las
-  # del gateway en `public`, sin tocarse.
+  # Ya esta cableado: MS_IDENTIDAD_URL apunta aqui, asi que la costura del
+  # gateway reenvia /api/auth y /api/usuarios a este servicio. Sus tablas viven
+  # en el esquema `identidad`; el gateway solo conoce `public`.
   ms-identidad:
     build:
       context: ..
@@ -79,7 +77,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
       # aqui hace que el gateway reenvie ese prefijo al microservicio.
-      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-}
+      # Cableado: los dos prefijos de identidad pasan a remotos por la costura.
+      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
       - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-}
       - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-}
       - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-}
@@ -88,6 +87,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # El gateway carga su cache de revocados al arrancar; si ms-identidad no
+      # esta en pie, arranca con la cache vacia y un aviso en el log.
+      ms-identidad:
+        condition: service_started
     volumes:
       # Recarga en caliente del codigo del gateway. `packages/` y `database/`
       # NO se montan: viven dentro de la imagen, asi que tocarlos exige

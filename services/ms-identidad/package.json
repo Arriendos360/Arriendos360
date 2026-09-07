@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "test": "cross-env NODE_ENV=test jest --runInBand --forceExit --detectOpenHandles",
-    "migrate": "ts-node src/database/aplicar.ts"
+    "migrate": "ts-node src/database/aplicar.ts",
+    "seed": "ts-node src/database/seed.ts"
   },
   "dependencies": {
     "arriendos360-contracts": "*",

@@ -24,9 +24,14 @@
 const fs = require('fs');
 const path = require('path');
 
-/** Esquemas en orden de aplicación. `dominio` no depende de `identidad`, pero
- *  fijar el orden hace reproducible el resultado. */
-const ESQUEMAS = ['identidad', 'dominio'];
+/**
+ * Esquemas que gobierna el gateway.
+ *
+ * `identidad` ya no está: sus tablas se fueron con ms-identidad, que aplica
+ * `database/identidad/` contra su propio esquema PostgreSQL. El gateway sólo
+ * prepara lo suyo, que es la regla dura 3 aplicada también a las migraciones.
+ */
+const ESQUEMAS = ['dominio'];
 
 /** `<raiz del monorepo>/database`, desde `apps/gateway/src/database/`. */
 const RUTA_BASE = path.resolve(__dirname, '../../../../database');

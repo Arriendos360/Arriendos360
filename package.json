@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "test": "npm test --workspaces --if-present",
+    "test:integracion": "node --test tests/integracion/caminos-criticos.test.js",
     "build:packages": "npm run build --workspace=packages/contracts --workspace=packages/shared",
     "typecheck": "npm run typecheck --workspace=packages/contracts --workspace=packages/shared --workspace=services/ms-identidad"
   },

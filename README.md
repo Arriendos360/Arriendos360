@@ -60,7 +60,7 @@ Necesitas dos archivos `.env` locales (ninguno se versiona; ver `docs/adr/0001`)
 
 - Web: http://localhost:3000
 - API (gateway): http://localhost:3001
-- ms-identidad: http://localhost:3011 (aun sin cablear al gateway)
+- ms-identidad: http://localhost:3011 (el gateway le reenvia /api/auth y /api/usuarios)
 
 `services/ms-identidad/.env` es un tercer archivo local, copiado de
 `services/ms-identidad/.env.example`. `DB_PASSWORD` y `JWT_SECRET` deben coincidir
@@ -72,9 +72,17 @@ con los del gateway: los dos servicios verifican la misma firma.
 # Pruebas de un workspace
 npm test --workspace=apps/gateway
 
-# Todas las pruebas
+# Todas: cada servicio contra dobles, sin levantar el stack
 npm test --workspaces --if-present
+
+# Caminos criticos contra el stack real (exige `up` previo)
+npm run test:integracion
 ```
+
+Cada servicio prueba su logica contra dobles y contra su propio esquema, asi que
+`npm test` corre en segundos y sin Docker. La suite de integracion es corta a
+proposito: solo comprueba que el contrato ENTRE servicios sea cierto, que es lo
+unico que un doble no puede garantizar. La convencion completa esta en CLAUDE.md.
 
 Las pruebas del gateway corren con `NODE_ENV=test` contra la base
 `arriendos360_test`, que se recrea al inicio de cada suite aplicando las mismas
@@ -104,10 +112,12 @@ relativa al codigo, asi que es la misma dentro y fuera del contenedor.
 
 ## Datos de prueba
 
+Los usuarios los siembra ms-identidad, que es su dueno:
+
 ```bash
-npm run seed --workspace=apps/gateway
+npm run seed --workspace=services/ms-identidad
 # o, con el stack levantado:
-docker exec arriendos360_api npm run seed
+docker exec arriendos360_identidad npm run seed
 ```
 
 Crea tres usuarios, todos con contrasena `Prueba123`:

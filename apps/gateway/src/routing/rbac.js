@@ -17,10 +17,13 @@
  * cuerpo: la carga de anexos viaja como multipart y tiene que llegar intacta al
  * reenvío.
  *
- * La consulta de revocados se inyecta. Aquí eso no es purismo: permite que las
- * pruebas de la matriz corran sin PostgreSQL, y es la costura por la que el
- * paso 3b enchufará la caché en memoria cuando `tokens_revocados` se vaya con
- * ms-identidad.
+ * La consulta de revocados se inyecta. Por esa costura entra hoy la caché en
+ * memoria que el gateway refresca contra ms-identidad (`cacheRevocados.js`), y
+ * es lo que permite que las pruebas de la matriz corran sin red ni base.
+ *
+ * Si no se inyecta nada, se deniega toda petición autenticada: no hay valor por
+ * defecto razonable. Suponer «no hay revocados» convertiría un olvido de
+ * cableado en una desactivación silenciosa del logout.
  */
 
 const {
@@ -61,7 +64,12 @@ const mensajeDeRol = (acceso) =>
  */
 const crearControlDeAcceso = (opciones = {}) => {
     const consultarRevocacion =
-        opciones.estaRevocado || require('../services/tokenService').estaRevocado;
+        opciones.estaRevocado ||
+        (() => {
+            throw new Error(
+                'crearControlDeAcceso() necesita `estaRevocado`: sin él no se puede saber si un token fue revocado.'
+            );
+        });
 
     return async function controlDeAcceso(req, res, next) {
         // Fuera de `/api` la matriz no opina: la raíz y `/uploads` los sirve

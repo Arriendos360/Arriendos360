@@ -69,7 +69,7 @@ const Contratos = () => {
      */
     const buscarInquilino = async (documento) => {
         try {
-            const respuesta = await api.get('/usuarios/buscar', { params: { documento } });
+            const respuesta = await api.get('/usuarios', { params: { documento } });
             return respuesta.data.id;
         } catch (error) {
             if (error.response?.status === 404) return null;

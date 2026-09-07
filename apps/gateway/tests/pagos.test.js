@@ -2,17 +2,17 @@ const request = require('supertest');
 
 const {
     app,
-    cerrarBase,
+    cerrarEntorno,
     conToken,
     crearInquilino,
-    recrearBase,
+    prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
 
 let tokenProp, idContrato;
 
 beforeAll(async () => {
-    await recrearBase();
+    await prepararEntorno();
 
     // 1. Registrar Propietario
     const propietario = await registrarPropietario({
@@ -53,7 +53,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    await cerrarBase();
+    await cerrarEntorno();
 });
 
 describe('Gestión de Pagos', () => {

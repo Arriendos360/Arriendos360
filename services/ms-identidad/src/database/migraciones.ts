@@ -4,13 +4,9 @@
  * Misma idea que el del gateway: los `.sql` son datos y viven aparte, el runner
  * es codigo y viaja con el servicio. Cambian dos cosas.
  *
- * 1. Los `.sql` de este servicio estan en `services/ms-identidad/database/`, no
- *    en `database/identidad/` de la raiz. Es TRANSITORIO. Mientras el gateway
- *    siga sirviendo `/api/auth` en local, sus tablas de identidad viven en
- *    `public` y las gobiernan las migraciones de `database/identidad/`. Si este
- *    servicio usara esa misma carpeta, los dos runners se pisarian. Cuando el
- *    PR siguiente desconecte la identidad del gateway, estos archivos suben a
- *    `database/identidad/` y aquellos desaparecen.
+ * 1. Los `.sql` viven en `database/identidad/`, en la raiz del monorepo, que es
+ *    donde CLAUDE.md ubica las migraciones: una carpeta por esquema. Son las
+ *    unicas: el gateway dejo de tener tablas de identidad.
  *
  * 2. La tabla de control tambien vive en el esquema `identidad`, para que este
  *    servicio no comparta ni siquiera el registro de que migraciones aplico.
@@ -22,7 +18,8 @@ import type { Sequelize } from 'sequelize';
 
 import { ESQUEMA } from '../config/database';
 
-export const RUTA_BASE = path.resolve(__dirname, '../../database');
+/** `<raiz del monorepo>/database/identidad`, desde `src/database/`. */
+export const RUTA_BASE = path.resolve(__dirname, '../../../../database/identidad');
 
 const TABLA_CONTROL = `${ESQUEMA}.migraciones_aplicadas`;
 

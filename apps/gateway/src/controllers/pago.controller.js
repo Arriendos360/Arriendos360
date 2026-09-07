@@ -1,7 +1,8 @@
 const { Op } = require('sequelize');
 const PDFDocument = require('pdfkit');
 
-const { Pago, Contrato, Inmueble, Abono, Usuario } = require('../models');
+const { adjuntarInquilino } = require('../clientes/composicion');
+const { Pago, Contrato, Inmueble, Abono } = require('../models');
 const { esUuid } = require('../models/uuid');
 const { generarPDFComprobante } = require('../services/pdfService');
 
@@ -13,9 +14,10 @@ const { generarPDFComprobante } = require('../services/pdfService');
  *
  * 1. `id_perfil` (la cédula del perfil) desaparece y su papel lo hace el `sub`
  *    del token, que es el UUID del usuario.
- * 2. Las tablas `propietarios` e `inquilinos` ya no existen. Donde antes se
- *    navegaba `Inmueble -> Propietario -> Usuario`, ahora se llega directo a
- *    `Usuario` por el alias `Propietario`. Un nivel menos de anidamiento.
+ * 2. Los datos del arrendatario que imprimen los PDF ya no vienen de un
+ *    `include`: `usuarios` es de ms-identidad y el JOIN cruzaría la frontera.
+ *    Los pide el gateway por HTTP y los compone justo antes de generar el
+ *    documento (`clientes/composicion.js`).
  *
  * La visibilidad deja de decidirse por el rol declarado y pasa a decidirse por
  * la pertenencia real: se ve un pago si eres el dueño del inmueble O el
@@ -47,13 +49,19 @@ const contratoConInmueble = {
     include: [{ model: Inmueble, required: true }]
 };
 
-/** Las dos partes del contrato, ya como usuarios. Se usan para los PDF. */
-const contratoConPartes = {
+/**
+ * Contrato con su inmueble, para los PDF.
+ *
+ * Ya no incluye al propietario: los comprobantes nunca imprimieron sus datos, y
+ * cargarlos era trabajo que no llegaba a ninguna parte. El arrendatario sí hace
+ * falta y se compone aparte, porque vive en ms-identidad.
+ *
+ * Se distingue de `contratoConInmueble` en que ese es un INNER JOIN: sirve para
+ * autorizar y por eso exige que el contrato y el inmueble existan. Éste no.
+ */
+const contratoParaPdf = {
     model: Contrato,
-    include: [
-        { model: Inmueble, include: [{ model: Usuario, as: 'Propietario' }] },
-        { model: Usuario, as: 'Inquilino' }
-    ]
+    include: [{ model: Inmueble }]
 };
 
 /** ¿Es este usuario parte del contrato al que pertenece el pago? */
@@ -201,9 +209,8 @@ const fmtPeriodo = (date) => new Date(date).toLocaleDateString('es-CO', { month:
 /**
  * Datos comunes de la cabecera de los comprobantes.
  *
- * `arrendatario` es ahora un `Usuario` directo, no un `Inquilino` con un
- * `Usuario` colgando, y su cédula sale de `documento` en vez de la antigua clave
- * primaria `id_inquilino`. Lo que se imprime en el PDF es idéntico.
+ * El `arrendatario` lo compone el gateway pidiéndoselo a ms-identidad; su cédula
+ * sale de `documento`. Lo que se imprime en el PDF es idéntico a antes.
  */
 const datosEmpresa = {
     empresa_nombre: "ARRIENDOS 360 S.A.S",
@@ -213,11 +220,20 @@ const datosEmpresa = {
     empresa_ciudad: "Bogotá D.C."
 };
 
+/**
+ * Bloque del arrendatario.
+ *
+ * Tolera que falte: si ms-identidad no respondió, el recibo sale con «No
+ * disponible» en lugar de no salir. Un comprobante incompleto sirve para algo;
+ * un 500 al pedir el recibo, no.
+ */
 const datosArrendatario = (arrendatario) => ({
-    nombre_arrendatario: `${arrendatario.nombres} ${arrendatario.apellidos}`,
-    cedula_arrendatario: arrendatario.documento,
-    telefono_arrendatario: arrendatario.telefono || 'No registrado',
-    email_arrendatario: arrendatario.email
+    nombre_arrendatario: arrendatario
+        ? `${arrendatario.nombres} ${arrendatario.apellidos}`
+        : 'No disponible',
+    cedula_arrendatario: arrendatario ? arrendatario.documento : 'No disponible',
+    telefono_arrendatario: (arrendatario && arrendatario.telefono) || 'No registrado',
+    email_arrendatario: (arrendatario && arrendatario.email) || 'No registrado'
 });
 
 const datosInmueble = (inmueble) => ({
@@ -244,7 +260,7 @@ const generarComprobanteAbono = async (req, res) => {
 
         const abono = esUuid(id_abono)
             ? await Abono.findByPk(id_abono, {
-                include: [{ model: Pago, include: [contratoConPartes] }]
+                include: [{ model: Pago, include: [contratoParaPdf] }]
             })
             : null;
 
@@ -254,7 +270,7 @@ const generarComprobanteAbono = async (req, res) => {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
-        const contrato = abono.Pago.Contrato;
+        const contrato = await adjuntarInquilino(abono.Pago.Contrato);
         const arrendatario = contrato.Inquilino;
         const esTotal = parseFloat(abono.saldo_restante_momento) === 0;
         const periodo = fmtPeriodo(abono.Pago.mes_correspondiente);
@@ -289,7 +305,7 @@ const generarRecibo = async (req, res) => {
         const { sub } = req.usuario;
 
         const pago = esUuid(id)
-            ? await Pago.findByPk(id, { include: [contratoConPartes] })
+            ? await Pago.findByPk(id, { include: [contratoParaPdf] })
             : null;
 
         if (!pago) return res.status(404).json({ mensaje: 'No encontrado' });
@@ -298,7 +314,7 @@ const generarRecibo = async (req, res) => {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
-        const contrato = pago.Contrato;
+        const contrato = await adjuntarInquilino(pago.Contrato);
         const arrendatario = contrato.Inquilino;
         const esTotal = parseFloat(pago.saldo_pendiente) === 0;
         const periodo = fmtPeriodo(pago.mes_correspondiente);

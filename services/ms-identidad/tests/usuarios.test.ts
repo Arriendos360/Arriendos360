@@ -175,3 +175,67 @@ describe('Registro de consultas', () => {
     }
   });
 });
+
+describe('GET /interno/usuarios (lote para el gateway)', () => {
+  test('devuelve los datos que el gateway necesita para componer', async () => {
+    const respuesta = await request(app).get(`/interno/usuarios?ids=${inquilinoId}`);
+
+    expect(respuesta.status).toBe(200);
+    const usuario = respuesta.body.usuarios[0];
+    expect(usuario.id).toBe(inquilinoId);
+    expect(usuario.nombres).toBe('Bruno');
+    // Aquí sí van contacto y roles: el llamante es el gateway componiendo una
+    // respuesta que ya está autorizado a construir, no una persona preguntando.
+    expect(usuario.email).toBe('inquilino@test.com');
+    expect(usuario.telefono).toBe('3005555555');
+    expect(usuario.roles).toEqual(['INQUILINO']);
+  });
+
+  test('resuelve varios de una vez: es lo que evita el N+1 por red', async () => {
+    const respuesta = await request(app).get(
+      `/interno/usuarios?ids=${inquilinoId},${propietario.id}`,
+    );
+
+    expect(respuesta.body.usuarios).toHaveLength(2);
+    const ids = respuesta.body.usuarios.map((u: { id: string }) => u.id).sort();
+    expect(ids).toEqual([inquilinoId, propietario.id].sort());
+  });
+
+  test('ignora identificadores que no son UUID en vez de reventar', async () => {
+    const respuesta = await request(app).get(`/interno/usuarios?ids=${inquilinoId},no-es-uuid,123`);
+
+    expect(respuesta.status).toBe(200);
+    expect(respuesta.body.usuarios).toHaveLength(1);
+  });
+
+  test('sin ids devuelve lista vacía, no un volcado de la tabla', async () => {
+    const respuesta = await request(app).get('/interno/usuarios');
+
+    expect(respuesta.status).toBe(200);
+    expect(respuesta.body.usuarios).toEqual([]);
+  });
+
+  test('un id inexistente simplemente no aparece', async () => {
+    const respuesta = await request(app).get(
+      '/interno/usuarios?ids=00000000-0000-4000-8000-000000000000',
+    );
+
+    expect(respuesta.body.usuarios).toEqual([]);
+  });
+
+  test('rechaza lotes desmedidos', async () => {
+    const muchos = Array.from({ length: 201 }, () => '00000000-0000-4000-8000-000000000000').join(',');
+    const respuesta = await request(app).get(`/interno/usuarios?ids=${muchos}`);
+
+    expect(respuesta.status).toBe(400);
+  });
+
+  test('las consultas internas NO se registran como consultas por documento', async () => {
+    // El registro existe para vigilar quién husmea cédulas. El gateway
+    // componiendo una respuesta no es eso, y meterlo ahí ahogaría la señal.
+    await ConsultaDocumento.destroy({ where: {} });
+    await request(app).get(`/interno/usuarios?ids=${inquilinoId}`);
+
+    expect(await ConsultaDocumento.count()).toBe(0);
+  });
+});

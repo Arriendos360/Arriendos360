@@ -29,8 +29,9 @@ RUN npm ci --include-workspace-root \
     --workspace=packages/shared
 
 # -------------------------------------------------------------------- codigo
-# Las migraciones del servicio viajan con el: el esquema `identidad` es suyo y
-# nadie mas lo prepara.
+# `database/identidad` son SUS migraciones: el esquema es suyo y nadie mas lo
+# prepara. Entran por COPY, igual que en el gateway.
+COPY database/identidad/ database/identidad/
 COPY services/ms-identidad/ services/ms-identidad/
 
 WORKDIR /repo/services/ms-identidad
