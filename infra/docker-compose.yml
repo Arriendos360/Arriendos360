@@ -28,6 +28,37 @@ services:
       retries: 20
       start_period: 5s
 
+  # MS-Identidad — usuarios, roles, autenticacion y revocacion.
+  #
+  # Ya corre, pero TODAVIA NO ESTA CABLEADO: MS_IDENTIDAD_URL sigue vacia en el
+  # gateway, asi que /api/auth y /api/usuarios se resuelven en local como hasta
+  # ahora. Este PR lo deja funcionando y probado; el siguiente acciona el
+  # interruptor. Mientras tanto sus tablas viven en el esquema `identidad` y las
+  # del gateway en `public`, sin tocarse.
+  ms-identidad:
+    build:
+      context: ..
+      dockerfile: services/ms-identidad/Dockerfile
+    container_name: arriendos360_identidad
+    command: npm run dev
+    ports:
+      - "3011:3011"
+    environment:
+      - PORT=3011
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=arriendos360_db
+      - DB_NAME_TEST=arriendos360_test
+      # Identico al del gateway: los dos verifican la misma firma.
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../services/ms-identidad:/repo/services/ms-identidad
+      - /repo/services/ms-identidad/node_modules
+
   # Servidor Backend
   backend:
     # Contexto en la raiz del monorepo: el gateway depende de packages/shared

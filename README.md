@@ -17,7 +17,9 @@ Arriendos360/
 ├─ apps/
 │  ├─ web/          React SPA (antes frontend/). Puerto 3000.
 │  └─ gateway/      Monolito Express + Sequelize (antes backend/). Puerto 3001.
-├─ services/        Microservicios extraidos del monolito (todavia vacio).
+├─ services/
+│  └─ ms-identidad/ Usuarios, roles, autenticacion y revocacion. Puerto 3011.
+│                   TypeScript strict, esquema PostgreSQL propio (`identidad`).
 ├─ packages/
 │  ├─ contracts/    DTOs compartidos en TypeScript.
 │  └─ shared/       Verificacion de JWT, errores, cliente HTTP.
@@ -58,6 +60,11 @@ Necesitas dos archivos `.env` locales (ninguno se versiona; ver `docs/adr/0001`)
 
 - Web: http://localhost:3000
 - API (gateway): http://localhost:3001
+- ms-identidad: http://localhost:3011 (aun sin cablear al gateway)
+
+`services/ms-identidad/.env` es un tercer archivo local, copiado de
+`services/ms-identidad/.env.example`. `DB_PASSWORD` y `JWT_SECRET` deben coincidir
+con los del gateway: los dos servicios verifican la misma firma.
 
 ## Pruebas
 

@@ -48,7 +48,18 @@ identidad del Capítulo 2 ya implementado:
   adaptador de Express sobre este paquete, no una segunda implementación.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
+- `services/ms-identidad/` — primer microservicio real. TypeScript `strict`, puerto
+  3011, esquema PostgreSQL propio (`identidad`) en la misma instancia. **Todavía no
+  está cableado:** `MS_IDENTIDAD_URL` sigue vacía, así que el gateway resuelve
+  `/api/auth` y `/api/usuarios` en local como hasta ahora. Corre, se prueba y se
+  demuestra solo; el PR siguiente acciona el interruptor.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
+
+Mientras dure ese estado transitorio, las tablas de identidad existen dos veces: en
+`public` (las del gateway, gobernadas por `database/identidad/`) y en `identidad` (las
+del servicio, gobernadas por `services/ms-identidad/database/`). No se pisan porque
+están en esquemas distintos. Al cablear, las del gateway y su carpeta desaparecen y las
+del servicio suben a `database/identidad/`.
 
 Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,

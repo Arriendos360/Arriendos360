@@ -6,10 +6,20 @@
 Test Suites: 9 passed, 9 total
 Tests:       136 passed, 136 total
 Snapshots:   0 total
-Time:        4.826 s, estimated 5 s
+Time:        4.674 s, estimated 5 s
 Ran all test suites.
 
 > arriendos360-frontend@0.1.0 test
 > react-scripts test --watchAll=false --passWithNoTests
 
 No tests found, exiting with code 0
+
+> arriendos360-ms-identidad@0.0.0 test
+> cross-env NODE_ENV=test jest --runInBand --forceExit --detectOpenHandles
+
+
+Test Suites: 2 passed, 2 total
+Tests:       33 passed, 33 total
+Snapshots:   0 total
+Time:        2.52 s, estimated 3 s
+Ran all test suites.
