@@ -1,0 +1,202 @@
+/**
+ * Cliente del gateway hacia ms-inmuebles.
+ *
+ * Existe por lo mismo que `identidad.js`: los inmuebles dejaron de ser
+ * alcanzables con un `include`. Pero el uso es distinto y la diferencia importa,
+ * porque decide qué se hace cuando el servicio no responde.
+ *
+ * DOS USOS, DOS POLÍTICAS DE FALLO.
+ *
+ * **Autorizar** — «¿qué inmuebles son de este propietario?». Es lo que sustituye
+ * a `$Inmueble.id_propietario$` en los `where` de contratos y pagos. Aquí un
+ * fallo NO puede degradarse: si se devolviera una lista vacía, el propietario
+ * vería «no tienes contratos» en vez de un error, que es una respuesta creíble y
+ * falsa. Peor todavía, la disyunción de visibilidad se reduciría a «eres el
+ * inquilino», y un propietario que además es inquilino vería la mitad de sus
+ * datos sin enterarse. Por eso `idsDePropietario` PROPAGA el fallo.
+ *
+ * **Decorar** — «dame los datos de estos inmuebles» para pintar un listado o un
+ * PDF. Aquí sí se degrada: `porIds` devuelve un mapa vacío y el consumidor pinta
+ * lo que pueda. Un recibo sin la dirección sigue siendo un recibo; un 502 al
+ * pedirlo, no. Es la misma política que `usuariosPorIds`.
+ *
+ * Es la distinción que ya existía entre `usuariosPorIds` y `revocadosVigentes`,
+ * aplicada dentro de un solo cliente.
+ */
+
+const { cabeceraDeServicio } = require('arriendos360-shared');
+
+const TIEMPO_LIMITE_MS = Number(process.env.MS_INMUEBLES_TIMEOUT_MS || 3000);
+
+const DESTINATARIO = 'ms-inmuebles';
+
+/** URL base del servicio, o null si todavía no está configurado. */
+const urlBase = (entorno = process.env) => {
+    const valor = entorno.MS_INMUEBLES_URL;
+    if (typeof valor !== 'string') {
+        return null;
+    }
+
+    const limpio = valor.trim();
+    return limpio === '' ? null : limpio.replace(/\/+$/, '');
+};
+
+const pedirJson = async (url, metodo = 'GET', cuerpo = null) => {
+    const respuesta = await fetch(url, {
+        method: metodo,
+        headers: {
+            ...cabeceraDeServicio({
+                emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+                destinatario: DESTINATARIO,
+                secreto: process.env.SERVICIO_JWT_SECRET
+            }),
+            ...(cuerpo ? { 'Content-Type': 'application/json' } : {})
+        },
+        ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}),
+        signal: AbortSignal.timeout(TIEMPO_LIMITE_MS)
+    });
+
+    if (!respuesta.ok) {
+        throw new Error(`ms-inmuebles respondió ${respuesta.status} a ${url}`);
+    }
+
+    return respuesta.json();
+};
+
+/**
+ * Los inmuebles de un propietario.
+ *
+ * @returns {Promise<Array<object>>}
+ * @throws si el servicio no responde. Ver la nota de cabecera.
+ */
+const dePropietario = async (sub, opciones = {}) => {
+    const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();
+
+    if (base === null) {
+        return [];
+    }
+
+    const datos = await pedirJson(
+        `${base}/interno/inmuebles?propietario=${encodeURIComponent(sub)}`
+    );
+
+    return datos.inmuebles || [];
+};
+
+/**
+ * Solo los identificadores de los inmuebles de un propietario.
+ *
+ * Es lo que se pasa como `id_inmueble: { [Op.in]: ids }` allí donde antes había
+ * un `include` con `where: { id_propietario: sub }`.
+ *
+ * SOBRE EL TAMAÑO DE LA LISTA. CLAUDE.md deja abierto qué pasa cuando un
+ * propietario tiene tantos inmuebles que la lista no cabe. Aquí no llega a ser
+ * un problema: la lista viaja en el cuerpo de la respuesta —no en una query
+ * string— y se usa en un `IN` de SQL contra la base LOCAL del gateway, que es
+ * donde siguen viviendo contratos y pagos. El día que Contratos también se
+ * extraiga habrá que decidirlo de verdad; hoy no.
+ */
+const idsDePropietario = async (sub, opciones = {}) =>
+    (await dePropietario(sub, opciones)).map((inmueble) => inmueble.id_inmueble);
+
+/**
+ * Datos de varios inmuebles, indexados por id.
+ *
+ * En lote a propósito: un listado de veinte contratos pediría veinte veces lo
+ * mismo si la consulta fuera de una en una.
+ *
+ * @returns {Promise<Map<string, object>>} vacío si el servicio no responde.
+ */
+const porIds = async (ids, opciones = {}) => {
+    const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();
+    const unicos = [...new Set((ids || []).filter(Boolean))];
+
+    if (base === null || unicos.length === 0) {
+        return new Map();
+    }
+
+    try {
+        const datos = await pedirJson(
+            `${base}/interno/inmuebles?ids=${encodeURIComponent(unicos.join(','))}`
+        );
+
+        return new Map((datos.inmuebles || []).map((inmueble) => [inmueble.id_inmueble, inmueble]));
+    } catch (error) {
+        // Se registra pero no se propaga: esto es decorar, no autorizar.
+        console.error('⚠️  No se pudieron obtener inmuebles de ms-inmuebles:', error.message);
+        return new Map();
+    }
+};
+
+/** Un inmueble, o null. Azúcar sobre `porIds`. */
+const porId = async (id, opciones = {}) => {
+    const mapa = await porIds([id], opciones);
+    return mapa.get(id) || null;
+};
+
+/**
+ * Un inmueble, SOLO si es de este propietario. `null` en cualquier otro caso.
+ *
+ * Es el ABAC de pertenencia que antes resolvía un `findOne` con
+ * `where: { id_inmueble, id_propietario }`. La comprobación se hace aquí, contra
+ * el `id_propietario` que devuelve el servicio, y no pidiéndole al servicio que
+ * filtre: así el que autoriza es el gateway, que es quien tiene el `sub`.
+ *
+ * PROPAGA el fallo, como `idsDePropietario`: no se autoriza a ciegas.
+ */
+const propioDe = async (id, sub, opciones = {}) => {
+    const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();
+
+    if (base === null || !id) {
+        return null;
+    }
+
+    const datos = await pedirJson(`${base}/interno/inmuebles?ids=${encodeURIComponent(id)}`);
+    const inmueble = (datos.inmuebles || [])[0];
+
+    return inmueble && inmueble.id_propietario === sub ? inmueble : null;
+};
+
+/**
+ * Mueve el estado de ocupación de un inmueble.
+ *
+ * Sustituye al `Inmueble.update(...)` que vivía DENTRO de la transacción que
+ * guardaba el contrato. Ya no hay transacción que abarque las dos cosas: son
+ * bases lógicas distintas. Ver `docs/adr/0011`.
+ *
+ * PROPAGA el fallo para que el llamante pueda decirlo. Callarlo dejaría un
+ * inmueble marcado como libre con un contrato vigente encima, y nadie lo
+ * arreglaría porque nadie se habría enterado.
+ */
+const cambiarEstado = async (idInmueble, estado, solicitadoPor, opciones = {}) => {
+    const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();
+
+    if (base === null) {
+        throw new Error('MS_INMUEBLES_URL no está configurada');
+    }
+
+    return pedirJson(
+        `${base}/interno/inmuebles/${encodeURIComponent(idInmueble)}/estado`,
+        'POST',
+        // Quién lo pidió, para que la auditoría del otro lado registre a la
+        // persona y no al servicio que transmitió.
+        { estado, solicitado_por: solicitadoPor }
+    );
+};
+
+/** Estados, para no repetir literales por los controladores. */
+const ESTADO_DISPONIBLE = 'disponible';
+const ESTADO_ARRENDADO = 'arrendado';
+
+module.exports = {
+    ESTADO_ARRENDADO,
+    ESTADO_DISPONIBLE,
+    TIEMPO_LIMITE_MS,
+    cambiarEstado,
+    dePropietario,
+    idsDePropietario,
+    porId,
+    porIds,
+    propioDe,
+    urlBase
+};

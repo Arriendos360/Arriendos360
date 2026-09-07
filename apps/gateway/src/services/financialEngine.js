@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const { adjuntarPartes } = require('../clientes/composicion');
-const { Contrato, Inmueble, Pago } = require('../models');
+const { Contrato, Pago } = require('../models');
 const { enviarCorreo } = require('../config/mailer');
 
 /**
@@ -17,12 +17,18 @@ const { enviarCorreo } = require('../config/mailer');
  * Este proceso corre sin usuario autenticado, asi que las columnas de auditoria
  * quedan a nombre de USUARIO_SISTEMA (ver models/auditoria.js).
  *
- * Los correos van a personas, y las personas viven en ms-identidad. Antes sus
- * datos llegaban con un `include`; ahora se componen por HTTP en un solo lote
- * antes de recorrer la lista. Si el servicio no responde, las partes quedan en
- * `null` y el aviso se omite: el motor sigue generando cuentas de cobro y
- * marcando mora, que es su trabajo principal, y lo que se pierde es la
+ * Los correos van a personas, y las personas viven en ms-identidad; el inmueble
+ * que se nombra en el aviso vive en ms-inmuebles. Antes los dos llegaban con un
+ * `include` anidado; ahora `adjuntarPartes` los compone por HTTP en un solo lote
+ * antes de recorrer la lista. Si alguno de los dos servicios no responde, esa
+ * parte queda en `null` y el aviso se omite: el motor sigue generando cuentas de
+ * cobro y marcando mora, que es su trabajo principal, y lo que se pierde es la
  * notificacion.
+ *
+ * Degradar aqui es lo correcto, al reves que en los controladores: este proceso
+ * no autoriza a nadie, solo avisa. Un barrido que no manda un correo es un
+ * incidente menor; un barrido que no genera las cuentas de cobro del mes porque
+ * ms-inmuebles tosio, no.
  */
 
 const iniciarMotorFinanciero = () => {
@@ -48,12 +54,10 @@ const procesarContratos = async () => {
         const fechaLimite = new Date();
         fechaLimite.setDate(hoy.getDate() + 2);
         
-        const contratos = await Contrato.findAll({
-            where: { estado: 1 },
-            include: [{ model: Inmueble }]
-        });
+        const contratos = await Contrato.findAll({ where: { estado: 1 } });
 
-        // Un solo viaje a ms-identidad para todos los contratos del barrido.
+        // Un viaje a cada servicio para todos los contratos del barrido, no uno
+        // por contrato.
         const contratosConPartes = await adjuntarPartes(contratos);
 
         for (const contrato of contratosConPartes) {
@@ -125,12 +129,7 @@ const procesarPagos = async () => {
         
         const pagosPendientes = await Pago.findAll({
             where: { estado: { [Op.in]: [1, 3] } }, // Pendiente o En Mora
-            include: [
-                { 
-                    model: Contrato, 
-                    include: [{ model: Inmueble }]
-                }
-            ]
+            include: [{ model: Contrato }]
         });
 
         // Igual que arriba: se componen las partes de todos los contratos

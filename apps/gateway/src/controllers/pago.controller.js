@@ -1,8 +1,9 @@
 const { Op } = require('sequelize');
 const PDFDocument = require('pdfkit');
 
-const { adjuntarInquilino } = require('../clientes/composicion');
-const { Pago, Contrato, Inmueble, Abono } = require('../models');
+const { adjuntarInquilino, adjuntarInmueble } = require('../clientes/composicion');
+const { idsDePropietario, porId: inmueblePorId, propioDe } = require('../clientes/inmuebles');
+const { Pago, Contrato, Abono } = require('../models');
 const { esUuid } = require('../models/uuid');
 const { generarPDFComprobante } = require('../services/pdfService');
 
@@ -24,54 +25,58 @@ const { generarPDFComprobante } = require('../services/pdfService');
  * inquilino del contrato. Para usuarios de un solo rol el resultado no cambia;
  * para quien es las dos cosas a la vez, que el modelo canónico ahora permite,
  * ya no se pierde la mitad de sus datos.
+ *
+ * EL PASO 4 CAMBIA CÓMO SE RESUELVE ESA DISYUNCIÓN, no la disyunción.
+ *
+ * Era una condición sobre columnas alcanzadas por `include` anidados de hasta
+ * tres niveles: `$Pago.Contrato.Inmueble.id_propietario$`, que iba de Financiero
+ * a Contratos y de ahí a Inmuebles. Con Inmuebles fuera, esa consulta ya no
+ * existe. Ahora se pregunta primero a ms-inmuebles qué inmuebles son de quien
+ * pregunta, y esa lista entra como filtro sobre `Contrato.id_inmueble`, que
+ * sigue siendo local.
+ *
+ * El salto Financiero -> Contratos SIGUE siendo un `include`: los dos viven
+ * todavía en el gateway. Se va en el paso 6, y entonces esto será un salto más.
  */
 
-// Rutas de columna a través de los `include`. Sequelize resuelve `$a.b.c$`
-// contra los alias de la consulta, lo que permite poner la condición OR en el
-// nivel superior en vez de repartirla por los `where` anidados.
-const RUTA_PROPIETARIO_DESDE_PAGO = '$Contrato.Inmueble.id_propietario$';
-const RUTA_INQUILINO_DESDE_PAGO = '$Contrato.id_inquilino$';
-const RUTA_PROPIETARIO_DESDE_ABONO = '$Pago.Contrato.Inmueble.id_propietario$';
-const RUTA_INQUILINO_DESDE_ABONO = '$Pago.Contrato.id_inquilino$';
-
-const esParteDelPago = (sub) => ({
-    [Op.or]: [{ [RUTA_PROPIETARIO_DESDE_PAGO]: sub }, { [RUTA_INQUILINO_DESDE_PAGO]: sub }]
-});
-
-const esParteDelAbono = (sub) => ({
-    [Op.or]: [{ [RUTA_PROPIETARIO_DESDE_ABONO]: sub }, { [RUTA_INQUILINO_DESDE_ABONO]: sub }]
-});
-
-/** Contrato con su inmueble, como INNER JOIN: sin ellos no hay a quién autorizar. */
-const contratoConInmueble = {
-    model: Contrato,
-    required: true,
-    include: [{ model: Inmueble, required: true }]
+/** 502 con el formato de error del proyecto. */
+const responderServicioCaido = (res, error, accion) => {
+    console.error(`Error al ${accion}:`, error.message);
+    return res.status(502).json({ mensaje: 'No se pudo contactar el servicio de inmuebles' });
 };
+
+/** Un pago es visible para el dueño del inmueble O para el inquilino del contrato. */
+const esParteDelPago = (sub, idsInmuebles) => ({
+    [Op.or]: [
+        { '$Contrato.id_inmueble$': { [Op.in]: idsInmuebles } },
+        { '$Contrato.id_inquilino$': sub }
+    ]
+});
+
+const esParteDelAbono = (sub, idsInmuebles) => ({
+    [Op.or]: [
+        { '$Pago.Contrato.id_inmueble$': { [Op.in]: idsInmuebles } },
+        { '$Pago.Contrato.id_inquilino$': sub }
+    ]
+});
 
 /**
- * Contrato con su inmueble, para los PDF.
+ * Contrato como INNER JOIN: sin él no hay a quién autorizar.
  *
- * Ya no incluye al propietario: los comprobantes nunca imprimieron sus datos, y
- * cargarlos era trabajo que no llegaba a ninguna parte. El arrendatario sí hace
- * falta y se compone aparte, porque vive en ms-identidad.
- *
- * Se distingue de `contratoConInmueble` en que ese es un INNER JOIN: sirve para
- * autorizar y por eso exige que el contrato y el inmueble existan. Éste no.
+ * Ya no arrastra el inmueble. Lo que hacía falta de él —`id_propietario`— se
+ * resuelve ahora con la lista de identificadores, y lo que hace falta para los
+ * PDF se compone aparte.
  */
-const contratoParaPdf = {
-    model: Contrato,
-    include: [{ model: Inmueble }]
-};
+const contratoRequerido = { model: Contrato, required: true };
 
 /** ¿Es este usuario parte del contrato al que pertenece el pago? */
-const puedeVerPago = (pago, sub) => {
+const puedeVerPago = (pago, sub, idsInmuebles) => {
     const contrato = pago.Contrato;
     if (!contrato) {
         return false;
     }
 
-    const esDuenio = contrato.Inmueble && contrato.Inmueble.id_propietario === sub;
+    const esDuenio = idsInmuebles.includes(contrato.id_inmueble);
     const esInquilino = contrato.id_inquilino === sub;
 
     return esDuenio || esInquilino;
@@ -82,13 +87,15 @@ const obtenerTodos = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
+        const mios = await idsDePropietario(sub);
+
         const pagos = await Pago.findAll({
-            where: esParteDelPago(sub),
-            include: [contratoConInmueble]
+            where: esParteDelPago(sub, mios),
+            include: [contratoRequerido]
         });
         res.json(pagos);
     } catch (error) {
-        res.status(500).json({ mensaje: 'Error al obtener pagos', error: error.message });
+        return responderServicioCaido(res, error, 'obtener pagos');
     }
 };
 
@@ -99,15 +106,13 @@ const obtenerPorContrato = async (req, res) => {
         const { sub } = req.usuario;
 
         const contrato = esUuid(id_contrato)
-            ? await Contrato.findOne({
-                where: { id_contrato },
-                include: [{ model: Inmueble }]
-            })
+            ? await Contrato.findOne({ where: { id_contrato } })
             : null;
 
         if (!contrato) return res.status(404).json({ mensaje: 'Contrato no encontrado' });
 
-        const esDuenio = contrato.Inmueble && contrato.Inmueble.id_propietario === sub;
+        const inmueble = await inmueblePorId(contrato.id_inmueble);
+        const esDuenio = Boolean(inmueble) && inmueble.id_propietario === sub;
         const esInquilino = contrato.id_inquilino === sub;
 
         if (!esDuenio && !esInquilino) {
@@ -131,13 +136,16 @@ const crear = async (req, res) => {
         const { id_contrato, monto_total } = req.body;
 
         const contrato = esUuid(id_contrato)
-            ? await Contrato.findOne({
-                where: { id_contrato },
-                include: [{ model: Inmueble, required: true, where: { id_propietario: sub } }]
-            })
+            ? await Contrato.findOne({ where: { id_contrato } })
             : null;
 
-        if (!contrato) return res.status(403).json({ mensaje: 'No tienes permisos sobre este contrato' });
+        // Cobrar es exclusivo del dueño del inmueble, así que aquí no basta con
+        // ser parte: hay que ser el propietario.
+        const inmueble = contrato ? await propioDe(contrato.id_inmueble, sub) : null;
+
+        if (!contrato || !inmueble) {
+            return res.status(403).json({ mensaje: 'No tienes permisos sobre este contrato' });
+        }
 
         const { creado_por, actualizado_por, ...datos } = req.body;
 
@@ -159,15 +167,17 @@ const registrarPago = async (req, res) => {
     const t = await Pago.sequelize.transaction();
     try {
         const pago = esUuid(id)
-            ? await Pago.findByPk(id, { include: [contratoConInmueble], transaction: t })
+            ? await Pago.findByPk(id, { include: [contratoRequerido], transaction: t })
             : null;
         if (!pago) { await t.rollback(); return res.status(404).json({ mensaje: 'Pago no encontrado' }); }
+
+        const mios = await idsDePropietario(sub);
 
         if (parseFloat(monto_pagado) <= 0 || parseFloat(monto_pagado) > parseFloat(pago.saldo_pendiente)) {
             await t.rollback(); return res.status(400).json({ mensaje: 'Monto inválido o superior al saldo' });
         }
 
-        if (!puedeVerPago(pago, sub)) { await t.rollback(); return res.status(403).json({ mensaje: 'No autorizado' }); }
+        if (!puedeVerPago(pago, sub, mios)) { await t.rollback(); return res.status(403).json({ mensaje: 'No autorizado' }); }
 
         const nuevoSaldo = parseFloat(pago.saldo_pendiente) - parseFloat(monto_pagado);
         const nuevoAbono = await Abono.create(
@@ -191,13 +201,15 @@ const obtenerHistorialGlobalAbonos = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
+        const mios = await idsDePropietario(sub);
+
         const abonos = await Abono.findAll({
-            where: esParteDelAbono(sub),
-            include: [{ model: Pago, required: true, include: [contratoConInmueble] }],
+            where: esParteDelAbono(sub, mios),
+            include: [{ model: Pago, required: true, include: [contratoRequerido] }],
             order: [['fecha_abono', 'DESC']]
         });
         res.json(abonos);
-    } catch (error) { res.status(500).json({ mensaje: 'Error al obtener historial global', error: error.message }); }
+    } catch (error) { return responderServicioCaido(res, error, 'obtener historial global'); }
 };
 
 // Formateador de moneda
@@ -236,10 +248,20 @@ const datosArrendatario = (arrendatario) => ({
     email_arrendatario: (arrendatario && arrendatario.email) || 'No registrado'
 });
 
+/**
+ * Bloque del inmueble.
+ *
+ * Tolera que falte, igual que el del arrendatario: si ms-inmuebles no respondió,
+ * el recibo sale con «No disponible» en lugar de no salir. Antes esto no hacía
+ * falta porque el inmueble venía del mismo JOIN y o estaba, o no había pago.
+ *
+ * `tipo` se llamaba `tipo_inmueble`. La CLAVE del PDF no cambia —`pdfService`
+ * la imprime con ese nombre— pero el campo del que sale, sí.
+ */
 const datosInmueble = (inmueble) => ({
-    direccion_inmueble: inmueble.direccion,
-    barrio_ciudad: `${inmueble.barrio}, ${inmueble.municipio}`,
-    tipo_inmueble: inmueble.tipo_inmueble
+    direccion_inmueble: inmueble ? inmueble.direccion : 'No disponible',
+    barrio_ciudad: inmueble ? `${inmueble.barrio}, ${inmueble.municipio}` : 'No disponible',
+    tipo_inmueble: inmueble ? inmueble.tipo : 'No disponible'
 });
 
 /** Envía un PDF ya construido con el mismo encabezado que usaba `window.open`. */
@@ -260,17 +282,19 @@ const generarComprobanteAbono = async (req, res) => {
 
         const abono = esUuid(id_abono)
             ? await Abono.findByPk(id_abono, {
-                include: [{ model: Pago, include: [contratoParaPdf] }]
+                include: [{ model: Pago, include: [{ model: Contrato }] }]
             })
             : null;
 
         if (!abono) return res.status(404).json({ mensaje: 'No encontrado' });
 
-        if (!abono.Pago || !puedeVerPago(abono.Pago, sub)) {
+        const mios = await idsDePropietario(sub);
+
+        if (!abono.Pago || !puedeVerPago(abono.Pago, sub, mios)) {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
-        const contrato = await adjuntarInquilino(abono.Pago.Contrato);
+        const contrato = await adjuntarInquilino(await adjuntarInmueble(abono.Pago.Contrato));
         const arrendatario = contrato.Inquilino;
         const esTotal = parseFloat(abono.saldo_restante_momento) === 0;
         const periodo = fmtPeriodo(abono.Pago.mes_correspondiente);
@@ -305,16 +329,18 @@ const generarRecibo = async (req, res) => {
         const { sub } = req.usuario;
 
         const pago = esUuid(id)
-            ? await Pago.findByPk(id, { include: [contratoParaPdf] })
+            ? await Pago.findByPk(id, { include: [{ model: Contrato }] })
             : null;
 
         if (!pago) return res.status(404).json({ mensaje: 'No encontrado' });
 
-        if (!puedeVerPago(pago, sub)) {
+        const mios = await idsDePropietario(sub);
+
+        if (!puedeVerPago(pago, sub, mios)) {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
-        const contrato = await adjuntarInquilino(pago.Contrato);
+        const contrato = await adjuntarInquilino(await adjuntarInmueble(pago.Contrato));
         const arrendatario = contrato.Inquilino;
         const esTotal = parseFloat(pago.saldo_pendiente) === 0;
         const periodo = fmtPeriodo(pago.mes_correspondiente);
@@ -345,28 +371,36 @@ const obtenerPendientes = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
+        const mios = await idsDePropietario(sub);
+
         const pagos = await Pago.findAll({
             where: {
-                [Op.and]: [{ estado: { [Op.in]: [1, 4] } }, esParteDelPago(sub)]
+                [Op.and]: [{ estado: { [Op.in]: [1, 4] } }, esParteDelPago(sub, mios)]
             },
-            include: [contratoConInmueble],
+            include: [contratoRequerido],
             order: [['mes_correspondiente', 'ASC']]
         });
         res.json(pagos);
-    } catch (error) { res.status(500).json({ mensaje: 'Error', error: error.message }); }
+    } catch (error) { return responderServicioCaido(res, error, 'obtener pendientes'); }
 };
 
 const verificarMora = async (req, res) => {
     try {
         const { sub } = req.usuario;
         const hoy = new Date();
+        // Solo sobre los propios: verificar la mora escribe, y escribir sobre el
+        // pago de otro sería peor que verlo.
+        const mios = await idsDePropietario(sub);
+
         const pagosVencidos = await Pago.findAll({
             where: { estado: { [Op.in]: [1, 4] }, mes_correspondiente: { [Op.lt]: hoy } },
-            include: [{ model: Contrato, required: true, include: [{ model: Inmueble, required: true, where: { id_propietario: sub } }] }]
+            include: [
+                { model: Contrato, required: true, where: { id_inmueble: { [Op.in]: mios } } }
+            ]
         });
         for (const pago of pagosVencidos) { await pago.update({ estado: 3 }, { usuarioAuditor: sub }); }
         res.json({ mensaje: 'Mora verificada', pagos_actualizados: pagosVencidos.length });
-    } catch (error) { res.status(500).json({ mensaje: 'Error', error: error.message }); }
+    } catch (error) { return responderServicioCaido(res, error, 'verificar mora'); }
 };
 
 const obtenerAbonos = async (req, res) => {
@@ -374,13 +408,16 @@ const obtenerAbonos = async (req, res) => {
         const { id } = req.params;
         const { sub } = req.usuario;
         const pago = esUuid(id)
-            ? await Pago.findByPk(id, { include: [contratoConInmueble] })
+            ? await Pago.findByPk(id, { include: [contratoRequerido] })
             : null;
         if (!pago) return res.status(404).json({ mensaje: 'No encontrado' });
-        if (!puedeVerPago(pago, sub)) return res.status(403).json({ mensaje: 'No autorizado' });
+
+        const mios = await idsDePropietario(sub);
+        if (!puedeVerPago(pago, sub, mios)) return res.status(403).json({ mensaje: 'No autorizado' });
+
         const abonos = await Abono.findAll({ where: { id_pago: id }, order: [['fecha_abono', 'DESC']] });
         res.json(abonos);
-    } catch (error) { res.status(500).json({ mensaje: 'Error al obtener abonos', error: error.message }); }
+    } catch (error) { return responderServicioCaido(res, error, 'obtener abonos'); }
 };
 
 module.exports = {

@@ -1,7 +1,7 @@
 /**
  * Utilidades compartidas entre el gateway y los microservicios.
  *
- * Tres piezas, todas pensadas para que al extraer un servicio no haya que
+ * Cinco piezas, todas pensadas para que al extraer un servicio no haya que
  * reinventar (ni desviar) comportamiento que el monolito ya define:
  *
  * - `errores`: la forma `{ mensaje }` y los codigos de estado convenidos.
@@ -10,12 +10,11 @@
  * - `http`: cliente minimo para llamadas entre servicios.
  * - `servicio`: autenticacion ENTRE servicios para los endpoints `/interno`,
  *   con las dos mitades: firmar la llamada y verificarla.
+ * - `revocacion`: la copia en memoria de lo que invalida tokens, para que cada
+ *   servicio pueda comprobar la revocacion sin un salto de red por peticion.
  *
- * Nadie lo consume todavia: el Dockerfile del gateway construye con contexto
- * `apps/gateway`, asi que `packages/` no entra en la imagen y declarar la
- * dependencia rompe `docker compose up --build`. Se conecta en el paso 3b, que
- * ya tiene que tocar los Dockerfiles para extraer ms-identidad. Los tipos de
- * evento del bus viviran tambien aqui, en el paso 5.
+ * Lo consumen el gateway, ms-identidad y ms-inmuebles. Los tipos de evento del
+ * bus viviran tambien aqui, en el paso 5.
  */
 
 export {
@@ -70,6 +69,19 @@ export type {
   ResolverClave,
   ResultadoServicio,
 } from './servicio';
+
+export {
+  INTERVALO_POR_DEFECTO_MS,
+  crearCacheInvalidacion,
+} from './revocacion';
+export type {
+  CacheInvalidacion,
+  EntradaRevocada,
+  EntradaSesion,
+  EstadoCache,
+  Invalidaciones,
+  OpcionesCache,
+} from './revocacion';
 
 export {
   TIMEOUT_POR_DEFECTO_MS,

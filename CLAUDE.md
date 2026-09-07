@@ -42,22 +42,40 @@ identidad del Capítulo 2 ya implementado:
   no llegue a la red interna.
 - `apps/web/` — el antiguo `frontend/`. React 18 con CRA. **Sin Tailwind**, aunque el
   PMP lo declara.
-- `packages/contracts/` — DTOs en TypeScript de los endpoints documentados.
-- `packages/shared/` — verificación local del JWT y de revocados, error estándar,
-  cliente HTTP. **El gateway ya lo consume**: su middleware de autenticación es un
-  adaptador de Express sobre este paquete, no una segunda implementación.
+- `packages/contracts/` — DTOs en TypeScript de los endpoints documentados. Casi
+  todo son tipos, salvo los **catálogos cerrados** de `inmuebles.ts` (`tipo`,
+  `estado`), que emiten JavaScript porque los comparten el servicio, el frontend
+  y el `CHECK` de la migración.
+- `packages/shared/` — verificación local del JWT y de revocados, autenticación
+  entre servicios, caché de invalidación, error estándar, cliente HTTP. **El
+  gateway ya lo consume**: su middleware de autenticación es un adaptador de
+  Express sobre este paquete, no una segunda implementación.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
-  (`identidad/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`.
+  (`identidad/`, `inmuebles/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver
+  `docs/adr/0003`. `dominio/` ya solo guarda contratos, anexos, pagos y abonos.
 - `services/ms-identidad/` — primer microservicio real y **ya en producción de la
   demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
   Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
+- `services/ms-inmuebles/` — segundo servicio. TypeScript `strict`, puerto 3012,
+  esquema propio (`inmuebles`). Sirve `/api/inmuebles`; el gateway se lo reenvía
+  por la costura. El gateway ya no tiene tabla ni modelo de inmuebles: lo que
+  necesita —qué inmuebles son de un propietario, los datos de uno concreto— lo
+  pide por HTTP a `/interno/inmuebles` y lo compone
+  (`apps/gateway/src/clientes/inmuebles.js`).
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
 
-El gateway ya no tiene tablas ni modelos de identidad. Lo que necesita de un usuario
-—el nombre del inquilino en un contrato, el arrendatario de un recibo, el correo al que
-avisa el motor— lo pide por HTTP a `/interno/usuarios` y lo compone
-(`apps/gateway/src/clientes/`). La revocación la resuelve una copia en memoria que
-refresca cada 15 s; ver `docs/adr/0008`.
+El gateway ya no tiene tablas ni modelos de identidad ni de inmuebles. Lo que
+necesita de ellos lo pide por HTTP y lo compone (`apps/gateway/src/clientes/`). La
+revocación la resuelve una copia en memoria que refresca cada 15 s; ver
+`docs/adr/0008`.
+
+**La política de fallo no es la misma en los dos casos, y la distinción importa.**
+Componer datos para *decorar* una respuesta degrada: si el servicio no contesta, la
+propiedad queda en `null` y el listado sale sin el nombre del inquilino o sin la
+dirección. Pedir datos para *autorizar* propaga el fallo y responde `502`: una lista
+vacía de «inmuebles de este propietario» haría que su dueño viera «no tienes
+contratos» —una respuesta creíble y falsa— y reduciría la disyunción de visibilidad a
+«eres el inquilino». Ver la cabecera de `clientes/inmuebles.js`.
 
 Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
@@ -77,6 +95,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 | `0009` | Autenticación entre servicios para `/interno`. Resuelve una decisión abierta; el documento no la contempla pero tampoco la contradice. |
 | `0010` | Recuperación de contraseña: endpoints, tabla de tokens, columna `contrasena_cambiada_en` y envío de correo desde `ms-identidad`. Esto último **debe desaparecer** en el paso 7, no documentarse. |
+| `0011` | El estado del inmueble deja de moverse dentro de la transacción del contrato. No se aparta del modelo; registra una **garantía que se pierde**. Provisional: lo reemplaza el evento `ContratoFormalizado` en el paso 5. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -362,8 +381,19 @@ remoto lo ya extraído.
      `database/identidad/`, el gateway pasó a componer por HTTP y a cachear los
      revocados, y las pruebas se reestructuraron sobre dobles.
    - ~~**3c.** Contraseña temporal del inquilino.~~ **Hecho.** Ver `docs/adr/0007`.
-4. **`ms-inmuebles`.** Primer servicio con referencias lógicas reales. Aquí entra la
-   validación ABAC de pertenencia.
+4. **`ms-inmuebles`.** Se parte en dos PRs, cada uno verde:
+   - ~~**4a.** Crear el servicio.~~ **Hecho.** `services/ms-inmuebles/` con su
+     esquema, sus migraciones en `database/inmuebles/`, el catálogo cerrado de
+     `tipo` en `packages/contracts`, el `/interno` de estado y sus pruebas. Es
+     **puramente aditivo**: el gateway no lo consume todavía, así que durante
+     este PR conviven dos tablas de inmuebles y la del servicio está vacía.
+   - ~~**4b.** Voltear el gateway.~~ **Hecho.** `MS_INMUEBLES_URL` activa, modelo
+     y controlador borrados, y los **29 sitios** que alcanzaban `inmuebles` por
+     asociación de Sequelize reescritos como composición. Eso adelantó la mitad
+     del trabajo que este archivo programaba para el paso 6: no había forma de
+     extraer el servicio y dejar los JOIN en pie. La tabla se movió de esquema
+     con `database/inmuebles/002` (copia) y `database/dominio/002` (retirada), en
+     ese orden y con Compose garantizándolo.
 5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
 6. **`ms-contratos`** y **`ms-financiero`.** El trabajo duro: separar `Pago`/`Abono` en
    `Cuentas_cobro`/`Transacciones`, mover el motor de mora a Financiero, obtener datos
@@ -392,6 +422,11 @@ remoto lo ya extraído.
 - **Errores:** `{ mensaje: "..." }` en el body. 401 sin token o token revocado, 403 rol
   insuficiente o recurso ajeno, 400 validación, 404 no encontrado.
 - **Roles en mayúsculas** en claims y respuestas: `PROPIETARIO`, `INQUILINO`.
+- **Catálogos cerrados en `packages/contracts`, en minúsculas.** `tipo` y `estado`
+  de Inmuebles son listas fijas que comparten el servicio, el frontend y el
+  `CHECK` de la migración. Van en minúsculas, a diferencia de los roles: un rol
+  viaja en los claims y el Capítulo 2 lo fija en mayúsculas; esto es un atributo
+  de negocio. Si agregas un valor, tócalo en los dos sitios — nada los sincroniza.
 - **Dinero:** pesos colombianos. `NUMERIC` en PostgreSQL, nunca `float`.
 - **Fechas:** guardar en UTC, presentar en `America/Bogota`. El cálculo de mora depende
   de esto y hoy usa `new Date()` local, que es una fuente latente de errores.
@@ -436,6 +471,27 @@ cualquier inquilino serviría para llamar a `/interno`. Ver `docs/adr/0009`.
 gana un doble suyo, ese doble verifica la credencial igual que el real: si no, las suites
 pasarían aunque el llamante olvidara mandarla.
 
+## Reglas que no caben en un solo servicio
+
+Algunas reglas dependen de datos de **dos contextos** y ningún servicio puede aplicarlas
+solo. «No borres un inmueble con contrato activo» es el caso tipo: la escribe Inmuebles
+pero la decide Contratos.
+
+Esas reglas van en `apps/gateway/src/routing/guardias.js`, montadas **después del RBAC y
+antes de la costura** — después, porque necesitan saber quién pregunta; antes, porque su
+trabajo es decidir si la petición llega a salir a la red interna.
+
+No se resuelven metiéndolas en el servicio que escribe. `ms-inmuebles` es subdominio de
+**Soporte** y Contratos es **Core**: consultar contratos desde ahí invertiría la
+dirección de las dependencias. Es el mismo razonamiento que puso la reemisión de la
+contraseña temporal en el gateway (`docs/adr/0010`).
+
+**El código de estado importa.** Un guardia que rechaza por el estado del recurso
+responde `409`, no `403`. El recurso es suyo y su rol es el correcto —las dos capas de
+autorización ya dijeron que sí—; lo que falla es que el recurso no está en condiciones.
+Un `403` le diría al propietario que no tiene derecho sobre su propio inmueble, que es
+falso y además no le dice qué hacer.
+
 ## Cómo se prueba
 
 Convención para los pasos 4 al 7, fijada al extraer el primer servicio:
@@ -467,6 +523,7 @@ suite de integración gana un camino sólo si es crítico para la demostración.
 docker compose -f infra/docker-compose.yml up --build     # levantar todo
 docker compose -f infra/docker-compose.yml down -v        # reinicio limpio
 npm test --workspace=services/ms-identidad                # pruebas de un servicio
+npm test --workspace=services/ms-inmuebles                # idem
 npm test --workspaces --if-present                        # todas, contra dobles
 npm run test:integracion                                  # caminos criticos, stack arriba
 npm run seed --workspace=services/ms-identidad            # usuarios de prueba
@@ -512,17 +569,23 @@ mitad de sus datos—, pero hoy se resuelve con un `Op.or` sobre columnas alcanz
 | `pago.controller.js` (pagos) | `$Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
 | `pago.controller.js` (abonos) | `$Pago.Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
 
-Funciona porque todo vive en el mismo esquema del monolito. En cuanto los servicios
-estén separados, estas consultas violan la regla dura 2. En el paso 6 debe resolverse
-**componiendo en el gateway**: pedir a Inmuebles los IDs del propietario y pasárselos a
-Contratos como filtro; para Financiero, encadenar un salto más. Decidir entonces si el
-gateway pagina o si Contratos acepta una lista de IDs, y qué pasa cuando un propietario
-tiene tantos inmuebles que la lista no cabe en una query string.
+**La mitad de esto ya está hecha.** El paso 4 tuvo que adelantarlo: al irse Inmuebles,
+los tres `include` dejaron de existir y la disyunción se resolvió como manda el plan
+—pedir a Inmuebles los IDs del propietario y filtrar por esa lista— en
+`clientes/inmuebles.js`. La lista viaja en el cuerpo de la respuesta, no en una query
+string, así que el problema del tamaño no llegó a plantearse.
 
-**`database/dominio/` es provisional.** Hoy agrupa inmuebles, contratos, pagos y abonos
-en una sola carpeta de migraciones porque todavía no hay servicios que las separen. Al
-extraer cada uno se parte en `database/inmuebles/`, `database/contratos/` y
-`database/financiero/`, y cada carpeta se va con su servicio. Ver `docs/adr/0003`.
+Lo que queda es el salto **Financiero → Contratos**, que hoy sigue siendo un `include`
+porque las dos tablas viven todavía en el gateway. En el paso 6, al extraerse
+`ms-contratos`, hay que encadenar un salto más: pedir a Contratos los contratos de esos
+inmuebles y filtrar los pagos por esa segunda lista. Ahí sí habrá que decidir si el
+gateway pagina o si Contratos acepta una lista de IDs.
+
+**`database/dominio/` es provisional.** Agrupaba inmuebles, contratos, pagos y abonos
+en una sola carpeta porque todavía no había servicios que las separaran.
+`database/inmuebles/` ya salió de ahí —con una migración que copia y otra que retira,
+en ese orden— y quedan `database/contratos/` y `database/financiero/`, que se van en el
+paso 6 por el mismo camino. Ver `docs/adr/0003`.
 
 **Clave por servicio para las llamadas internas.** Hoy todos comparten
 `SERVICIO_JWT_SECRET`, así que comprometer un servicio permite suplantar a los demás. El

@@ -1,19 +1,33 @@
 const crypto = require('crypto');
 
-const { Contrato, Inmueble, Pago } = require('../src/models');
+const { Contrato, Pago } = require('../src/models');
 const { USUARIO_SISTEMA } = require('../src/models/constantes');
 const { procesarContratos, procesarPagos } = require('../src/services/financialEngine');
-const { cerrarEntorno, identidadFalsa, prepararEntorno } = require('./utiles/entorno');
+const { cerrarEntorno, identidadFalsa, inmueblesFalso, prepararEntorno } = require('./utiles/entorno');
 
 /**
  * Motor financiero.
  *
  * Construye los datos con los modelos, porque el motor no tiene endpoint propio
- * desde que se elimino `/api/admin`. Los usuarios ya no se crean aqui: viven en
- * ms-identidad, y para estas pruebas los pone el doble. Al motor le llegan sus
- * UUID en `id_propietario` e `id_inquilino`, que es todo lo que el gateway
- * guarda de ellos.
+ * desde que se elimino `/api/admin`. Ni los usuarios ni los inmuebles se crean
+ * aqui: viven en ms-identidad y ms-inmuebles, y para estas pruebas los ponen sus
+ * dobles. Al gateway le llegan sus UUID en `id_inquilino` e `id_inmueble`, que
+ * es todo lo que guarda de ellos.
  */
+
+/** Pone un inmueble en el doble, sin pasar por la API. */
+const inmuebleEnElDoble = (idPropietario, direccion) => {
+    const inmueble = {
+        id_inmueble: crypto.randomUUID(),
+        direccion,
+        tipo: 'casa',
+        estado: 'arrendado',
+        id_propietario: idPropietario
+    };
+
+    inmueblesFalso().inmuebles.set(inmueble.id_inmueble, inmueble);
+    return inmueble;
+};
 
 let idContrato;
 let idPropietario;
@@ -55,10 +69,7 @@ describe('Motor Financiero (Automatizacion)', () => {
     jest.setTimeout(15000);
 
     test('RF-11: Deberia generar un recibo si faltan 2 dias para el aniversario', async () => {
-        const inm = await Inmueble.create(
-            { direccion: 'Finance Street', id_propietario: idPropietario },
-            { usuarioAuditor: idPropietario }
-        );
+        const inm = inmuebleEnElDoble(idPropietario, 'Finance Street');
 
         const pasadoManana = new Date();
         pasadoManana.setDate(pasadoManana.getDate() + 2);

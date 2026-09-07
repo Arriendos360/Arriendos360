@@ -1,0 +1,1 @@
+export { Inmueble } from './Inmueble';

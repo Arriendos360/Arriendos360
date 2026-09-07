@@ -9,7 +9,6 @@
 
 const Abono = require('./Abono');
 const Contrato = require('./Contrato');
-const Inmueble = require('./Inmueble');
 const Pago = require('./Pago');
 
-module.exports = { Abono, Contrato, Inmueble, Pago };
+module.exports = { Abono, Contrato, Pago };

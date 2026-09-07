@@ -53,7 +53,7 @@ const Contratos = () => {
                 api.get('/inmuebles')
             ]);
             setContratos(contratosRes.data);
-            setInmuebles(inmueblesRes.data.filter(i => i.estado_ocupacion === 'disponible'));
+            setInmuebles(inmueblesRes.data.filter(i => i.estado === 'disponible'));
         } catch (error) {
             showNotify('Error al cargar datos del servidor');
         } finally {

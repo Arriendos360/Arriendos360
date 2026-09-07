@@ -1,10 +1,11 @@
 /**
- * Composición de datos de usuario sobre entidades del gateway.
+ * Composición de datos de otros servicios sobre entidades del gateway.
  *
- * Sustituye a los `include` que cruzaban la frontera de ms-identidad. La forma
- * del resultado es exactamente la que producía Sequelize —`Inquilino` y
- * `Propietario` como objetos con `id_usuario`, `nombres`, `apellidos`,
- * `documento`, `telefono` y `email`— para que ni el frontend ni los PDF noten la
+ * Sustituye a los `include` que cruzaban la frontera de ms-identidad y, desde el
+ * paso 4, también los de ms-inmuebles. La forma del resultado es exactamente la
+ * que producía Sequelize —`Inquilino` y `Propietario` como objetos con
+ * `id_usuario`, `nombres`, `apellidos`, `documento`, `telefono` y `email`;
+ * `Inmueble` anidado en el contrato— para que ni el frontend ni los PDF noten la
  * diferencia. Lo único que cambió es de dónde salen los datos.
  *
  * Todas las funciones recogen los identificadores de la colección entera y hacen
@@ -17,6 +18,7 @@
  */
 
 const { usuariosPorIds } = require('./identidad');
+const { porIds: inmueblesPorIds } = require('./inmuebles');
 
 /** Da al usuario del servicio la forma que tenía el modelo del monolito. */
 const comoUsuario = (usuario) =>
@@ -61,37 +63,109 @@ const adjuntarInquilino = async (contrato) => {
 };
 
 /**
- * Adjunta `Propietario` a los inmuebles anidados de una lista de contratos y,
- * a la vez, `Inquilino` a los contratos.
+ * Adjunta al contrato su `Inmueble`, el `Propietario` de ese inmueble y su
+ * `Inquilino`.
  *
- * Es lo que necesita el motor financiero: avisa a las dos partes, así que pedir
- * inquilinos y propietarios por separado serían dos viajes donde basta uno.
+ * Es lo que necesita el motor financiero: avisa a las dos partes, y para saber
+ * a quién avisar hace falta la cadena entera.
+ *
+ * DOS SALTOS, y no se pueden paralelizar: hasta que ms-inmuebles no dice de
+ * quién es cada inmueble, no se sabe qué propietarios pedirle a ms-identidad.
+ * Lo que sí se hace es pedirlos todos de una vez, junto con los inquilinos, en
+ * una sola petición.
+ *
+ * Antes esto era un `include` anidado de dos niveles. La forma del resultado se
+ * conserva exactamente —`contrato.Inmueble.Propietario.email` sigue siendo la
+ * ruta— para que el motor no se entere.
  */
 const adjuntarPartes = async (contratos) => {
     const lista = (contratos || []).map(aPlano);
 
+    const inmuebles = await inmueblesPorIds(lista.map((contrato) => contrato.id_inmueble));
+
     const ids = [];
     for (const contrato of lista) {
         ids.push(contrato.id_inquilino);
-        if (contrato.Inmueble) {
-            ids.push(contrato.Inmueble.id_propietario);
+        const inmueble = inmuebles.get(contrato.id_inmueble);
+        if (inmueble) {
+            ids.push(inmueble.id_propietario);
         }
     }
 
     const usuarios = await usuariosPorIds(ids);
 
+    return lista.map((contrato) => {
+        const inmueble = inmuebles.get(contrato.id_inmueble);
+
+        return {
+            ...contrato,
+            Inquilino: comoUsuario(usuarios.get(contrato.id_inquilino)),
+            Inmueble: inmueble
+                ? { ...inmueble, Propietario: comoUsuario(usuarios.get(inmueble.id_propietario)) }
+                : null
+        };
+    });
+};
+
+/**
+ * Adjunta `Inmueble` a una lista de contratos.
+ *
+ * Ocupa el lugar exacto de `include: [{ model: Inmueble }]`. Una sola petición
+ * para toda la lista, con los identificadores recogidos de antemano.
+ *
+ * Si ms-inmuebles no responde, la propiedad queda en `null` — igual que quedaba
+ * cuando el `include` no encontraba fila. Los consumidores que AUTORIZAN a
+ * partir de `Inmueble.id_propietario` no pueden conformarse con eso y no usan
+ * esta función: piden la lista de identificadores por su cuenta y dejan que el
+ * fallo se propague. Ver `clientes/inmuebles.js`.
+ */
+const adjuntarInmuebles = async (contratos) => {
+    const lista = (contratos || []).map(aPlano);
+    const inmuebles = await inmueblesPorIds(lista.map((contrato) => contrato.id_inmueble));
+
     return lista.map((contrato) => ({
         ...contrato,
-        Inquilino: comoUsuario(usuarios.get(contrato.id_inquilino)),
-        ...(contrato.Inmueble
-            ? {
-                  Inmueble: {
-                      ...contrato.Inmueble,
-                      Propietario: comoUsuario(usuarios.get(contrato.Inmueble.id_propietario))
-                  }
-              }
-            : {})
+        Inmueble: inmuebles.get(contrato.id_inmueble) || null
     }));
 };
 
-module.exports = { adjuntarInquilino, adjuntarInquilinos, adjuntarPartes, comoUsuario };
+/** Adjunta `Inmueble` a un solo contrato. */
+const adjuntarInmueble = async (contrato) => {
+    if (!contrato) {
+        return contrato;
+    }
+
+    const [conInmueble] = await adjuntarInmuebles([contrato]);
+    return conInmueble;
+};
+
+/**
+ * Adjunta `Inquilino` E `Inmueble` a una lista de contratos, en dos viajes.
+ *
+ * Dos y no cuatro: cada servicio se consulta una vez para toda la lista, y los
+ * dos en paralelo porque no dependen entre sí.
+ */
+const adjuntarInquilinosEInmuebles = async (contratos) => {
+    const lista = (contratos || []).map(aPlano);
+
+    const [usuarios, inmuebles] = await Promise.all([
+        usuariosPorIds(lista.map((contrato) => contrato.id_inquilino)),
+        inmueblesPorIds(lista.map((contrato) => contrato.id_inmueble))
+    ]);
+
+    return lista.map((contrato) => ({
+        ...contrato,
+        Inquilino: comoUsuario(usuarios.get(contrato.id_inquilino)),
+        Inmueble: inmuebles.get(contrato.id_inmueble) || null
+    }));
+};
+
+module.exports = {
+    adjuntarInmueble,
+    adjuntarInmuebles,
+    adjuntarInquilino,
+    adjuntarInquilinos,
+    adjuntarInquilinosEInmuebles,
+    adjuntarPartes,
+    comoUsuario
+};

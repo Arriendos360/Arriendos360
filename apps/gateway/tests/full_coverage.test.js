@@ -21,7 +21,7 @@ beforeAll(async () => {
     token = propietario.token;
 
     // Crear datos base
-    const resInm = await request(app).post('/api/inmuebles').set(...conToken(token)).send({ direccion: 'Dir 1' });
+    const resInm = await request(app).post('/api/inmuebles').set(...conToken(token)).send({ direccion: 'Dir 1', tipo: 'casa' });
     idInmueble = resInm.body.inmueble.id_inmueble;
 
     const inquilino = await crearInquilino(token, {

@@ -3,7 +3,6 @@ const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 const { columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } = require('./auditoria');
 const { claveUuid, referenciaUuid } = require('./uuid');
-const Inmueble = require('./Inmueble');
 
 /**
  * Contratos.
@@ -51,10 +50,12 @@ const Contrato = sequelize.define('Contrato', {
 
 registrarHooksAuditoria(Contrato);
 
-// `id_inmueble` sigue teniendo asociación porque Inmuebles todavía vive en el
-// gateway; el paso 4 la sustituirá por composición, igual que se acaba de hacer
-// con el inquilino. `id_inquilino` ya no la tiene: cruza a ms-identidad.
-Contrato.belongsTo(Inmueble, { foreignKey: 'id_inmueble', constraints: false });
-Inmueble.hasMany(Contrato, { foreignKey: 'id_inmueble', constraints: false });
+// Ni `id_inmueble` ni `id_inquilino` tienen asociación: los dos cruzan la
+// frontera de un servicio —ms-inmuebles y ms-identidad— y la regla dura 2
+// prohíbe que un `include` la atraviese. Son referencias lógicas puras: UUID sin
+// clave foránea y sin nada que el ORM pueda seguir.
+//
+// Lo que antes traía el `include` lo compone ahora el gateway por HTTP, con la
+// misma forma de respuesta. Ver `clientes/composicion.js`.
 
 module.exports = Contrato;

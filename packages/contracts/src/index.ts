@@ -2,13 +2,11 @@
  * DTOs compartidos de Arriendos360.
  *
  * Traduccion literal de los contratos de interfaz del Documento Principal
- * (Capitulo 2). Es un paquete de solo tipos: no emite JavaScript ejecutable ni
- * valida nada en runtime. Cuando cada microservicio se extraiga, estos tipos son
- * la referencia unica de la forma de cada payload.
+ * (Capitulo 2). Es la referencia unica de la forma de cada payload.
  *
- * Nadie los consume todavia: el Dockerfile del gateway construye con contexto
- * `apps/gateway`, asi que `packages/` no entra en la imagen. Se conectan en el
- * paso 3b, que ya tiene que tocar los Dockerfiles para extraer ms-identidad.
+ * Casi todo son tipos, que se borran al compilar. La excepcion son los
+ * catalogos cerrados de `inmuebles.ts`, que emiten JavaScript porque hay que
+ * poder recorrerlos en runtime para validar y para pintar un desplegable.
  */
 
 export type {
@@ -28,7 +26,24 @@ export type {
   UsuarioLogin,
 } from './identidad';
 
-export type { CrearInmuebleRequest } from './inmuebles';
+/**
+ * Inmuebles es el unico modulo que exporta VALORES y no solo tipos: el catalogo
+ * de tipos de inmueble tiene que ser el mismo en el servicio, en el frontend y
+ * en la migracion. Ver la cabecera de `inmuebles.ts`.
+ */
+export {
+  ESTADOS_INMUEBLE,
+  TIPOS_INMUEBLE,
+  esEstadoInmueble,
+  esTipoInmueble,
+} from './inmuebles';
+
+export type {
+  CambiarEstadoInmuebleRequest,
+  CrearInmuebleRequest,
+  EstadoInmueble,
+  TipoInmueble,
+} from './inmuebles';
 
 export type {
   CrearAnexoFormData,

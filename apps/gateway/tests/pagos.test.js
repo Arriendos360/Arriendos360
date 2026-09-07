@@ -35,7 +35,7 @@ beforeAll(async () => {
     const resInm = await request(app)
         .post('/api/inmuebles')
         .set(...conToken(tokenProp))
-        .send({ direccion: 'Calle Pago 1', tipo_inmueble: 'Apto' });
+        .send({ direccion: 'Calle Pago 1', tipo: 'apartamento' });
     const idInm = resInm.body.inmueble.id_inmueble;
 
     // 4. Crear Contrato
