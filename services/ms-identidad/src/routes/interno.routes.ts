@@ -1,9 +1,25 @@
 import { Router } from 'express';
+import { exigirServicio } from 'arriendos360-shared';
 
 import { usuariosPorIds } from '../controllers/usuario.controller';
 import { revocadosVigentes } from '../services/tokenService';
 
 const router: Router = Router();
+
+/**
+ * TODO endpoint de `/interno` exige credencial de servicio.
+ *
+ * Va como `router.use` y no ruta por ruta a proposito: asi un endpoint nuevo
+ * nace protegido y no hay forma de olvidarse. Confianza cero (regla dura 7): que
+ * la peticion venga de la red interna no la hace confiable, y menos aun cuando
+ * el puerto esta publicado al host en desarrollo.
+ */
+router.use(
+  exigirServicio({
+    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-identidad',
+    secreto: process.env['SERVICIO_JWT_SECRET'],
+  }),
+);
 
 /**
  * GET /interno/revocados
@@ -12,14 +28,10 @@ const router: Router = Router();
  * tiempo para mantener su copia en memoria y no tener que preguntar en cada
  * peticion (Capitulo 2, Revocacion de tokens).
  *
- * Cuelga de `/interno` y NO de `/api` a proposito: la costura del gateway solo
- * reenvia prefijos `/api/*`, asi que esta ruta no es alcanzable desde fuera a
- * traves del gateway. Su unico control de acceso hoy es la red interna de
- * Compose.
- *
- * PENDIENTE al desplegar en Azure: ahi la red ya no es una frontera de
- * confianza y hace falta autenticacion entre servicios (mTLS o un token de
- * servicio). Anotado como decision abierta en CLAUDE.md.
+ * Cuelga de `/interno` y NO de `/api`: la costura del gateway solo reenvia
+ * prefijos `/api/*`, asi que no es alcanzable a traves del gateway. Pero eso no
+ * basta —el puerto esta publicado al host en Compose— y por eso exige credencial
+ * de servicio, como todo lo que cuelga de `/interno`.
  */
 router.get('/revocados', async (_req, res) => {
   try {

@@ -25,6 +25,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { exigirServicio } = require('arriendos360-shared');
 
 const VIGENCIA_SEGUNDOS = 3600;
 
@@ -180,6 +181,17 @@ const crearIdentidadFalsa = async (opciones = {}) => {
     });
 
     // ── /interno ────────────────────────────────────────────────────────────
+    // El doble EXIGE la credencial de servicio, igual que el real. Si no lo
+    // hiciera, las pruebas del gateway pasarían aunque olvidara mandarla, que es
+    // exactamente el fallo que nadie quiere descubrir en producción.
+    app.use(
+        '/interno',
+        exigirServicio({
+            destinatario: 'ms-identidad',
+            secreto: opciones.secretoServicio || process.env.SERVICIO_JWT_SECRET
+        })
+    );
+
     app.get('/interno/usuarios', (req, res) => {
         const ids = typeof req.query.ids === 'string' ? req.query.ids.split(',') : [];
         return res.json({
