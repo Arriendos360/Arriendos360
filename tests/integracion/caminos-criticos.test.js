@@ -323,6 +323,56 @@ describe('Caminos críticos', () => {
         assert.equal(typeof sobre.payload.canon, 'number');
     });
 
+    it('el anexo se sube, se lista y se descarga por la API autenticada', async () => {
+        // Es un camino que ningún doble puede dar: multipart de verdad contra el
+        // contenedor, escritura en el almacenamiento y descarga en streaming. Y
+        // comprueba algo que sólo falla dentro de Docker — que la raíz relativa
+        // de la implementación de disco se resuelva donde se espera.
+        const PDF = Buffer.from('%PDF-1.7\ncontrato de integracion\n%%EOF');
+
+        const formulario = new FormData();
+        formulario.append('tipo', 'CONTRATO_FIRMADO');
+        formulario.append('file', new Blob([PDF], { type: 'application/pdf' }), 'contrato.pdf');
+
+        const subida = await fetch(`${GATEWAY}/api/contratos/${idContrato}/anexos`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tokenPropietario}` },
+            body: formulario
+        });
+        const creado = await subida.json();
+
+        assert.equal(subida.status, 201, JSON.stringify(creado));
+        assert.equal(creado.anexo.tipo, 'CONTRATO_FIRMADO');
+
+        const listado = await pedir('GET', `/api/contratos/${idContrato}/anexos`, {
+            token: tokenPropietario
+        });
+        assert.equal(listado.estado, 200);
+        assert.ok(listado.datos.some((a) => a.id_anexo === creado.anexo.id_anexo));
+        // La referencia del almacenamiento es interna y no sale en la respuesta.
+        assert.equal(listado.datos[0].archivo_anexo, undefined);
+
+        const descarga = await fetch(
+            `${GATEWAY}/api/contratos/${idContrato}/anexos/${creado.anexo.id_anexo}`,
+            { headers: { Authorization: `Bearer ${tokenPropietario}` } }
+        );
+
+        assert.equal(descarga.status, 200);
+        assert.match(descarga.headers.get('content-type'), /application\/pdf/);
+        assert.equal(Buffer.from(await descarga.arrayBuffer()).equals(PDF), true);
+    });
+
+    it('el anexo NO se puede bajar sin token, y /uploads ya no existe', async () => {
+        // Las dos mitades de la trampa que este paso cierra. La primera: la ruta
+        // nueva exige token, a diferencia de `express.static`. La segunda: la
+        // ruta vieja ya no sirve nada.
+        const sinToken = await fetch(`${GATEWAY}/api/contratos/${idContrato}/anexos`);
+        assert.equal(sinToken.status, 401);
+
+        const vieja = await fetch(`${GATEWAY}/uploads/contratos/cualquiera.pdf`);
+        assert.equal(vieja.status, 404);
+    });
+
     it('no se puede borrar un inmueble con contrato activo', async () => {
         // El veto vive en el gateway porque depende de contratos, que ms-inmuebles
         // no puede consultar sin invertir la dirección de las dependencias.

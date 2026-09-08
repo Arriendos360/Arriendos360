@@ -403,44 +403,24 @@
           }
         },
         {
-          "name": "Crear Contrato (Multiform)",
+          "name": "Crear Contrato",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
             "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "id_inmueble",
-                  "value": "{{id_inmueble}}",
-                  "type": "text"
-                },
-                {
-                  "key": "id_inquilino",
-                  "value": "{{id_inquilino}}",
-                  "type": "text"
-                },
-                {
-                  "key": "inicio",
-                  "value": "2023-01-01",
-                  "type": "text"
-                },
-                {
-                  "key": "fin",
-                  "value": "2024-01-01",
-                  "type": "text"
-                },
-                {
-                  "key": "canon",
-                  "value": "1500000",
-                  "type": "text"
-                },
-                {
-                  "key": "pdf",
-                  "type": "file",
-                  "src": []
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
                 }
-              ]
+              },
+              "raw": "{\n    \"id_inmueble\": \"{{id_inmueble}}\",\n    \"id_inquilino\": \"{{id_inquilino}}\",\n    \"inicio\": \"2026-01-01\",\n    \"fin\": \"2026-12-31\",\n    \"canon\": 1500000,\n    \"fecha_limite_pago\": 5,\n    \"nombre_deudor_solidario\": \"Ana Fiadora\",\n    \"documento_deudor_solidario\": \"10203040\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/contratos",
@@ -465,6 +445,113 @@
               }
             }
           ]
+        },
+        {
+          "name": "Subir Anexo (paso aparte)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "tipo",
+                  "value": "CONTRATO_FIRMADO",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/anexos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "anexos"
+              ]
+            },
+            "description": "El anexo NO viaja con el contrato: primero tiene que existir el id_contrato (Capitulo 2). Solo PDF, comprobado por contenido, y maximo 10 MB — por encima responde 413."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.anexo && d.anexo.id_anexo) { pm.collectionVariables.set(\"id_anexo\", d.anexo.id_anexo); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Anexos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/anexos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "anexos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Descargar Anexo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/anexos/{{id_anexo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "anexos",
+                "{{id_anexo}}"
+              ]
+            },
+            "description": "Se sirve desde el servicio, en streaming y con el token en la cabecera. No hay URL publica ni firmada: /uploads desaparecio."
+          }
+        },
+        {
+          "name": "Eliminar Anexo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/anexos/{{id_anexo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "anexos",
+                "{{id_anexo}}"
+              ]
+            }
+          }
         },
         {
           "name": "Finalizar Contrato",
@@ -835,6 +922,10 @@
       "key": "contrasena_temporal",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "id_anexo",
+      "value": ""
     }
   ]
 }

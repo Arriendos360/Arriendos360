@@ -8,7 +8,8 @@
  */
 
 const Abono = require('./Abono');
+const Anexo = require('./Anexo');
 const Contrato = require('./Contrato');
 const Pago = require('./Pago');
 
-module.exports = { Abono, Contrato, Pago };
+module.exports = { Abono, Anexo, Contrato, Pago };

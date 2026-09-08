@@ -45,19 +45,37 @@ export const abrirPdf = async (ruta, nombre) => {
 };
 
 /**
- * URL de un archivo servido desde `/uploads` (los PDF de contrato).
+ * Descarga un PDF del backend forzando el guardado.
  *
- * OJO: `/uploads` lo sirve `express.static` sin pasar por `verificarToken`, así
- * que esos archivos son públicos para quien conozca la URL. El código anterior
- * le pegaba `?token=` y eso nunca sirvió de nada, porque `express.static` no
- * mira cabeceras ni query. Aquí se quita el parámetro para no dar la impresión
- * de que protege algo.
+ * Igual que `abrirPdf` pero sin `target="_blank"`: para un anexo interesa que el
+ * archivo caiga en Descargas con un nombre reconocible, no que se abra en una
+ * pestana. El backend lo sirve con `Content-Disposition: attachment` por la
+ * misma razon, y ademas porque es contenido que sube un usuario y se lo descarga
+ * otro.
  *
- * Queda pendiente servir los anexos por una ruta autenticada. El paso 6 lo
- * resuelve de raíz al mover los archivos a almacenamiento en la nube y guardar
- * sólo la URL firmada.
+ * AQUI ABAJO ESTABA `urlArchivoSubido`, que componia la URL publica de
+ * `/uploads`. Se fue con el propio `/uploads`: los anexos ya no tienen URL
+ * publica, salen por `GET /api/contratos/:id/anexos/:idAnexo` con el token en la
+ * cabecera. Que no exista la funcion es lo que impide volver a enlazarlos por
+ * accidente.
+ *
+ * @param {string} ruta   ruta relativa a la baseURL de la API
+ * @param {string} nombre nombre con el que se guarda
  */
-export const urlArchivoSubido = (rutaAbsoluta) => {
-    const base = (process.env.REACT_APP_API_URL || 'http://localhost:3001/api').replace(/\/api\/?$/, '');
-    return `${base}${rutaAbsoluta}`;
+export const descargarPdf = async (ruta, nombre) => {
+    const respuesta = await api.get(ruta, { responseType: 'blob' });
+
+    const url = URL.createObjectURL(
+        new Blob([respuesta.data], { type: 'application/pdf' })
+    );
+
+    const enlace = document.createElement('a');
+    enlace.href = url;
+    enlace.download = nombre || 'documento.pdf';
+
+    document.body.appendChild(enlace);
+    enlace.click();
+    document.body.removeChild(enlace);
+
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
 };

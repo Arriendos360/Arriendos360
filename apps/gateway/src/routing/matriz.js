@@ -36,9 +36,11 @@ const SOLO_PROPIETARIO = [ROL_PROPIETARIO];
  *   `/**`    esta ruta y todo lo que cuelgue de ella
  *
  * Nota sobre `/api/contratos` y `/api/pagos`: los comodines de método cubren
- * `/:id/finalizar` y `/:id/anexos`, que el enunciado pedía explícitamente. No se
- * declaran aparte para no repetir filas con el mismo resultado; hay pruebas que
- * los nombran una por una.
+ * `/:id/finalizar`. Los anexos SÍ se declaran aparte aunque los comodines ya
+ * dieran el mismo resultado, y el motivo es el que justifica que la matriz sea
+ * declarativa: son cuatro operaciones sobre archivos con reparto asimétrico
+ * —dos roles leen, uno escribe— y auditar eso leyendo dos comodines de método
+ * obliga a reconstruir mentalmente qué rutas cubren. Escritas, se leen.
  */
 const MATRIZ = [
     // ── Identidad ──────────────────────────────────────────────────────────
@@ -66,6 +68,23 @@ const MATRIZ = [
     { metodo: 'DELETE', patron: '/api/inmuebles/**', acceso: SOLO_PROPIETARIO },
 
     // ── Contratos ──────────────────────────────────────────────────────────
+    // Anexos, primero: las cuatro filas van ANTES de los comodines de
+    // contratos porque gana la primera que casa, y `POST /api/contratos/**`
+    // las taparía.
+    //
+    // Las DOS partes leen —un inquilino tiene derecho a su contrato firmado—
+    // y sólo el propietario adjunta y borra. Que el inquilino pueda leer no
+    // significa que pueda leerlo todo: el ABAC del controlador comprueba
+    // además que el contrato sea suyo (regla dura 8).
+    { metodo: 'GET', patron: '/api/contratos/:id/anexos', acceso: AMBOS },
+    { metodo: 'GET', patron: '/api/contratos/:id/anexos/:idAnexo', acceso: AMBOS },
+    { metodo: 'POST', patron: '/api/contratos/:id/anexos', acceso: SOLO_PROPIETARIO },
+    {
+        metodo: 'DELETE',
+        patron: '/api/contratos/:id/anexos/:idAnexo',
+        acceso: SOLO_PROPIETARIO
+    },
+
     // El inquilino lee su contrato; sólo el propietario lo escribe.
     { metodo: 'GET', patron: '/api/contratos/**', acceso: AMBOS },
     // Se declara aparte del comodin de POST que la cubriria igual: reemitir una

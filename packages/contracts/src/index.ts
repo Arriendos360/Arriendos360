@@ -44,7 +44,12 @@ export type {
   TipoInmueble,
 } from './inmuebles';
 
-export { ESTADOS_CONTRATO, esEstadoContrato } from './contratos';
+export {
+  ESTADOS_CONTRATO,
+  TAMANO_MAXIMO_ANEXO_MB,
+  TIPOS_ANEXO_CONOCIDOS,
+  esEstadoContrato,
+} from './contratos';
 
 export type {
   CrearAnexoFormData,

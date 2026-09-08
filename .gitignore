@@ -24,8 +24,14 @@ npm-debug.log*
 # Volcados temporales de verificacion (salida de npm test, builds, compose)
 salida-*.txt
 
-# Archivos subidos por usuarios (contratos, comprobantes)
+# Archivos subidos por usuarios (anexos de contrato).
+#
+# `uploads/` era el directorio que servia express.static y que el paso 6b
+# retiro; se deja ignorado porque puede quedar en arboles de trabajo viejos.
+# `almacenamiento/` es el nuevo, el de la implementacion de disco, y nada lo
+# publica: los anexos solo salen por la API autenticada.
 apps/gateway/uploads/
+apps/gateway/almacenamiento/
 
 # IDE
 .vscode/

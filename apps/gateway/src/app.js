@@ -55,7 +55,17 @@ app.use(crearGuardiaDeBorrado());
 app.use(crearEnrutadorGateway());
 
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
+
+// AQUI ESTABA `app.use('/uploads', express.static('uploads'))`.
+//
+// Servia los contratos escaneados a cualquiera que conociera la URL: iba
+// antes de todo middleware de token, asi que ni la matriz RBAC ni
+// `verificarToken` lo veian pasar. El `?token=` que el frontend le pegaba
+// nunca protegio nada, porque `express.static` no mira cabeceras ni query.
+//
+// Desde el paso 6b los archivos son `Anexos` y salen unicamente por
+// `GET /api/contratos/:id/anexos/:idAnexo`, que pasa por la matriz y por el
+// ABAC del controlador. Era la trampa que CLAUDE.md tenia anotada.
 
 // Ruta de prueba
 app.get('/', (req, res) => {

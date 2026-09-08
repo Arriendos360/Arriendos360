@@ -9,6 +9,7 @@ import RecuperarContrasena from "./pages/RecuperarContrasena";
 import RestablecerContrasena from "./pages/RestablecerContrasena";
 import Inmuebles from "./pages/Inmuebles";
 import Contratos from "./pages/Contratos";
+import ContratoDetalle from "./pages/ContratoDetalle";
 import Pagos from "./pages/Pagos";
 import "./App.css";
 
@@ -62,6 +63,19 @@ function App() {
               </Layout>
             </ProtectedRoute>
           } 
+        />
+        {/* Detalle de un contrato con sus anexos. Accesible a los dos roles:
+            el inquilino se descarga lo que hay firmado, el propietario ademas
+            adjunta. El backend lo vuelve a comprobar (regla dura 8). */}
+        <Route
+          path="/contratos/:id"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <ContratoDetalle />
+              </Layout>
+            </ProtectedRoute>
+          }
         />
         <Route 
           path="/pagos" 
