@@ -34,6 +34,77 @@
 > —la auditoría registra ahora al *sistema*, no a la persona, porque el sobre de un evento
 > no lleva actor— y el punto 5, porque ya no hay fallo que declarar en la respuesta.
 
+## Cómo se reconstruye la cadena de auditoría
+
+**Esta sección describe el sistema ACTUAL, no la decisión histórica de abajo.** Está aquí
+porque es donde va a mirar quien se pregunte por qué `inmuebles.actualizado_por` dice
+«sistema».
+
+Cuando el cambio lo provoca un evento, **el rastro no se pierde: cambia de forma**. Dentro
+de un servicio era una columna; entre servicios es una cadena de tres eslabones, y hay que
+recorrerla entera para responder «¿quién dejó este inmueble arrendado?».
+
+| Eslabón | Dónde | Qué aporta |
+|---|---|---|
+| 1. El efecto | `inmuebles.inmuebles.actualizado_por` = `6facbaff-…be52d` (`USUARIO_SISTEMA`) | Que el cambio lo hizo un proceso automático **y no una persona**. Es un dato, no un hueco. |
+| 2. La causa | `public.eventos_salida` (tabla de salida del productor) | Qué evento lo provocó, cuándo ocurrió el hecho y sobre qué contrato. |
+| 3. La persona | `public.contratos.creado_por` | Quién firmó el contrato del que todo lo demás se deriva. |
+
+En una consulta, contra la base del productor:
+
+```sql
+-- ¿Quién dejó este inmueble arrendado?
+SELECT c.creado_por  AS persona,
+       c.id_contrato,
+       e.id_evento,
+       e.ocurrido_en
+  FROM public.eventos_salida e
+  JOIN public.contratos c
+    ON c.id_contrato = (e.payload->>'id_contrato')::uuid
+ WHERE e.payload->>'id_inmueble' = :id_inmueble
+   AND e.tipo = 'ContratoFormalizado'
+ ORDER BY e.ocurrido_en DESC;
+```
+
+Y del lado del consumidor, `inmuebles.eventos_procesados` confirma que **este servicio**
+aplicó ese evento y cuándo:
+
+```sql
+SELECT tipo, procesado_en FROM inmuebles.eventos_procesados WHERE id_evento = :id_evento;
+```
+
+### Por qué el sobre no lleva un actor, que sería más cómodo
+
+Añadir `actor` al sobre convertiría los tres eslabones en uno y es exactamente lo que se
+descartó. Tres razones, la primera de peso:
+
+1. **Un actor en el sobre es una credencial esperando a que alguien la use para
+   autorizar.** Hoy nadie lo haría; el día que un consumidor tenga que decidir algo, tiene
+   ahí un `sub` a mano y la regla dura 7 —confianza cero— se rompe sin que salte nada. Un
+   dato que no existe no se puede confundir con una credencial.
+2. **Un evento describe un hecho del dominio del emisor**, no la petición de una persona a
+   quien lo recibe. `USUARIO_SISTEMA` en la columna es literalmente cierto: ese `UPDATE` lo
+   ejecutó un proceso reaccionando a un aviso.
+3. **En el payload sería además desviación del documento.** El Capítulo 2 fija los campos
+   de `ContratoFormalizado`, y `actor` no está entre ellos.
+
+Si algún día el producto pide auditoría a nivel de persona sobre estado derivado, la forma
+correcta es un bloque `metadatos` en el **sobre** —nunca en el payload— con la regla
+explícita de que es sólo para auditar y jamás para autorizar. Es una decisión de un
+párrafo el día que toque; no hay que adelantarla.
+
+### Dos casos que conviene tener previstos
+
+**Si el evento acabó `apartado`,** el inmueble nunca cambió de estado: no hay cambio
+derivado que auditar, y la fila de `eventos_salida` guarda el porqué en `ultimo_error`. El
+rastro sigue completo — dice que el aviso no llegó, que es la información que hace falta.
+
+**Después del paso 6** la consulta sigue siendo válida sin tocarla: la tabla de salida se
+muda **con** `contratos` a `ms-contratos`, así que los eslabones 2 y 3 siguen en la misma
+base y el `JOIN` sigue siendo legal. Lo que cambia es el nombre del esquema.
+
+---
+
 ## Contexto
 
 Hasta el paso 4, formalizar un contrato eran dos escrituras dentro de **una transacción de
