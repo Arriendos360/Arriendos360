@@ -346,7 +346,8 @@ vive en `packages/shared` y ningún servicio lo reimplementa:
 `payload`. La versión va desde el primer evento. **No lleva actor**, y eso tiene una
 consecuencia visible: lo que un consumidor escribe al reaccionar se audita como del
 sistema, no de la persona que provocó el hecho. Quién lo provocó queda registrado en el
-agregado del emisor, que es donde corresponde.
+agregado del emisor, que es donde corresponde. **El rastro no se pierde, cambia de forma:**
+`docs/adr/0011` tiene la cadena de tres eslabones y la consulta que la recorre.
 
 ### Eventos definidos
 
