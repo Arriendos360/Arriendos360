@@ -123,9 +123,9 @@ describe('Seguridad de Contratos', () => {
             .send({
                 id_inmueble: idInmuebleOwner1,
                 id_inquilino: idInquilino,
-                fecha_inicio: '2023-01-01',
-                fecha_fin: '2023-12-31',
-                valor_mensual: 1000
+                inicio: '2023-01-01',
+                fin: '2023-12-31',
+                canon: 1000
             });
 
         expect(response.statusCode).toBe(403);
@@ -142,9 +142,9 @@ describe('Seguridad de Contratos', () => {
             .send({
                 id_inmueble: idInmuebleOwner1,
                 id_inquilino: '333',
-                fecha_inicio: '2023-01-01',
-                fecha_fin: '2023-12-31',
-                valor_mensual: 1000
+                inicio: '2023-01-01',
+                fin: '2023-12-31',
+                canon: 1000
             });
 
         expect(response.statusCode).toBe(404);

@@ -14,13 +14,15 @@
  * quien escribe el contrato**, sea quien sea. Cuando el contrato se mude, se
  * mudan con él la tabla de salida y estas cuatro líneas.
  *
- * LOS NOMBRES DEL EVENTO SON LOS DEL MODELO CANÓNICO, no los de la tabla. El
- * evento habla de `canon` y `fecha_inicio_corte` aunque la columna se siga
- * llamando `valor_mensual` y la de corte no exista todavía. Es deliberado: el
- * evento es un contrato entre servicios y lo consumirá ms-financiero en el paso
- * 6, así que traducir aquí —una vez, en el emisor— evita que la deuda del
- * esquema viejo se propague a un consumidor que aún no existe. La traducción
- * desaparece sola cuando la tabla adopte los nombres del Capítulo 2.
+ * LOS NOMBRES DEL EVENTO SON LOS DEL MODELO CANÓNICO, y desde el paso 6a los de
+ * la tabla también. Aquí hubo una traducción postiza mientras duró el desfase:
+ * el evento hablaba de `canon` y `fecha_inicio_corte` cuando la columna se
+ * llamaba `valor_mensual` y la de corte no existía, así que la fecha se derivaba
+ * de `fecha_inicio` en el emisor. Ya no: las dos se leen de su columna.
+ *
+ * La diferencia no es cosmética. Derivada, la fecha de corte que anunciaba el
+ * evento era siempre la del inicio del contrato, aunque alguien la hubiera
+ * cambiado después; ahora el evento dice lo que dice la fila.
  */
 
 const {
@@ -94,9 +96,6 @@ const crearPublicadorDeSalida = (opciones = {}) =>
  */
 const publicador = crearPublicadorDeSalida();
 
-/** `YYYY-MM-DD` en UTC, que es como se guardan las fechas (ver Convenciones). */
-const soloFecha = (valor) => new Date(valor).toISOString().slice(0, 10);
-
 /**
  * Anota `ContratoFormalizado` en la tabla de salida.
  *
@@ -110,11 +109,11 @@ const registrarContratoFormalizado = (contrato, transaccion) =>
         crearSobre(TIPO_CONTRATO_FORMALIZADO, {
             id_contrato: contrato.id_contrato,
             id_inmueble: contrato.id_inmueble,
-            canon: Number(contrato.valor_mensual),
-            // El modelo canónico tiene `fecha_inicio_corte` y la tabla actual no.
-            // Hasta el paso 6, el primer corte es el inicio del contrato, que es
-            // lo que el motor financiero ya asume hoy.
-            fecha_inicio_corte: soloFecha(contrato.fecha_inicio)
+            // `canon` es DECIMAL, y Sequelize devuelve los DECIMAL como texto
+            // para no perder precisión. El evento lleva un número.
+            canon: Number(contrato.canon),
+            // De la columna, tal cual. `DATEONLY` ya viene como `YYYY-MM-DD`.
+            fecha_inicio_corte: contrato.fecha_inicio_corte
         }),
         // El inmueble ordena: sus eventos se entregan en el orden en que se
         // registraron. Sin esto, un `Finalizado` podría adelantar a su

@@ -24,10 +24,11 @@
 const { Op } = require('sequelize');
 
 const Contrato = require('../models/Contrato');
+const { ESTADO_CONTRATO_ACTIVO } = require('../models/constantes');
 const { esUuid } = require('../models/uuid');
 
 /** Estados de contrato que impiden borrar el inmueble. Hoy solo el activo. */
-const ESTADOS_QUE_BLOQUEAN = [1];
+const ESTADOS_QUE_BLOQUEAN = [ESTADO_CONTRATO_ACTIVO];
 
 const MENSAJE_CON_CONTRATO =
     'No se puede eliminar un inmueble con un contrato activo. Finaliza el contrato primero.';

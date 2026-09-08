@@ -44,9 +44,12 @@ export type {
   TipoInmueble,
 } from './inmuebles';
 
+export { ESTADOS_CONTRATO, esEstadoContrato } from './contratos';
+
 export type {
   CrearAnexoFormData,
   CrearContratoRequest,
+  EstadoContrato,
   TipoAnexo,
 } from './contratos';
 

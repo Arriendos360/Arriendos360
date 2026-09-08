@@ -28,7 +28,7 @@ beforeAll(async () => {
     // 3. Crear Inmueble y Contrato
     const resInm = await request(app).post('/api/inmuebles').set(...conToken(tokenProp)).send({ direccion: 'Abono Street', tipo: 'casa' });
     const resCon = await request(app).post('/api/contratos').set(...conToken(tokenProp)).send({
-        id_inmueble: resInm.body.inmueble.id_inmueble, id_inquilino: inquilino.id, fecha_inicio: '2023-01-01', fecha_fin: '2023-12-31', valor_mensual: 1000
+        id_inmueble: resInm.body.inmueble.id_inmueble, id_inquilino: inquilino.id, inicio: '2023-01-01', fin: '2023-12-31', canon: 1000
     });
     idContrato = resCon.body.contrato.id_contrato;
 

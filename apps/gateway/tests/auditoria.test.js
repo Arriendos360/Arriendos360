@@ -61,11 +61,11 @@ const casos = [
         datos: async () => ({
             id_inmueble: crypto.randomUUID(),
             id_inquilino: crypto.randomUUID(),
-            fecha_inicio: '2026-01-01',
-            fecha_fin: '2026-12-31',
-            valor_mensual: 1500000
+            inicio: '2026-01-01',
+            fin: '2026-12-31',
+            canon: 1500000
         }),
-        cambio: { valor_mensual: 1600000 }
+        cambio: { canon: 1600000 }
     },
     {
         nombre: 'Pago',
@@ -187,9 +187,9 @@ describe('Un `creado_por` explícito gana en el alta', () => {
             {
                 id_inmueble: crypto.randomUUID(),
                 id_inquilino: crypto.randomUUID(),
-                fecha_inicio: '2026-01-01',
-                fecha_fin: '2026-12-31',
-                valor_mensual: 1000,
+                inicio: '2026-01-01',
+                fin: '2026-12-31',
+                canon: 1000,
                 creado_por: propio
             },
             { usuarioAuditor: CREADOR }

@@ -73,9 +73,9 @@ const contratoSobreInmuebleNuevo = async (direccion) => {
         .send({
             id_inmueble: idInmueble,
             id_inquilino: idInquilino,
-            fecha_inicio: '2023-01-01',
-            fecha_fin: '2023-12-31',
-            valor_mensual: 1000
+            inicio: '2023-01-01',
+            fin: '2023-12-31',
+            canon: 1000
         });
 
     return { idInmueble, idContrato: respuesta.body.contrato?.id_contrato, respuesta };

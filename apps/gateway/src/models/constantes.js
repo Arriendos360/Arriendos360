@@ -12,6 +12,19 @@
 const { ROL_INQUILINO, ROL_PROPIETARIO } = require('arriendos360-shared');
 
 /**
+ * Estados de un contrato.
+ *
+ * El catálogo cerrado vive en `packages/contracts` porque lo comparten el
+ * modelo, el frontend y el `CHECK` de la migración. Aquí sólo se les pone
+ * nombre, para que los `where` del motor financiero, del dashboard y del
+ * guardia de borrado no repartan literales sueltos por el código — que es
+ * exactamente lo que pasaba con los enteros 1 y 2 que esto sustituye.
+ */
+const ESTADO_CONTRATO_ACTIVO = 'activo';
+const ESTADO_CONTRATO_FINALIZADO = 'finalizado';
+const ESTADO_CONTRATO_CANCELADO = 'cancelado';
+
+/**
  * Autor de los cambios que no origina una persona: el motor financiero cuando
  * genera recibos a medianoche.
  *
@@ -21,4 +34,11 @@ const { ROL_INQUILINO, ROL_PROPIETARIO } = require('arriendos360-shared');
  */
 const USUARIO_SISTEMA = '6facbaff-9fcd-4300-9426-e464f45be52d';
 
-module.exports = { ROL_INQUILINO, ROL_PROPIETARIO, USUARIO_SISTEMA };
+module.exports = {
+    ESTADO_CONTRATO_ACTIVO,
+    ESTADO_CONTRATO_CANCELADO,
+    ESTADO_CONTRATO_FINALIZADO,
+    ROL_INQUILINO,
+    ROL_PROPIETARIO,
+    USUARIO_SISTEMA
+};

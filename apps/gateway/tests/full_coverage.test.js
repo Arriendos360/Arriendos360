@@ -8,6 +8,7 @@ const {
     prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
+const { ESTADO_CONTRATO_FINALIZADO } = require('../src/models/constantes');
 
 let token, idInmueble, idContrato;
 
@@ -29,7 +30,7 @@ beforeAll(async () => {
     });
 
     const resCon = await request(app).post('/api/contratos').set(...conToken(token)).send({
-        id_inmueble: idInmueble, id_inquilino: inquilino.id, fecha_inicio: '2023-01-01', fecha_fin: '2023-12-31', valor_mensual: 500
+        id_inmueble: idInmueble, id_inquilino: inquilino.id, inicio: '2023-01-01', fin: '2023-12-31', canon: 500
     });
     idContrato = resCon.body.contrato.id_contrato;
 });
@@ -60,7 +61,8 @@ describe('Cobertura Total - Contratos', () => {
     test('PUT /api/contratos/:id/finalizar', async () => {
         const res = await request(app).put(`/api/contratos/${idContrato}/finalizar`).set(...conToken(token));
         expect(res.statusCode).toBe(200);
-        expect(res.body.contrato.estado).toBe(2);
+        // 'finalizado', no 2: el estado dejo de ser un entero sin significado.
+        expect(res.body.contrato.estado).toBe(ESTADO_CONTRATO_FINALIZADO);
     });
 });
 

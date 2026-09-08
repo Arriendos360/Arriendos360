@@ -24,6 +24,7 @@ const { dePropietario, ESTADO_ARRENDADO, ESTADO_DISPONIBLE } = require('../clien
 const { adjuntarInmuebles } = require('../clientes/composicion');
 const Pago = require('../models/Pago');
 const Contrato = require('../models/Contrato');
+const { ESTADO_CONTRATO_ACTIVO, ESTADO_CONTRATO_FINALIZADO } = require('../models/constantes');
 
 /**
  * 502 con el formato de error del proyecto.
@@ -113,7 +114,7 @@ const obtenerContratosActivos = async (req, res) => {
         const mios = (await dePropietario(sub)).map((i) => i.id_inmueble);
 
         const contratosActivos = await Contrato.findAll({
-            where: { estado: 1, id_inmueble: mios } // 1 = Activo
+            where: { estado: ESTADO_CONTRATO_ACTIVO, id_inmueble: mios }
         });
 
         res.json({
@@ -144,8 +145,8 @@ const obtenerResumen = async (req, res) => {
                     include: [contratoDe(mios, { attributes: [] })],
                     raw: true
                 }),
-                Contrato.count({ where: { estado: 1, id_inmueble: mios } }),
-                Contrato.count({ where: { estado: 2, id_inmueble: mios } }),
+                Contrato.count({ where: { estado: ESTADO_CONTRATO_ACTIVO, id_inmueble: mios } }),
+                Contrato.count({ where: { estado: ESTADO_CONTRATO_FINALIZADO, id_inmueble: mios } }),
                 Pago.count({ where: { estado: 1 }, include: [contratoDe(mios)] })
             ]);
 

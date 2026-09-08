@@ -421,17 +421,17 @@
                   "type": "text"
                 },
                 {
-                  "key": "fecha_inicio",
+                  "key": "inicio",
                   "value": "2023-01-01",
                   "type": "text"
                 },
                 {
-                  "key": "fecha_fin",
+                  "key": "fin",
                   "value": "2024-01-01",
                   "type": "text"
                 },
                 {
-                  "key": "valor_mensual",
+                  "key": "canon",
                   "value": "1500000",
                   "type": "text"
                 },

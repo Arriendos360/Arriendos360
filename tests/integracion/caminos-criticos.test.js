@@ -16,11 +16,22 @@
  *   npm run test:integracion
  *
  * Usa el runner de Node (`node --test`), no jest: cero dependencias nuevas para
- * algo que sólo hace peticiones HTTP y comprueba respuestas.
+ * algo que casi sólo hace peticiones HTTP y comprueba respuestas.
+ *
+ * EL «CASI» ES LA TABLA DE SALIDA. Desde el paso 6a hay una comprobación que no
+ * se puede hacer por HTTP: qué lleva dentro el evento que emite el gateway. El
+ * sobre no aparece en ninguna respuesta —viaja del gateway a ms-inmuebles por
+ * la red interna— así que la única forma de verlo es leer `eventos_salida`.
+ * Se usa `pg`, que ya es dependencia del gateway: no entra nada nuevo.
  */
 
+const path = require('node:path');
 const assert = require('node:assert/strict');
 const { after, before, describe, it } = require('node:test');
+const { Client } = require('pg');
+
+// Las credenciales son las del gateway: es su base y su tabla de salida.
+require('dotenv').config({ path: path.resolve(__dirname, '../../apps/gateway/.env') });
 
 const GATEWAY = process.env.URL_GATEWAY || 'http://localhost:3001';
 const IDENTIDAD = process.env.URL_IDENTIDAD || 'http://localhost:3011';
@@ -74,6 +85,35 @@ const pedir = async (metodo, ruta, { token, cuerpo, base = GATEWAY } = {}) => {
     }
 
     return { estado: respuesta.status, datos };
+};
+
+/**
+ * El sobre que el gateway anotó para un contrato.
+ *
+ * Se abre y se cierra una conexión por consulta a propósito: son dos consultas
+ * en toda la suite y un pool abierto dejaría el runner colgado al terminar.
+ */
+const eventoDe = async (idContrato, tipo) => {
+    const cliente = new Client({
+        host: process.env.DB_HOST_TEST_INTEGRACION || 'localhost',
+        port: Number(process.env.DB_PORT || 5432),
+        database: process.env.DB_NAME || 'arriendos360_db',
+        user: process.env.DB_USER || 'postgres',
+        password: process.env.DB_PASSWORD
+    });
+
+    await cliente.connect();
+    try {
+        const { rows } = await cliente.query(
+            `SELECT tipo, version, payload, estado
+               FROM public.eventos_salida
+              WHERE payload->>'id_contrato' = $1 AND tipo = $2`,
+            [idContrato, tipo]
+        );
+        return rows[0] || null;
+    } finally {
+        await cliente.end();
+    }
 };
 
 let tokenPropietario;
@@ -172,9 +212,9 @@ describe('Caminos críticos', () => {
             cuerpo: {
                 id_inmueble: idInmueble,
                 id_inquilino: idInquilino,
-                fecha_inicio: '2026-01-01',
-                fecha_fin: '2026-12-31',
-                valor_mensual: 1500000
+                inicio: '2026-01-01',
+                fin: '2026-12-31',
+                canon: 1500000
             }
         });
         assert.equal(contrato.estado, 201, JSON.stringify(contrato.datos));
@@ -226,6 +266,61 @@ describe('Caminos críticos', () => {
         // describe un hecho del dominio del emisor y no la petición de alguien a
         // este servicio. Quién firmó está en el contrato.
         assert.equal(detalle.datos.actualizado_por, USUARIO_SISTEMA);
+    });
+
+    it('el evento lleva la fecha_inicio_corte de la COLUMNA, no derivada', async () => {
+        // Antes del paso 6a el emisor derivaba la fecha de corte del inicio del
+        // contrato, porque la columna no existía. Para demostrar que ya no lo
+        // hace no basta con un contrato normal —ahí las dos fechas coinciden y
+        // el evento saldría igual de las dos formas— así que se firma uno cuyo
+        // ciclo de facturación arranca en una fecha DISTINTA de su inicio.
+        const inicio = '2026-05-10';
+        const corte = '2026-06-01';
+
+        const inmueble = await pedir('POST', '/api/inmuebles', {
+            token: tokenPropietario,
+            cuerpo: {
+                direccion: 'Calle del Corte 2',
+                barrio: 'Centro',
+                municipio: 'Bogota',
+                tipo: 'casa'
+            }
+        });
+        assert.equal(inmueble.estado, 201, JSON.stringify(inmueble.datos));
+
+        const contrato = await pedir('POST', '/api/contratos', {
+            token: tokenPropietario,
+            cuerpo: {
+                id_inmueble: inmueble.datos.inmueble.id_inmueble,
+                id_inquilino: idInquilino,
+                inicio,
+                fin: '2027-05-09',
+                canon: 1800000,
+                fecha_inicio_corte: corte,
+                fecha_limite_pago: 1
+            }
+        });
+        assert.equal(contrato.estado, 201, JSON.stringify(contrato.datos));
+
+        const guardado = contrato.datos.contrato;
+        assert.equal(guardado.fecha_inicio_corte, corte, 'la columna guarda lo pactado');
+
+        const sobre = await eventoDe(guardado.id_contrato, 'ContratoFormalizado');
+
+        assert.ok(sobre, 'el contrato debería haber dejado su evento en la tabla de salida');
+        assert.equal(sobre.version, 1);
+
+        // LA aserción del paso 6a: el evento dice lo que dice la fila.
+        assert.equal(sobre.payload.fecha_inicio_corte, corte);
+        assert.notEqual(
+            sobre.payload.fecha_inicio_corte,
+            inicio,
+            'si el emisor siguiera derivando, aquí vendría el inicio del contrato'
+        );
+
+        // Y el canon viaja como número, no como el texto que devuelve DECIMAL.
+        assert.equal(sobre.payload.canon, 1800000);
+        assert.equal(typeof sobre.payload.canon, 'number');
     });
 
     it('no se puede borrar un inmueble con contrato activo', async () => {
