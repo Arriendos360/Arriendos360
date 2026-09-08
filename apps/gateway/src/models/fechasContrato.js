@@ -42,7 +42,30 @@
  * El día GUARDADO no se toca nunca: se guarda 31 y se recorta al resolverlo
  * contra cada mes. Guardar 28 haría que el contrato cobrara el 28 en abril, que
  * sí tiene 31 — el recorte se perdería para siempre por un febrero.
+ *
+ * ── LA REGLA DEL PERIODO (paso 6c) ────────────────────────────────────────────
+ *
+ * `Cuentas_cobro` ya no guarda un `mes_correspondiente` suelto sino un periodo
+ * explícito, `inicio` y `fin`, y la regla que los define vive aquí porque es la
+ * regla del día 31 aplicada dos veces:
+ *
+ *   inicio = la fecha de corte del mes que se factura
+ *   fin    = el día ANTERIOR a la siguiente fecha de corte
+ *
+ * Lo que hace correcta a esta definición y no a la obvia —«inicio más un mes
+ * menos un día»— es que los periodos TESELAN el calendario: cada día pertenece a
+ * un periodo y sólo a uno, sin huecos ni solapes, sea cual sea el día pactado.
+ * Con un corte el 31: enero va del 31/01 al 27/02, febrero del 28/02 al 30/03,
+ * marzo del 31/03 al 29/04. Los tres encajan sin dejar un día fuera, y ninguno
+ * dura lo mismo. Con la definición obvia, febrero acabaría el 27/03 y los días
+ * 28, 29 y 30 de marzo no serían de nadie.
+ *
+ * `periodoDeCorte()` es la única forma de construir esas dos fechas. No hay una
+ * segunda cuenta en el motor ni en el controlador: los dos la llaman.
  */
+
+/** Milisegundos de un día. Sale de sumar y restar fechas de calendario en UTC. */
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
 /** Días de cada mes. Febrero se resuelve aparte, que para eso está el bisiesto. */
 const DIAS_POR_MES = [31, null, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -123,13 +146,112 @@ const diaDeCorte = (fechaInicioCorte) => {
     return fecha === null ? null : Number(fecha.slice(8, 10));
 };
 
+/** `YYYY-MM-DD` a partir de sus tres componentes. `mes` es 0-11, como en `Date`. */
+const comoISO = (anio, mes, dia) =>
+    `${String(anio).padStart(4, '0')}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+
+/** Los tres componentes de un `YYYY-MM-DD`. `mes` sale 0-11, como en `Date`. */
+const partesDeISO = (fechaISO) => {
+    const [anio, mes, dia] = fechaISO.split('-').map(Number);
+    return { anio, mes: mes - 1, dia };
+};
+
+/** El mes siguiente a uno dado, con el cambio de año resuelto. `mes` es 0-11. */
+const mesSiguiente = (anio, mes) => (mes === 11 ? { anio: anio + 1, mes: 0 } : { anio, mes: mes + 1 });
+
+/**
+ * El periodo de facturación que empieza en el corte de `mes`/`anio`.
+ *
+ * @param {number} diaCorte día del mes pactado, 1-31, SIN recortar
+ * @param {number} anio     año del periodo
+ * @param {number} mes      mes del periodo, 0-11
+ * @returns {{inicio: string, fin: string}} las dos fechas en `YYYY-MM-DD`
+ *
+ * Todo en UTC —`Date.UTC`, nunca el constructor local— porque el resultado es
+ * una fecha de calendario que se guarda en una columna `DATE`. Construirla en
+ * hora local haría que el día dependiera de dónde corra el proceso, que es
+ * exactamente la trampa que documenta la cabecera de este archivo.
+ *
+ * Ver la regla del periodo, arriba: `fin` es el día anterior al SIGUIENTE corte,
+ * no «un mes menos un día».
+ */
+const periodoDeCorte = (diaCorte, anio, mes) => {
+    const siguiente = mesSiguiente(anio, mes);
+    const proximoCorte = Date.UTC(
+        siguiente.anio,
+        siguiente.mes,
+        diaEnMes(siguiente.anio, siguiente.mes, diaCorte)
+    );
+
+    return {
+        inicio: comoISO(anio, mes, diaEnMes(anio, mes, diaCorte)),
+        fin: new Date(proximoCorte - MS_POR_DIA).toISOString().slice(0, 10)
+    };
+};
+
+/**
+ * El periodo cuyo corte cae en el mes de `fechaISO`.
+ *
+ * Atajo para cuando ya se tiene la fecha de inicio y hace falta el fin, que es
+ * lo que necesita el alta manual de una cuenta de cobro.
+ */
+const periodoQueEmpiezaEn = (fechaISO, diaCorte) => {
+    const { anio, mes } = partesDeISO(fechaISO);
+    return periodoDeCorte(diaCorte, anio, mes);
+};
+
+/**
+ * Hoy, en `America/Bogota` y como `YYYY-MM-DD`.
+ *
+ * POR QUÉ NO `new Date()` A SECAS. El motor financiero compara «hoy» contra
+ * fechas de calendario guardadas en columnas `DATE`, y una fecha de calendario
+ * no significa nada sin decir en qué zona se lee. Hasta el paso 6c la
+ * comparación mezclaba las dos convenciones —columnas en UTC contra `new Date()`
+ * local— y CLAUDE.md lo tenía anotado como pendiente en Convenciones.
+ *
+ * La zona es la del negocio, no la del servidor ni UTC: quien decide que un
+ * arriendo entró en mora al sexto día lo hace en Bogotá, y en un contenedor
+ * configurado en UTC el corte se adelantaría cinco horas. Colombia no tiene
+ * horario de verano, así que el desplazamiento es constante, pero se pide por
+ * nombre de zona y no como `-05:00` fijo para no tener que revisarlo si algún
+ * día lo tuviera.
+ */
+const ZONA_NEGOCIO = 'America/Bogota';
+
+const hoyEnZonaNegocio = () =>
+    new Intl.DateTimeFormat('en-CA', {
+        timeZone: ZONA_NEGOCIO,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date());
+
+/**
+ * Días enteros de `desdeISO` a `hastaISO`. Negativo si `hasta` es anterior.
+ *
+ * Cuenta DÍAS DE CALENDARIO, no intervalos de 24 horas: las dos fechas se
+ * interpretan a medianoche UTC, así que el resultado es siempre un entero y no
+ * depende de la hora a la que se pregunte. Es lo que permite que «el sexto día»
+ * sea una afirmación comprobable.
+ */
+const diasEntre = (desdeISO, hastaISO) =>
+    Math.round((Date.parse(`${hastaISO}T00:00:00Z`) - Date.parse(`${desdeISO}T00:00:00Z`)) / MS_POR_DIA);
+
 module.exports = {
+    ZONA_NEGOCIO,
+    comoISO,
     diaDeCorte,
     diaEnMes,
+    diasEntre,
     diaLimiteDesde,
     esBisiesto,
     fechaEnMes,
     fechaInicioCorteDesde,
+    hoyEnZonaNegocio,
+    mesSiguiente,
+    partesDeISO,
+    periodoDeCorte,
+    periodoQueEmpiezaEn,
     soloFecha,
     ultimoDiaDelMes
 };

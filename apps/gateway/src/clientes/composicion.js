@@ -163,16 +163,17 @@ const adjuntarInquilinosEInmuebles = async (contratos) => {
 /**
  * Adjunta `Inmueble` al contrato ANIDADO de una lista.
  *
- * Existe porque los pagos y los abonos no llevan `id_inmueble` propio: cuelgan
- * de un contrato, y es ese contrato el que sabe de qué inmueble se trata. Antes
- * lo resolvía un `include` anidado —`Pago -> Contrato -> Inmueble`, y para los
- * abonos un nivel más— y la pantalla de Pagos lee esa ruta tal cual
- * (`pago.Contrato.Inmueble.direccion`).
+ * Existe porque las cuentas de cobro y las transacciones no llevan
+ * `id_inmueble` propio: cuelgan de un contrato, y es ese contrato el que sabe de
+ * qué inmueble se trata. Antes lo resolvía un `include` anidado
+ * —`CuentaCobro -> Contrato -> Inmueble`, y para las transacciones un nivel
+ * más— y la pantalla de Pagos lee esa ruta tal cual
+ * (`cuenta.Contrato.Inmueble.direccion`).
  *
  * `camino` dice dónde está el contrato dentro de cada elemento. Un solo lote
  * para toda la lista, como el resto.
  *
- * @param {Array} elementos pagos o abonos
+ * @param {Array} elementos cuentas de cobro o transacciones
  * @param {(elemento: object) => object|null|undefined} camino cómo llegar al contrato
  */
 const adjuntarInmuebleAlContratoAnidado = async (elementos, camino) => {
@@ -193,18 +194,21 @@ const adjuntarInmuebleAlContratoAnidado = async (elementos, camino) => {
     });
 };
 
-/** `pago.Contrato.Inmueble`. */
-const adjuntarInmuebleAPagos = (pagos) =>
-    adjuntarInmuebleAlContratoAnidado(pagos, (pago) => pago.Contrato);
+/** `cuenta.Contrato.Inmueble`. */
+const adjuntarInmuebleACuentas = (cuentas) =>
+    adjuntarInmuebleAlContratoAnidado(cuentas, (cuenta) => cuenta.Contrato);
 
-/** `abono.Pago.Contrato.Inmueble`. */
-const adjuntarInmuebleAAbonos = (abonos) =>
-    adjuntarInmuebleAlContratoAnidado(abonos, (abono) => abono.Pago && abono.Pago.Contrato);
+/** `transaccion.CuentaCobro.Contrato.Inmueble`. */
+const adjuntarInmuebleATransacciones = (transacciones) =>
+    adjuntarInmuebleAlContratoAnidado(
+        transacciones,
+        (transaccion) => transaccion.CuentaCobro && transaccion.CuentaCobro.Contrato
+    );
 
 module.exports = {
     adjuntarInmueble,
-    adjuntarInmuebleAAbonos,
-    adjuntarInmuebleAPagos,
+    adjuntarInmuebleACuentas,
+    adjuntarInmuebleATransacciones,
     adjuntarInmuebles,
     adjuntarInquilino,
     adjuntarInquilinos,

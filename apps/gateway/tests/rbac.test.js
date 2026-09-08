@@ -80,7 +80,7 @@ describe('Denegar por defecto', () => {
     });
 
     test('un método no declarado sobre una ruta que sí existe responde 403', async () => {
-        // DELETE no está declarado para pagos: sólo GET, POST y el PUT de pagar.
+        // DELETE no está declarado para pagos: sólo GET y POST.
         const respuesta = await pedir('DELETE', '/api/pagos/abc', PROPIETARIO());
 
         expect(respuesta.status).toBe(403);
@@ -182,10 +182,13 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
         ['DELETE', '/api/contratos/abc', PROPIETARIO, INQUILINO],
 
         ['GET', '/api/pagos', INQUILINO, SIN_ROLES],
+        // Registrar el pago es del propietario: el inquilino lo consulta, no lo
+        // asienta. Ver docs/adr/0006. Desde el paso 6c la ruta es
+        // `POST /api/pagos`, que era la del alta manual de un cobro.
         ['POST', '/api/pagos', PROPIETARIO, INQUILINO],
-        // Registrar el abono es del propietario: el inquilino lo consulta, no lo
-        // asienta. Ver docs/adr/0006.
-        ['PUT', '/api/pagos/abc/pagar', PROPIETARIO, INQUILINO],
+        ['POST', '/api/pagos/cuentas-cobro', PROPIETARIO, INQUILINO],
+        // Anular deshace un movimiento contable: mismo reparto, fila propia.
+        ['POST', '/api/pagos/transacciones/abc/anular', PROPIETARIO, INQUILINO],
 
         ['GET', '/api/dashboard/resumen', PROPIETARIO, INQUILINO]
     ];
@@ -248,7 +251,7 @@ describe('Resolución de patrones', () => {
         ['GET', '/api/pagos', '/api/pagos/**'],
         ['GET', '/api/pagos/pendientes', '/api/pagos/**'],
         ['GET', '/api/pagos/abc/recibo', '/api/pagos/**'],
-        ['GET', '/api/pagos/abono/abc', '/api/pagos/**'],
+        ['GET', '/api/pagos/transacciones/abc/comprobante', '/api/pagos/**'],
         ['GET', '/api/inmuebles', '/api/inmuebles/**'],
         ['GET', '/api/inmuebles/abc', '/api/inmuebles/**'],
         ['GET', '/api/contratos/abc', '/api/contratos/**'],
@@ -260,7 +263,13 @@ describe('Resolución de patrones', () => {
         ['POST', '/api/contratos/abc/otra-cosa', '/api/contratos/**'],
         ['GET', '/api/usuarios/buscar', '/api/usuarios/**'],
         ['GET', '/api/dashboard/mora', '/api/dashboard/**'],
-        ['PUT', '/api/pagos/abc/pagar', '/api/pagos/:id/pagar']
+        // Desde el paso 6c las escrituras de Financiero tienen fila propia, y
+        // ganan al comodin porque van antes: la matriz resuelve por orden.
+        ['POST', '/api/pagos/cuentas-cobro', '/api/pagos/cuentas-cobro'],
+        ['POST', '/api/pagos/transacciones/abc/anular', '/api/pagos/transacciones/:id/anular'],
+        // Lo que NO son esas dos sigue cayendo en el comodin.
+        ['POST', '/api/pagos', '/api/pagos/**'],
+        ['POST', '/api/pagos/verificar-mora', '/api/pagos/**']
     ];
 
     test.each(RESOLUCIONES)('%s %s resuelve a %s', (metodo, ruta, patron) => {
@@ -268,10 +277,15 @@ describe('Resolución de patrones', () => {
     });
 
     test('`:id` consume exactamente un segmento, ni cero ni dos', () => {
-        // `/api/pagos/a/b/pagar` no debe caer en `/api/pagos/:id/pagar`; cae en
-        // el comodín de GET, que para PUT no existe, así que no hay política.
-        expect(resolverPolitica('PUT', '/api/pagos/a/b/pagar')).toBeNull();
-        expect(resolverPolitica('PUT', '/api/pagos//pagar')).toBeNull();
+        // `/api/pagos/transacciones/a/b/anular` no puede caer en la fila de
+        // `:id`. Aquí SÍ hay política, porque el comodín de POST la recoge —lo
+        // que se comprueba es que no la resuelva la fila específica.
+        expect(resolverPolitica('POST', '/api/pagos/transacciones/a/b/anular').patron)
+            .toBe('/api/pagos/**');
+        expect(resolverPolitica('POST', '/api/pagos/transacciones//anular').patron)
+            .toBe('/api/pagos/**');
+        // Y con un método que no tiene comodín, no hay política que valga.
+        expect(resolverPolitica('PUT', '/api/pagos/transacciones/abc/anular')).toBeNull();
     });
 
     test('un prefijo parcial no cuela: /api/pagosfalsos no es /api/pagos', () => {
@@ -290,8 +304,13 @@ describe('El inquilino consulta pagos pero no los asienta', () => {
         expect((await pedir('GET', '/api/pagos/abc/recibo', INQUILINO())).status).toBe(200);
     });
 
-    test('no puede registrar un abono', async () => {
-        const respuesta = await pedir('PUT', '/api/pagos/abc/pagar', INQUILINO());
+    test('no puede registrar un pago', async () => {
+        const respuesta = await pedir('POST', '/api/pagos', INQUILINO());
+        expect(respuesta.status).toBe(403);
+    });
+
+    test('ni anular una transacción', async () => {
+        const respuesta = await pedir('POST', '/api/pagos/transacciones/abc/anular', INQUILINO());
         expect(respuesta.status).toBe(403);
     });
 });

@@ -7,7 +7,7 @@
  * El resultado fue un defecto que vivió sin que saltara nada: `instancia.update()`
  * decide qué columnas escribe ANTES de disparar los hooks, así que
  * `actualizado_por` conservaba para siempre el valor del alta en `contratos`,
- * `pagos` y `abonos` a la vez.
+ * `pagos` y `abonos` a la vez — hoy `cuentas_cobro` y `transacciones`.
  *
  * LO QUE HACE QUE ESTAS PRUEBAS SIRVAN, y que es justo lo que le faltaba a la
  * que existía en ms-inmuebles: **el que modifica no es el que creó**. Aquella
@@ -27,7 +27,7 @@ const crypto = require('crypto');
 
 const { sequelize } = require('../src/config/database');
 const { recrearEsquema } = require('../src/database/migraciones');
-const { Abono, Contrato, Pago } = require('../src/models');
+const { Contrato, CuentaCobro, Transaccion } = require('../src/models');
 const { USUARIO_SISTEMA } = require('../src/models/constantes');
 
 /** Dos personas distintas. La distinción ES la prueba. */
@@ -48,10 +48,10 @@ const desdeLaBase = (modelo, id) => modelo.findByPk(id);
 /**
  * Un caso por modelo con auditoría.
  *
- * `contratos` y `pagos` son las dos tablas con peso probatorio —un contrato y su
- * cobro son lo que se enseña si alguien discute— y `abonos` va con ellas porque
- * comparte el mismo hook: dejarla fuera sería volver a tener una tabla sin
- * comprobar, que es como empezó todo esto.
+ * `contratos` y `cuentas_cobro` son las dos tablas con peso probatorio —un
+ * contrato y su cobro son lo que se enseña si alguien discute— y `transacciones`
+ * va con ellas porque comparte el mismo hook: dejarla fuera sería volver a tener
+ * una tabla sin comprobar, que es como empezó todo esto.
  */
 const casos = [
     {
@@ -68,38 +68,48 @@ const casos = [
         cambio: { canon: 1600000 }
     },
     {
-        nombre: 'Pago',
-        modelo: Pago,
-        clave: 'id_pago',
+        nombre: 'CuentaCobro',
+        modelo: CuentaCobro,
+        clave: 'id_cuenta_cobro',
         datos: async () => ({
             id_contrato: crypto.randomUUID(),
-            monto_total: 1500000,
-            saldo_pendiente: 1500000,
-            mes_correspondiente: '2026-01-01'
+            detalle: 'Canon de arrendamiento del 2026-01-01 al 2026-01-31',
+            valor: 1500000,
+            inicio: '2026-01-01',
+            fin: '2026-01-31'
         }),
-        // El cambio de estado real: 4 = pago parcial. Es el que hace el
-        // controlador al registrar un abono.
-        cambio: { estado: 4 }
+        // El cambio de estado real. Es el que hace el controlador al registrar
+        // una transacción que no cubre la cuenta entera.
+        cambio: { estado: 'PARCIAL' }
     },
     {
-        nombre: 'Abono',
-        modelo: Abono,
-        clave: 'id_abono',
+        nombre: 'Transaccion',
+        modelo: Transaccion,
+        clave: 'id_transaccion',
         datos: async () => {
-            // `abonos` sí tiene clave foránea a `pagos`: las dos acaban en
-            // ms-financiero, así que no cruza frontera de servicio.
-            const pago = await Pago.create(
+            // `transacciones` sí tiene clave foránea a `cuentas_cobro`: las dos
+            // acaban en ms-financiero, así que no cruza frontera de servicio.
+            const cuenta = await CuentaCobro.create(
                 {
                     id_contrato: crypto.randomUUID(),
-                    monto_total: 1000,
-                    mes_correspondiente: '2026-01-01'
+                    detalle: 'Canon de arrendamiento del 2026-01-01 al 2026-01-31',
+                    valor: 1000,
+                    inicio: '2026-01-01',
+                    fin: '2026-01-31'
                 },
                 { usuarioAuditor: CREADOR }
             );
 
-            return { id_pago: pago.id_pago, monto: 500, saldo_restante_momento: 500 };
+            return {
+                id_cuenta_cobro: cuenta.id_cuenta_cobro,
+                monto: 500,
+                saldo_restante_momento: 500
+            };
         },
-        cambio: { observaciones: 'corregido' }
+        // Anular es el cambio que de verdad hace el controlador sobre una
+        // transacción, y el que más importa que quede auditado: es quien
+        // deshace un movimiento contable.
+        cambio: { estado: 'ANULADA' }
     }
 ];
 

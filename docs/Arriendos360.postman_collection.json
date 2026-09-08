@@ -578,7 +578,7 @@
       "name": "Pagos",
       "item": [
         {
-          "name": "Listar Historial de Pagos",
+          "name": "Listar Cuentas de Cobro",
           "request": {
             "method": "GET",
             "header": [],
@@ -595,7 +595,7 @@
           }
         },
         {
-          "name": "Pagos PENDIENTES",
+          "name": "Cuentas de Cobro PENDIENTES",
           "request": {
             "method": "GET",
             "header": [],
@@ -613,7 +613,7 @@
           }
         },
         {
-          "name": "Pagos por Contrato",
+          "name": "Cuentas de Cobro por Contrato",
           "request": {
             "method": "GET",
             "header": [],
@@ -632,19 +632,50 @@
           }
         },
         {
-          "name": "Generar Cobro Mensual",
+          "name": "Emitir Cuenta de Cobro",
           "request": {
             "method": "POST",
             "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/cuentas-cobro",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "cuentas-cobro"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"id_contrato\": \"{{id_contrato}}\",\n    \"monto_total\": 1500000,\n    \"mes_correspondiente\": \"2023-06-01\"\n}",
+              "raw": "{\n    \"id_contrato\": \"{{id_contrato}}\",\n    \"valor\": 1500000,\n    \"inicio\": \"2026-06-01\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
+            "description": "Alta manual. El camino normal es que las genere el motor financiero a partir del contrato; esto existe para la demostracion. Si se omiten `inicio` y `fin`, se derivan del ciclo de facturacion del contrato."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var d = pm.response.json();",
+                  "if (d.cuenta_cobro && d.cuenta_cobro.id_cuenta_cobro) { pm.collectionVariables.set(\"id_cuenta_cobro\", d.cuenta_cobro.id_cuenta_cobro); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar Pago (Transaccion)",
+          "request": {
+            "method": "POST",
+            "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/pagos",
               "host": [
@@ -654,48 +685,17 @@
                 "api",
                 "pagos"
               ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "var d = pm.response.json();",
-                  "if (d.pago && d.pago.id_pago) { pm.collectionVariables.set(\"id_pago\", d.pago.id_pago); }"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ]
-        },
-        {
-          "name": "Registrar Pago o Abono",
-          "request": {
-            "method": "PUT",
-            "header": [],
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"monto_pagado\": 500000,\n    \"tipo_transaccion\": \"Transferencia Bancaria\",\n    \"observaciones\": \"Primer abono del mes\"\n}",
+              "raw": "{\n    \"id_cuenta_cobro\": \"{{id_cuenta_cobro}}\",\n    \"monto\": 500000,\n    \"tipo\": \"INGRESO\",\n    \"medio_pago\": \"Transferencia Bancaria\",\n    \"observaciones\": \"Primer abono del mes\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/pagos/{{id_pago}}/pagar",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "pagos",
-                "{{id_pago}}",
-                "pagar"
-              ]
-            },
-            "description": "RF-17: Permite pagos totales o parciales. Valida que no se exceda el saldo pendiente."
+            "description": "RF-17. Sustituye a `PUT /api/pagos/{{id_pago}}/pagar`, que ya no existe. El cuerpo es el del Capitulo 2. OJO: `tipo` es el tipo de MOVIMIENTO (hoy siempre INGRESO) y `medio_pago` es como entro el dinero; son campos distintos. Valida que no se exceda el saldo, que el servidor deriva de las transacciones confirmadas."
           },
           "event": [
             {
@@ -703,7 +703,7 @@
               "script": {
                 "exec": [
                   "var d = pm.response.json();",
-                  "if (d.abono && d.abono.id_abono) { pm.collectionVariables.set(\"id_abono\", d.abono.id_abono); }"
+                  "if (d.transaccion && d.transaccion.id_transaccion) { pm.collectionVariables.set(\"id_transaccion\", d.transaccion.id_transaccion); }"
                 ],
                 "type": "text/javascript"
               }
@@ -711,43 +711,84 @@
           ]
         },
         {
-          "name": "Ver Historial de Abonos",
+          "name": "Ver Transacciones de una Cuenta",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/pagos/{{id_pago}}/abonos",
+              "raw": "{{baseUrl}}/api/pagos/{{id_cuenta_cobro}}/transacciones",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "pagos",
-                "{{id_pago}}",
-                "abonos"
+                "{{id_cuenta_cobro}}",
+                "transacciones"
               ]
             },
-            "description": "Lista todos los abonos realizados a un recibo mensual específico."
+            "description": "Lista todas las transacciones de una cuenta de cobro, incluidas las anuladas."
           }
         },
         {
-          "name": "Obtener Comprobante de Abono",
+          "name": "Historial de Transacciones",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/pagos/abono/{{id_abono}}",
+              "raw": "{{baseUrl}}/api/pagos/historial-transacciones",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "pagos",
-                "abono",
-                "{{id_abono}}"
+                "historial-transacciones"
               ]
             },
-            "description": "RF-18: Genera un comprobante en formato PDF por cada abono registrado."
+            "description": "Todas las transacciones en las que el usuario es parte."
+          }
+        },
+        {
+          "name": "Obtener Comprobante de Transaccion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/transacciones/{{id_transaccion}}/comprobante",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "transacciones",
+                "{{id_transaccion}}",
+                "comprobante"
+              ]
+            },
+            "description": "RF-18: comprobante en PDF de una transaccion. El saldo que imprime es `saldo_restante_momento`, la foto del instante en que se registro: no se recalcula, porque cambiaria un documento ya emitido."
+          }
+        },
+        {
+          "name": "Anular Transaccion",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pagos/transacciones/{{id_transaccion}}/anular",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagos",
+                "transacciones",
+                "{{id_transaccion}}",
+                "anular"
+              ]
+            },
+            "description": "Solo PROPIETARIO. No borra la fila: le cambia el estado a ANULADA y el saldo de la cuenta se corrige solo, porque la suma que lo deriva deja de contarla. Anular dos veces responde 409. Ver docs/adr/0016."
           }
         },
         {
@@ -769,19 +810,19 @@
           }
         },
         {
-          "name": "Obtener Recibo PDF (Simulado)",
+          "name": "Obtener Recibo Mensual PDF",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/pagos/{{id_pago}}/recibo",
+              "raw": "{{baseUrl}}/api/pagos/{{id_cuenta_cobro}}/recibo",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "pagos",
-                "{{id_pago}}",
+                "{{id_cuenta_cobro}}",
                 "recibo"
               ]
             }
@@ -909,12 +950,12 @@
       "type": "string"
     },
     {
-      "key": "id_pago",
+      "key": "id_cuenta_cobro",
       "value": "",
       "type": "string"
     },
     {
-      "key": "id_abono",
+      "key": "id_transaccion",
       "value": "",
       "type": "string"
     },

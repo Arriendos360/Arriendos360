@@ -247,31 +247,36 @@ describe('El CRUD sigue funcionando a través de la costura', () => {
 
 describe('Los pagos y abonos siguen trayendo el inmueble de su contrato', () => {
     // Regresión. La pantalla de Pagos imprime `pago.Contrato.Inmueble.direccion`
-    // y `abono.Pago.Contrato.Inmueble.direccion`, rutas que producía un `include`
+    // y `transaccion.CuentaCobro.Contrato.Inmueble.direccion`, rutas que producía un `include`
     // anidado de dos y tres niveles. Al quitar Inmuebles de esos `include` la
     // columna pasó a mostrar el UUID del contrato en crudo — la API respondía
     // 200 y la pantalla salía «bien», que es como esto se coló.
     let idInmueble;
-    let idPago;
+    let idCuenta;
 
     beforeAll(async () => {
         const creado = await contratoSobreInmuebleNuevo('Avenida del Pago 7');
         idInmueble = creado.idInmueble;
 
-        const pago = await request(app)
-            .post('/api/pagos')
+        const cuenta = await request(app)
+            .post('/api/pagos/cuentas-cobro')
             .set(...conToken(tokenProp))
             .send({
                 id_contrato: creado.idContrato,
-                monto_total: 1000,
-                mes_correspondiente: '2026-01-01'
+                valor: 1000,
+                inicio: '2026-01-01'
             });
-        idPago = pago.body.pago.id_pago;
+        idCuenta = cuenta.body.cuenta_cobro.id_cuenta_cobro;
 
         await request(app)
-            .put(`/api/pagos/${idPago}/pagar`)
+            .post('/api/pagos')
             .set(...conToken(tokenProp))
-            .send({ monto_pagado: 400, tipo_transaccion: 'Transferencia' });
+            .send({
+                id_cuenta_cobro: idCuenta,
+                monto: 400,
+                tipo: 'INGRESO',
+                medio_pago: 'Transferencia'
+            });
     });
 
     test('GET /api/pagos compone Contrato.Inmueble', async () => {
@@ -279,7 +284,7 @@ describe('Los pagos y abonos siguen trayendo el inmueble de su contrato', () => 
             .get('/api/pagos')
             .set(...conToken(tokenProp));
 
-        const pago = respuesta.body.find((p) => p.id_pago === idPago);
+        const pago = respuesta.body.find((p) => p.id_cuenta_cobro === idCuenta);
         expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
     });
 
@@ -288,17 +293,17 @@ describe('Los pagos y abonos siguen trayendo el inmueble de su contrato', () => 
             .get('/api/pagos/pendientes')
             .set(...conToken(tokenProp));
 
-        const pago = respuesta.body.find((p) => p.id_pago === idPago);
+        const pago = respuesta.body.find((p) => p.id_cuenta_cobro === idCuenta);
         expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
     });
 
-    test('El historial de abonos lo compone un nivel más abajo', async () => {
+    test('El historial de transacciones lo compone un nivel más abajo', async () => {
         const respuesta = await request(app)
-            .get('/api/pagos/historial-abonos')
+            .get('/api/pagos/historial-transacciones')
             .set(...conToken(tokenProp));
 
-        const abono = respuesta.body.find((a) => a.id_pago === idPago);
-        expect(abono.Pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
+        const transaccion = respuesta.body.find((a) => a.id_cuenta_cobro === idCuenta);
+        expect(transaccion.CuentaCobro.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
     });
 
     test('Y el inquilino ve lo mismo sobre el inmueble que arrienda', async () => {
@@ -311,7 +316,7 @@ describe('Los pagos y abonos siguen trayendo el inmueble de su contrato', () => 
             .get('/api/pagos')
             .set(...conToken(login.body.token));
 
-        const pago = respuesta.body.find((p) => p.id_pago === idPago);
+        const pago = respuesta.body.find((p) => p.id_cuenta_cobro === idCuenta);
         expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
         expect(pago.Contrato.Inmueble.id_propietario).not.toBe(login.body.usuario.id);
     });

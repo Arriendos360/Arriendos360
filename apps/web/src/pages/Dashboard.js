@@ -6,6 +6,7 @@ import {
     Title, Tooltip, Legend, ArcElement
 } from 'chart.js';
 import api from '../services/api';
+import { ESTADOS_CUENTA_COBRO } from 'arriendos360-contracts';
 import {
     TrendingUp, Home, AlertCircle, FileText,
     MapPin, ArrowRight, Calendar,
@@ -13,6 +14,15 @@ import {
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
+
+/**
+ * Los cuatro estados de una cuenta de cobro, del catálogo compartido.
+ *
+ * Se desestructuran por posición del `as const` para que un cambio en el
+ * catálogo llegue aquí sin que haya que acordarse: si alguien añade un estado,
+ * lo que falla es esta línea, no una comparación silenciosa contra un literal.
+ */
+const [PENDIENTE, PAGADA, PARCIAL, EN_MORA] = ESTADOS_CUENTA_COBRO;
 
 const Dashboard = () => {
     const navigate = useNavigate();
@@ -46,11 +56,14 @@ const Dashboard = () => {
     if (loading) return <div className="loading">Cargando dashboard...</div>;
 
     // ── Gráfico barras ──
+    // Los estados dejaron de ser 1, 2, 3 y 4 en el paso 6c: son el catálogo
+    // cerrado que comparten el servicio, la migración y esta pantalla. El mes se
+    // saca de `inicio`, que es el arranque del periodo que factura la cuenta.
     const pagosPorMes = {};
     pagos.forEach(p => {
-        if (p.estado === 2) {
-            const mes = formatDate(p.mes_correspondiente, { month: 'short', year: '2-digit' });
-            pagosPorMes[mes] = (pagosPorMes[mes] || 0) + parseFloat(p.monto_total || 0);
+        if (p.estado === PAGADA) {
+            const mes = formatDate(p.inicio, { month: 'short', year: '2-digit' });
+            pagosPorMes[mes] = (pagosPorMes[mes] || 0) + parseFloat(p.valor || 0);
         }
     });
     const meses = Object.keys(pagosPorMes).slice(-6);
@@ -64,9 +77,9 @@ const Dashboard = () => {
     };
 
     // ── Dona ──
-    const pagados    = pagos.filter(p => p.estado === 2).length;
-    const pendientes = pagos.filter(p => p.estado === 1 || p.estado === 4).length;
-    const mora       = pagos.filter(p => p.estado === 3).length;
+    const pagados    = pagos.filter(p => p.estado === PAGADA).length;
+    const pendientes = pagos.filter(p => p.estado === PENDIENTE || p.estado === PARCIAL).length;
+    const mora       = pagos.filter(p => p.estado === EN_MORA).length;
     const donutData  = {
         labels: ['Pagados', 'Pendientes', 'En Mora'],
         datasets: [{ data: [pagados, pendientes, mora], backgroundColor: ['#22c55e', '#f59e0b', '#ef4444'], borderWidth: 2 }]
@@ -74,8 +87,11 @@ const Dashboard = () => {
 
     // ── Requieren atención ──
     const requierenAtencion = pagos
-        .filter(p => p.estado === 1 || p.estado === 3 || p.estado === 4)
-        .sort((a, b) => { const o = { 3: 0, 4: 1, 1: 2 }; return (o[a.estado] ?? 3) - (o[b.estado] ?? 3); })
+        .filter(p => p.estado === PENDIENTE || p.estado === EN_MORA || p.estado === PARCIAL)
+        .sort((a, b) => {
+            const o = { [EN_MORA]: 0, [PARCIAL]: 1, [PENDIENTE]: 2 };
+            return (o[a.estado] ?? 3) - (o[b.estado] ?? 3);
+        })
         .slice(0, 5);
 
     const kpis = [
@@ -86,10 +102,10 @@ const Dashboard = () => {
     ];
 
     const getEstadoConfig = (estado) => ({
-        3: { label: 'En Mora',      bg: '#fef2f2', border: '#fca5a5', badge: '#fee2e2', badgeText: '#b91c1c', dot: '#ef4444' },
-        4: { label: 'Pago Parcial', bg: '#fffbeb', border: '#fcd34d', badge: '#fef9c3', badgeText: '#a16207', dot: '#f59e0b' },
-        2: { label: 'Pagado',       bg: '#f0fdf4', border: '#bbf7d0', badge: '#dcfce7', badgeText: '#15803d', dot: '#22c55e' },
-        1: { label: 'Pendiente',    bg: '#f8fafc', border: '#e2e8f0', badge: '#f1f5f9', badgeText: '#475569', dot: '#94a3b8' },
+        [EN_MORA]:   { label: 'En Mora',      bg: '#fef2f2', border: '#fca5a5', badge: '#fee2e2', badgeText: '#b91c1c', dot: '#ef4444' },
+        [PARCIAL]:   { label: 'Pago Parcial', bg: '#fffbeb', border: '#fcd34d', badge: '#fef9c3', badgeText: '#a16207', dot: '#f59e0b' },
+        [PAGADA]:    { label: 'Pagado',       bg: '#f0fdf4', border: '#bbf7d0', badge: '#dcfce7', badgeText: '#15803d', dot: '#22c55e' },
+        [PENDIENTE]: { label: 'Pendiente',    bg: '#f8fafc', border: '#e2e8f0', badge: '#f1f5f9', badgeText: '#475569', dot: '#94a3b8' },
     }[estado] || { label: '—', bg: '#f8fafc', border: '#e2e8f0', badge: '#f1f5f9', badgeText: '#475569', dot: '#cbd5e1' });
 
 
@@ -152,9 +168,9 @@ const Dashboard = () => {
                     </div>
                     {requierenAtencion.map((pago, idx) => {
                         const cfg = getEstadoConfig(pago.estado);
-                        const esMora = pago.estado === 3;
+                        const esMora = pago.estado === EN_MORA;
                         return (
-                            <div key={pago.id_pago} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.5rem', background: cfg.bg, borderBottom: idx < requierenAtencion.length - 1 ? `1px solid ${cfg.border}` : 'none' }}>
+                            <div key={pago.id_cuenta_cobro} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.5rem', background: cfg.bg, borderBottom: idx < requierenAtencion.length - 1 ? `1px solid ${cfg.border}` : 'none' }}>
                                 <div style={{ width: '4px', height: '40px', borderRadius: '2px', background: cfg.dot, flexShrink: 0 }} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
@@ -165,7 +181,7 @@ const Dashboard = () => {
                                     </div>
                                     <div style={{ display: 'flex', gap: '0.75rem' }}>
                                         <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                                            <Calendar size={11} /> {formatDate(pago.mes_correspondiente)}
+                                            <Calendar size={11} /> {formatDate(pago.inicio)}
                                         </span>
                                         <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Arrendatario: {pago.Contrato?.id_inquilino || '--'}</span>
                                     </div>

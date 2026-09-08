@@ -68,19 +68,28 @@ describe('Cobertura Total - Contratos', () => {
 
 describe('Cobertura Total - Pagos', () => {
     test('POST /api/pagos/verificar-mora', async () => {
-        // Crear un pago vencido manualmente
-        const Pago = require('../src/models/Pago');
-        await Pago.create({ id_contrato: idContrato, monto_total: 500, saldo_pendiente: 500, mes_correspondiente: '2020-01-01', estado: 1 });
-        
+        // Crear una cuenta de cobro vencida manualmente. Ya no lleva
+        // `saldo_pendiente`: el saldo se deriva de sus transacciones, y esta no
+        // tiene ninguna, asi que vale su importe entero.
+        const CuentaCobro = require('../src/models/CuentaCobro');
+        await CuentaCobro.create({
+            id_contrato: idContrato,
+            detalle: 'Canon vencido de prueba',
+            valor: 500,
+            inicio: '2020-01-01',
+            fin: '2020-01-31',
+            estado: 'PENDIENTE'
+        });
+
         const res = await request(app).post('/api/pagos/verificar-mora').set(...conToken(token));
         expect(res.statusCode).toBe(200);
         expect(res.body.pagos_actualizados).toBeGreaterThan(0);
     });
 
     test('GET /api/pagos/:id/recibo', async () => {
-        const Pago = require('../src/models/Pago');
-        const p = await Pago.findOne();
-        const res = await request(app).get(`/api/pagos/${p.id_pago}/recibo`).set(...conToken(token));
+        const CuentaCobro = require('../src/models/CuentaCobro');
+        const c = await CuentaCobro.findOne();
+        const res = await request(app).get(`/api/pagos/${c.id_cuenta_cobro}/recibo`).set(...conToken(token));
         expect(res.statusCode).toBe(200);
         expect(res.header['content-type']).toBe('application/pdf');
     });

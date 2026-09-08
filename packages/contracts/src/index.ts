@@ -58,7 +58,26 @@ export type {
   TipoAnexo,
 } from './contratos';
 
+/**
+ * Financiero exporta VALORES desde el paso 6c, por lo mismo que Inmuebles: sus
+ * tres catalogos cerrados los comparten el modelo, el frontend y los `CHECK` de
+ * la migracion. Ver la cabecera de `financiero.ts`, que explica ademas por que
+ * estos van en MAYUSCULAS y los de Inmuebles y Contratos en minusculas.
+ */
+export {
+  ESTADOS_CUENTA_COBRO,
+  ESTADOS_TRANSACCION,
+  MEDIOS_PAGO_CONOCIDOS,
+  TIPOS_TRANSACCION,
+  esEstadoCuentaCobro,
+  esEstadoTransaccion,
+  esTipoTransaccion,
+} from './financiero';
+
 export type {
+  CrearCuentaCobroRequest,
+  EstadoCuentaCobro,
+  EstadoTransaccion,
   MedioPago,
   RegistrarPagoRequest,
   TipoTransaccion,
