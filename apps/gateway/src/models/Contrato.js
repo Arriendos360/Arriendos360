@@ -1,45 +1,98 @@
 const { DataTypes } = require('sequelize');
+const { ESTADOS_CONTRATO } = require('arriendos360-contracts');
 
 const { sequelize } = require('../config/database');
 const { columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } = require('./auditoria');
+const { ESTADO_CONTRATO_ACTIVO } = require('./constantes');
+const { diaLimiteDesde, fechaInicioCorteDesde } = require('./fechasContrato');
 const { claveUuid, referenciaUuid } = require('./uuid');
 
 /**
- * Contratos.
+ * Contratos, ya con los nombres del modelo canónico.
  *
- * Igual que en Inmuebles, los nombres de negocio no se tocan: `valor_mensual`
- * pasará a `canon` y aparecerán `fecha_inicio_corte`, `fecha_limite_pago` y los
- * datos del deudor solidario cuando se extraiga ms-contratos (paso 6).
+ * `fecha_inicio` → `inicio`, `fecha_fin` → `fin` y `valor_mensual` → `canon`, y
+ * `estado` deja de ser un entero. Lo que sigue faltando frente al Capítulo 2 son
+ * los `Anexos`, que hoy son un `url_pdf` suelto y se separan en el paso 6.
  *
- * `id_inquilino` guarda el UUID del usuario como referencia lógica pura, sin
- * asociación de Sequelize: cruza la frontera hacia ms-identidad. El nombre del
- * inquilino que el listado muestra ya no sale de un `include`, lo compone el
- * gateway pidiéndoselo al servicio.
+ * `id_inmueble` e `id_inquilino` guardan UUID como referencias lógicas puras,
+ * sin asociación de Sequelize: cruzan la frontera hacia ms-inmuebles y
+ * ms-identidad. Lo que antes traía un `include` lo compone ahora el gateway por
+ * HTTP (`clientes/composicion.js`).
  */
 const Contrato = sequelize.define('Contrato', {
     id_contrato: claveUuid(),
-    fecha_inicio: {
+    inicio: {
         type: DataTypes.DATE,
         allowNull: false
     },
-    fecha_fin: {
+    fin: {
         type: DataTypes.DATE,
         allowNull: false
     },
-    valor_mensual: {
+    canon: {
         type: DataTypes.DECIMAL(12, 2),
         allowNull: false
     },
-    deposito: { type: DataTypes.DECIMAL(12, 2) },
-    estado: {
+
+    /**
+     * Primera fecha de corte del ciclo de facturación.
+     *
+     * `DATEONLY` y no `DATE`: es una fecha de calendario, sin hora. Sequelize la
+     * devuelve como `'YYYY-MM-DD'`, así que quien la lea obtiene el día que se
+     * guardó sin que ninguna zona horaria se lo mueva — que es justo el problema
+     * que tendría un `TIMESTAMPTZ` leído con `.getDate()`.
+     */
+    fecha_inicio_corte: {
+        type: DataTypes.DATEONLY,
+        allowNull: false
+    },
+
+    /**
+     * Día del mes en que vence el pago. Un ENTERO, no una fecha; el Capítulo 2
+     * lo ejemplifica con `5`.
+     *
+     * Se guarda tal cual se pactó —un 31 se guarda 31— y el recorte a los meses
+     * que no tienen ese día se aplica al resolverlo. Ver `fechasContrato.js`.
+     */
+    fecha_limite_pago: {
         type: DataTypes.INTEGER,
-        defaultValue: 1
+        allowNull: false,
+        validate: {
+            min: { args: [1], msg: 'La fecha límite de pago debe ser un día del mes (1-31)' },
+            max: { args: [31], msg: 'La fecha límite de pago debe ser un día del mes (1-31)' }
+        }
     },
+
+    /** Condiciones particulares en texto libre. Opcional. */
+    info_contrato: { type: DataTypes.TEXT },
+
+    estado: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: ESTADO_CONTRATO_ACTIVO,
+        validate: {
+            isIn: {
+                args: [[...ESTADOS_CONTRATO]],
+                msg: `El estado del contrato debe ser uno de: ${ESTADOS_CONTRATO.join(', ')}`
+            }
+        }
+    },
+
+    /**
+     * Deudor solidario. Los dos opcionales: no todo arriendo tiene codeudor.
+     * Exigirlos impediría registrar los que no lo tienen, que son mayoría en
+     * arriendos pequeños.
+     */
+    nombre_deudor_solidario: { type: DataTypes.STRING(150) },
+    documento_deudor_solidario: { type: DataTypes.STRING(20) },
+
+    /**
+     * PDF del contrato firmado. Es el antecesor de `Anexos` y se va en el paso
+     * 6, cuando esa tabla exista y el archivo se suba a almacenamiento en la
+     * nube en vez de a disco local.
+     */
     url_pdf: { type: DataTypes.STRING(500) },
-    inventario_fotografico: {
-        type: DataTypes.JSON,
-        defaultValue: []
-    },
+
     id_inmueble: referenciaUuid(),
     id_inquilino: referenciaUuid(),
     ...columnasAuditoria
@@ -50,12 +103,41 @@ const Contrato = sequelize.define('Contrato', {
 
 registrarHooksAuditoria(Contrato);
 
+/**
+ * Deriva las dos fechas del ciclo de facturación cuando no vienen dadas.
+ *
+ * VA EN UN HOOK Y NO EN EL CONTROLADOR a propósito. Las dos columnas son
+ * `NOT NULL`, así que el invariante «un contrato siempre tiene fecha de corte y
+ * día límite» es del modelo; dejarlo en el controlador significaría que
+ * cualquier otro camino de escritura —el motor financiero, una migración de
+ * datos, el `ms-contratos` del paso 6b— tendría que acordarse de repetirlo, y el
+ * día que se olvide falla el `INSERT` en vez de derivarse solo.
+ *
+ * SÓLO SI NO VIENEN. Un valor explícito gana siempre: es lo que permite que el
+ * formulario ofrezca el día límite como sugerencia editable, y lo que deja la
+ * puerta abierta a renegociar el ciclo sin tocar la fecha de inicio del
+ * contrato. Derivar en lectura habría cerrado esa puerta.
+ *
+ * Va en `beforeValidate` por lo mismo que los hooks de auditoría: las columnas
+ * son `allowNull: false` y rellenarlas después de la validación llega tarde.
+ */
+Contrato.addHook('beforeValidate', (contrato) => {
+    if (!contrato.isNewRecord || !contrato.inicio) {
+        return;
+    }
+
+    if (!contrato.fecha_inicio_corte) {
+        contrato.fecha_inicio_corte = fechaInicioCorteDesde(contrato.inicio);
+    }
+
+    if (contrato.fecha_limite_pago === null || contrato.fecha_limite_pago === undefined) {
+        contrato.fecha_limite_pago = diaLimiteDesde(contrato.inicio);
+    }
+});
+
 // Ni `id_inmueble` ni `id_inquilino` tienen asociación: los dos cruzan la
 // frontera de un servicio —ms-inmuebles y ms-identidad— y la regla dura 2
 // prohíbe que un `include` la atraviese. Son referencias lógicas puras: UUID sin
 // clave foránea y sin nada que el ORM pueda seguir.
-//
-// Lo que antes traía el `include` lo compone ahora el gateway por HTTP, con la
-// misma forma de respuesta. Ver `clientes/composicion.js`.
 
 module.exports = Contrato;

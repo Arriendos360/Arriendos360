@@ -31,7 +31,7 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1 a 5 de la migración completados. El sistema sigue siendo un **monolito
+Pasos 1 a 5 completados, y el 6a (realineación de Contratos con el modelo canónico). El sistema sigue siendo un **monolito
 modular funcionando**, ahora dentro de una estructura de monorepo, con el modelo de
 identidad del Capítulo 2 implementado, dos microservicios extraídos y el bus de eventos
 en pie:
@@ -56,7 +56,8 @@ en pie:
   productor de eventos son treinta líneas de cableado sobre `salida.ts`.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `inmuebles/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver
-  `docs/adr/0003`. `dominio/` ya solo guarda contratos, anexos, pagos y abonos.
+  `docs/adr/0003`. `dominio/` ya solo guarda contratos, pagos y abonos, y la
+  tabla de salida del bus.
 - `services/ms-identidad/` — primer microservicio real y **ya en producción de la
   demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
   Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
@@ -93,6 +94,14 @@ claims nuevos (`sub`/`email`/`roles`/`jti`), `logout` con `TokensRevocados`, tok
 memoria en la SPA y descargas por blob. Después llegaron el build en contexto raíz, la
 matriz RBAC, la extracción de los dos servicios y el bus. Falta el paso 6: separar
 `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones` y extraer Contratos y Financiero.
+
+**Contratos ya habla el idioma del Capítulo 2** desde el paso 6a, aunque siga
+viviendo en el gateway: `inicio`, `fin`, `canon`, y `estado` como catálogo cerrado
+—`activo`, `finalizado`, `cancelado`— en vez del entero sin significado que había.
+Tiene además `fecha_inicio_corte`, `fecha_limite_pago`, `info_contrato` y los dos
+campos del deudor solidario, que son opcionales. Se fueron `deposito` e
+`inventario_fotografico`, que no están en el modelo canónico y nadie escribía.
+Lo que falta para cerrar el capítulo son los `Anexos`: hoy son un `url_pdf` suelto.
 
 Desviaciones de la línea base acumuladas, todas con ADR y **todas pendientes de
 incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
@@ -474,9 +483,18 @@ remoto lo ya extraído.
    es el gateway mientras `contratos` sea suya. `ContratoFormalizado` y
    `ContratoFinalizado` (`docs/adr/0013`) reemplazaron la llamada síncrona del paso 4:
    el `/interno` que la servía se retiró y el ADR 0011 quedó saldado.
-6. **`ms-contratos`** y **`ms-financiero`.** El trabajo duro: separar `Pago`/`Abono` en
-   `Cuentas_cobro`/`Transacciones`, mover el motor de mora a Financiero, obtener datos
-   del contrato por API en vez de por `include`, y almacenamiento en la nube para anexos.
+6. **`ms-contratos`** y **`ms-financiero`.** El trabajo duro. Se parte igual que el 4:
+   - ~~**6a.** Realinear Contratos con el modelo canónico, sin extraer nada.~~
+     **Hecho.** Renombres, `estado` como catálogo, las columnas que faltaban y las
+     dos muertas fuera, todo con una migración que TRANSFORMA los datos existentes.
+     El evento `ContratoFormalizado` dejó de traducir nombres postizos.
+   - **6b.** Extraer `ms-contratos` con `Contratos` + `Anexos`, y llevarse la tabla
+     de salida del bus con él: el productor se muda con lo que produce.
+   - **6c.** Separar `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones`, mover el
+     motor de mora a Financiero y extraerlo. Es donde se cobra la deuda de
+     `financialEngine.js`.
+   - Y en algún punto de los dos: obtener datos del contrato por API en vez de por
+     `include`, y almacenamiento en la nube para los anexos.
 7. **`ms-notificaciones`.** Mailer y recordatorios.
 8. **Azure Container Apps.** Bicep, pipeline y terminación SSL. Al final.
 
@@ -507,8 +525,16 @@ remoto lo ya extraído.
   viaja en los claims y el Capítulo 2 lo fija en mayúsculas; esto es un atributo
   de negocio. Si agregas un valor, tócalo en los dos sitios — nada los sincroniza.
 - **Dinero:** pesos colombianos. `NUMERIC` en PostgreSQL, nunca `float`.
-- **Fechas:** guardar en UTC, presentar en `America/Bogota`. El cálculo de mora depende
-  de esto y hoy usa `new Date()` local, que es una fuente latente de errores.
+- **Fechas:** guardar en UTC, presentar en `America/Bogota`. **A medio arreglar.** El
+  paso 6a cerró la parte que tocaba: `fecha_inicio_corte` y `fecha_limite_pago` se
+  derivan en UTC (`models/fechasContrato.js`) y la migración las rellenó con
+  `AT TIME ZONE 'UTC'`, así que el día que se guarda es el que el usuario escribió.
+  El resto del motor de mora sigue comparando contra `new Date()` local; se arregla
+  al mudarlo a Financiero en el paso 6c.
+- **Días del mes que no existen:** un contrato que vence el 31 no tiene ese día en
+  febrero. La regla es **recortar al último día del mes**, y el día pactado se guarda
+  sin tocar: el recorte se aplica al resolverlo contra cada mes, no al guardarlo. Ver
+  la cabecera de `models/fechasContrato.js`.
 
 ---
 

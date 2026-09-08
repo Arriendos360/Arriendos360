@@ -13,7 +13,7 @@ const {
     registrarContratoFormalizado
 } = require('../eventos');
 const Contrato = require('../models/Contrato');
-const { ROL_INQUILINO } = require('../models/constantes');
+const { ESTADO_CONTRATO_FINALIZADO, ROL_INQUILINO } = require('../models/constantes');
 const { esUuid } = require('../models/uuid');
 
 /**
@@ -106,7 +106,7 @@ const crear = async (req, res) => {
     let t = null;
     try {
         const { sub } = req.usuario;
-        const { id_inmueble, id_inquilino, fecha_inicio, fecha_fin, valor_mensual } = req.body;
+        const { id_inmueble, id_inquilino, inicio, fin, canon } = req.body;
 
         // Las columnas de auditoría no se aceptan del cliente: las pone el hook.
         const { creado_por, actualizado_por, ...contratoData } = req.body;
@@ -132,12 +132,29 @@ const crear = async (req, res) => {
         }
 
         // 1. Validaciones de Negocio
-        if (new Date(fecha_fin) <= new Date(fecha_inicio)) {
+        if (new Date(fin) <= new Date(inicio)) {
             return res.status(400).json({ mensaje: 'La fecha de fin debe ser posterior a la de inicio' });
         }
 
-        if (parseFloat(valor_mensual) <= 0) {
-            return res.status(400).json({ mensaje: 'El valor mensual debe ser un número positivo' });
+        if (parseFloat(canon) <= 0) {
+            return res.status(400).json({ mensaje: 'El canon debe ser un número positivo' });
+        }
+
+        // El día límite llega del formulario, así que se valida aquí y no sólo
+        // en el modelo: la validación de Sequelize saldría por el `catch` de
+        // abajo como un 500, y esto es un 400 de manual — un dato del cliente
+        // que no vale. Sólo se mira si viene: si no, lo deriva el hook.
+        if (contratoData.fecha_limite_pago !== undefined && contratoData.fecha_limite_pago !== '') {
+            const dia = Number(contratoData.fecha_limite_pago);
+
+            if (!Number.isInteger(dia) || dia < 1 || dia > 31) {
+                return res.status(400).json({
+                    mensaje: 'La fecha límite de pago debe ser un día del mes (1-31)'
+                });
+            }
+
+            // `multipart/form-data` lo entrega como cadena; la columna es entera.
+            contratoData.fecha_limite_pago = dia;
         }
 
         // 2. Verificar que el inquilino existe y que efectivamente es inquilino.
@@ -159,13 +176,11 @@ const crear = async (req, res) => {
             contratoData.url_pdf = `/uploads/contratos/${req.file.filename}`;
         }
 
-        if (typeof contratoData.inventario_fotografico === 'string') {
-            try {
-                contratoData.inventario_fotografico = JSON.parse(contratoData.inventario_fotografico);
-            } catch (e) {
-                contratoData.inventario_fotografico = [];
-            }
-        }
+        // `fecha_inicio_corte` y `fecha_limite_pago` NO se calculan aquí: si no
+        // vienen en el cuerpo, las deriva de `inicio` el hook del modelo, que es
+        // donde vive el invariante porque las dos columnas son NOT NULL. Si
+        // vienen —el formulario manda el día límite, editable— ganan las del
+        // cuerpo. Ver `models/fechasContrato.js`.
 
         // 4. Guardar el contrato Y ANUNCIARLO, en una sola transacción.
         //
@@ -249,11 +264,14 @@ const finalizar = async (req, res) => {
             return res.status(404).json({ mensaje: 'Contrato no encontrado o no tienes permisos' });
         }
 
-        // Estado finalizado (2) y anuncio, en la misma transacción. Antes esto
-        // no tenía transacción porque era una sola fila; ahora son dos, y son
+        // Estado finalizado y anuncio, en la misma transacción. Antes esto no
+        // tenía transacción porque era una sola fila; ahora son dos, y son
         // justamente las dos que no pueden quedar desparejadas.
         await sequelize.transaction(async (transaccion) => {
-            await contrato.update({ estado: 2 }, { transaction: transaccion, usuarioAuditor: sub });
+            await contrato.update(
+                { estado: ESTADO_CONTRATO_FINALIZADO },
+                { transaction: transaccion, usuarioAuditor: sub }
+            );
             await registrarContratoFinalizado(contrato, transaccion);
         });
 

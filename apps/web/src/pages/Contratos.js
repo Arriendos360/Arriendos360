@@ -5,6 +5,29 @@ import { useSesion } from '../auth/sesion';
 import api from '../services/api';
 import { urlArchivoSubido } from '../services/descargas';
 
+/**
+ * Estados de contrato.
+ *
+ * Eran los enteros 1, 2 y 3, traducidos aqui con un ternario anidado que
+ * duplicaba un mapa que tambien vivia en el backend. Ahora la API devuelve el
+ * valor del catalogo y esto solo pone la etiqueta que se pinta.
+ */
+const ESTADO_ACTIVO = 'activo';
+
+const ETIQUETA_ESTADO = {
+    activo: 'Activo',
+    finalizado: 'Finalizado',
+    cancelado: 'Cancelado'
+};
+
+/**
+ * Dia del mes que sugiere una fecha `YYYY-MM-DD`, como cadena para el <input>.
+ *
+ * Se corta la cadena en vez de usar `new Date(valor).getDate()`: eso ultimo
+ * interpreta la fecha como medianoche UTC y en Bogota devuelve el dia anterior.
+ */
+const diaLimiteSugerido = (fecha) => (fecha ? String(Number(fecha.slice(8, 10))) : '');
+
 const Contratos = () => {
     const { esPropietario } = useSesion();
     const [contratos, setContratos] = useState([]);
@@ -20,9 +43,15 @@ const Contratos = () => {
     // Lo que el propietario teclea es la CÉDULA. El contrato necesita el UUID
     // del usuario, así que hay que traducirlo antes de enviar.
     const [documentoInquilino, setDocumentoInquilino] = useState('');
-    const [fechaInicio, setFechaInicio] = useState('');
-    const [fechaFin, setFechaFin] = useState('');
-    const [valorMensual, setValorMensual] = useState('');
+    const [inicio, setInicio] = useState('');
+    const [fin, setFin] = useState('');
+    const [canon, setCanon] = useState('');
+    // Dia del mes en que vence el pago. Se sugiere desde el inicio y se puede
+    // cambiar: el ciclo de facturacion no tiene por que coincidir con la firma.
+    // Cadena y no numero porque es el valor de un <input>.
+    const [diaLimitePago, setDiaLimitePago] = useState('');
+    const [nombreDeudor, setNombreDeudor] = useState('');
+    const [documentoDeudor, setDocumentoDeudor] = useState('');
     const [pdf, setPdf] = useState(null);
 
     // Tenant Modal state
@@ -99,9 +128,16 @@ const Contratos = () => {
         const formData = new FormData();
         formData.append('id_inmueble', idInmueble);
         formData.append('id_inquilino', idInquilino);
-        formData.append('fecha_inicio', fechaInicio);
-        formData.append('fecha_fin', fechaFin);
-        formData.append('valor_mensual', valorMensual);
+        formData.append('inicio', inicio);
+        formData.append('fin', fin);
+        formData.append('canon', canon);
+        if (diaLimitePago) formData.append('fecha_limite_pago', diaLimitePago);
+        // Los del codeudor solo se mandan si se llenaron: no todo arriendo lo tiene,
+        // y mandar cadenas vacias guardaria un codeudor sin nombre.
+        if (nombreDeudor.trim()) formData.append('nombre_deudor_solidario', nombreDeudor.trim());
+        if (documentoDeudor.trim()) {
+            formData.append('documento_deudor_solidario', documentoDeudor.trim());
+        }
         if (pdf) formData.append('pdf', pdf);
 
         await api.post('/contratos', formData, {
@@ -117,13 +153,13 @@ const Contratos = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (new Date(fechaFin) <= new Date(fechaInicio)) {
+        if (new Date(fin) <= new Date(inicio)) {
             showNotify('La fecha de fin debe ser posterior a la de inicio');
             return;
         }
 
-        if (parseFloat(valorMensual) <= 0) {
-            showNotify('El valor mensual debe ser mayor a cero');
+        if (parseFloat(canon) <= 0) {
+            showNotify('El canon debe ser mayor a cero');
             return;
         }
 
@@ -164,12 +200,36 @@ const Contratos = () => {
         }
     };
 
+    /**
+     * Cambiar el inicio sugiere el dia limite de pago.
+     *
+     * Solo SUGIERE: en cuanto el propietario escribe uno propio, deja de
+     * pisarselo. La alternativa —recalcularlo siempre— haria imposible pactar
+     * un dia distinto del de la firma, que es justamente lo que la columna
+     * permite ahora que existe.
+     *
+     * El dia se lee de la cadena `YYYY-MM-DD`, no de `new Date(...).getDate()`:
+     * eso ultimo interpreta la fecha como medianoche UTC y en Bogota devolveria
+     * el dia anterior.
+     */
+    const cambiarInicio = (valor) => {
+        setInicio(valor);
+
+        const sugerido = diaLimiteSugerido(inicio);
+        if (!diaLimitePago || diaLimitePago === sugerido) {
+            setDiaLimitePago(diaLimiteSugerido(valor));
+        }
+    };
+
     const resetForm = () => {
         setIdInmueble('');
         setDocumentoInquilino('');
-        setFechaInicio('');
-        setFechaFin('');
-        setValorMensual('');
+        setInicio('');
+        setFin('');
+        setCanon('');
+        setDiaLimitePago('');
+        setNombreDeudor('');
+        setDocumentoDeudor('');
         setPdf(null);
     };
 
@@ -238,18 +298,47 @@ const Contratos = () => {
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Fecha Inicio</label>
-                            <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} required />
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Inicio</label>
+                            <input type="date" value={inicio} onChange={(e) => cambiarInicio(e.target.value)} required />
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Fecha Fin</label>
-                            <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} required />
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Fin</label>
+                            <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} required />
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Valor Mensual ($)</label>
-                            <input type="number" value={valorMensual} onChange={(e) => setValorMensual(e.target.value)} required />
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Canon Mensual ($)</label>
+                            <input type="number" value={canon} onChange={(e) => setCanon(e.target.value)} required />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Dia limite de pago</label>
+                            <input
+                                type="number"
+                                min="1"
+                                max="31"
+                                value={diaLimitePago}
+                                onChange={(e) => setDiaLimitePago(e.target.value)}
+                                placeholder="Se toma del dia de inicio"
+                            />
+                            <small style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                Sugerido por la fecha de inicio. Si un mes no tiene ese dia, se cobra el ultimo.
+                            </small>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>
+                                Deudor solidario <span style={{ color: '#64748b', fontWeight: '400' }}>(opcional)</span>
+                            </label>
+                            <input type="text" placeholder="Nombre completo" value={nombreDeudor} onChange={(e) => setNombreDeudor(e.target.value)} />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>
+                                Cedula del deudor solidario <span style={{ color: '#64748b', fontWeight: '400' }}>(opcional)</span>
+                            </label>
+                            <input type="text" placeholder="Ej: 10203040" value={documentoDeudor} onChange={(e) => setDocumentoDeudor(e.target.value)} />
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -367,15 +456,15 @@ const Contratos = () => {
                                     <td style={{ padding: '1rem' }}>{contrato.Inquilino ? `${contrato.Inquilino.nombres} ${contrato.Inquilino.apellidos}` : '—'}</td>
                                     <td style={{ padding: '1rem' }}>
                                         <div style={{ fontSize: '0.9rem' }}>
-                                            {formatDate(contrato.fecha_inicio)} - {formatDate(contrato.fecha_fin)}
+                                            {formatDate(contrato.inicio)} - {formatDate(contrato.fin)}
                                         </div>
                                     </td>
                                     <td style={{ padding: '1rem', fontWeight: '600', color: '#059669' }}>
-                                        ${parseFloat(contrato.valor_mensual).toLocaleString()}
+                                        ${parseFloat(contrato.canon).toLocaleString()}
                                     </td>
                                     <td style={{ padding: '1rem' }}>
-                                        <span className={`badge ${contrato.estado === 1 ? 'badge-success' : 'badge-pending'}`}>
-                                            {contrato.estado === 1 ? 'Activo' : contrato.estado === 2 ? 'Finalizado' : 'Cancelado'}
+                                        <span className={`badge ${contrato.estado === ESTADO_ACTIVO ? 'badge-success' : 'badge-pending'}`}>
+                                            {ETIQUETA_ESTADO[contrato.estado] || contrato.estado}
                                         </span>
                                     </td>
                                     {esPropietario && <td style={{ padding: '1rem', textAlign: 'center', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
@@ -384,7 +473,7 @@ const Contratos = () => {
                                                 <ExternalLink size={18} />
                                             </a>
                                         )}
-                                        {esPropietario && contrato.estado === 1 && (
+                                        {esPropietario && contrato.estado === ESTADO_ACTIVO && (
                                             <button
                                                 title="Finalizar contrato"
                                                 onClick={async () => {

@@ -45,9 +45,9 @@ beforeAll(async () => {
         .send({
             id_inmueble: idInm,
             id_inquilino: inquilino.id,
-            fecha_inicio: '2023-01-01',
-            fecha_fin: '2023-12-31',
-            valor_mensual: 1200
+            inicio: '2023-01-01',
+            fin: '2023-12-31',
+            canon: 1200
         });
     idContrato = resCon.body.contrato.id_contrato;
 });

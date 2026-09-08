@@ -3,6 +3,8 @@ const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const { adjuntarPartes } = require('../clientes/composicion');
 const { Contrato, Pago } = require('../models');
+const { ESTADO_CONTRATO_ACTIVO } = require('../models/constantes');
+const { diaDeCorte, fechaEnMes } = require('../models/fechasContrato');
 const { enviarCorreo } = require('../config/mailer');
 
 /**
@@ -54,25 +56,38 @@ const procesarContratos = async () => {
         const fechaLimite = new Date();
         fechaLimite.setDate(hoy.getDate() + 2);
         
-        const contratos = await Contrato.findAll({ where: { estado: 1 } });
+        const contratos = await Contrato.findAll({ where: { estado: ESTADO_CONTRATO_ACTIVO } });
 
         // Un viaje a cada servicio para todos los contratos del barrido, no uno
         // por contrato.
         const contratosConPartes = await adjuntarPartes(contratos);
 
         for (const contrato of contratosConPartes) {
-            const fechaInicio = new Date(contrato.fecha_inicio);
-            const diaCorte = fechaInicio.getDate();
-            
+            // El día de corte sale de SU COLUMNA, no de recalcularlo desde el
+            // inicio del contrato. Es la diferencia que trae el paso 6a: si
+            // alguien renegocia el ciclo de facturación, el motor lo respeta.
+            const diaCorte = diaDeCorte(contrato.fecha_inicio_corte);
+            if (diaCorte === null) continue;
+
             // Determinar el mes y año de la "próxima factura"
             // Si hoy es 8 y el corte es 10, el mes es el actual.
             // Si hoy es 28 y el corte es 5, el mes es el siguiente.
-            let fechaObjetivo = new Date(hoy.getFullYear(), hoy.getMonth(), diaCorte);
+            //
+            // `fechaEnMes` y no `new Date(anio, mes, diaCorte)`: para un corte
+            // el 31, febrero se desbordaba en silencio al 3 de marzo y el cobro
+            // salía tres días tarde. Ahora se recorta al último día del mes.
+            let fechaObjetivo = fechaEnMes(hoy.getFullYear(), hoy.getMonth(), diaCorte);
             
             // Si la fecha objetivo ya pasó hace mucho (más de 20 días), probablemente nos referimos al mes siguiente
             // Si hoy es 25 y el corte es 5, la fechaObjetivo (25, mes, 5) es del pasado.
             if (hoy.getDate() > diaCorte + 2) {
-                fechaObjetivo.setMonth(fechaObjetivo.getMonth() + 1);
+                // Mismo recorte al pasar de mes: `setMonth` tiene el mismo
+                // desbordamiento que el constructor.
+                fechaObjetivo = fechaEnMes(
+                    fechaObjetivo.getFullYear(),
+                    fechaObjetivo.getMonth() + 1,
+                    diaCorte
+                );
             }
 
             // ¿Estamos dentro de la ventana de 2 días antes de la fecha objetivo?
@@ -96,8 +111,8 @@ const procesarContratos = async () => {
                 if (!yaExiste) {
                     await Pago.create({
                         id_contrato: contrato.id_contrato,
-                        monto_total: contrato.valor_mensual,
-                        saldo_pendiente: contrato.valor_mensual,
+                        monto_total: contrato.canon,
+                        saldo_pendiente: contrato.canon,
                         mes_correspondiente: fechaObjetivo,
                         estado: 1 // Pendiente
                     });
@@ -108,7 +123,7 @@ const procesarContratos = async () => {
                         await enviarCorreo(
                             contrato.Inquilino.email,
                             '🏠 Nuevo recibo de arriendo generado',
-                            `Hola ${contrato.Inquilino.nombres}, se ha generado tu recibo de arriendo para el periodo que inicia el ${diaCorte}. Valor: $${contrato.valor_mensual}.`
+                            `Hola ${contrato.Inquilino.nombres}, se ha generado tu recibo de arriendo para el periodo que inicia el ${diaCorte}. Valor: $${contrato.canon}.`
                         );
                     }
                 }

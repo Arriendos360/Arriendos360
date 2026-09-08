@@ -75,9 +75,9 @@ const firmarContrato = async (direccion) => {
         .send({
             id_inmueble: idInmueble,
             id_inquilino: idInquilino,
-            fecha_inicio: '2026-03-01',
-            fecha_fin: '2027-02-28',
-            valor_mensual: 1500000
+            inicio: '2026-03-01',
+            fin: '2027-02-28',
+            canon: 1500000
         });
 
     return { idInmueble, idContrato: respuesta.body.contrato?.id_contrato, respuesta };
@@ -108,10 +108,12 @@ describe('Firmar un contrato deja el evento en la tabla de salida', () => {
         expect(fila.version).toBe(1);
     });
 
-    test('el payload habla el idioma del modelo canónico, no el de la tabla', async () => {
-        // `valor_mensual` sale como `canon` y la fecha de corte aparece aunque la
-        // columna todavía no exista. La traducción se hace UNA vez, en el emisor,
-        // para que la deuda del esquema viejo no llegue a ms-financiero.
+    test('el payload sale de las columnas, sin traducción de por medio', async () => {
+        // Hasta el paso 6a el emisor traducía: `valor_mensual` salía como `canon`
+        // y la fecha de corte se derivaba de `fecha_inicio` porque no había
+        // columna. Ahora la tabla tiene los nombres del modelo canónico y el
+        // evento lee la fila tal cual. Ver `models/fechasContrato.js` para de
+        // dónde sale `fecha_inicio_corte` al crear.
         const [fila] = await filasDeSalida(`WHERE payload->>'id_contrato' = '${idContrato}'`);
 
         expect(fila.payload).toEqual({
@@ -159,9 +161,9 @@ describe('Atomicidad: el contrato y su evento, o ninguno de los dos', () => {
             {
                 id_inmueble: idInmueble,
                 id_inquilino: idInquilino,
-                fecha_inicio: '2026-01-01',
-                fecha_fin: '2026-12-31',
-                valor_mensual: 1000
+                inicio: '2026-01-01',
+                fin: '2026-12-31',
+                canon: 1000
             },
             { transaction: transaccion, usuarioAuditor: idProp }
         );
@@ -198,9 +200,9 @@ describe('Atomicidad: el contrato y su evento, o ninguno de los dos', () => {
             .send({
                 id_inmueble: idInmueble,
                 id_inquilino: idInquilino,
-                fecha_inicio: '2026-01-01',
-                fecha_fin: '2026-12-31',
-                valor_mensual: 'no soy un número'
+                inicio: '2026-01-01',
+                fin: '2026-12-31',
+                canon: 'no soy un número'
             });
 
         expect(respuesta.statusCode).toBe(500);

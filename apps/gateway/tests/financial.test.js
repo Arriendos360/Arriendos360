@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 const { Contrato, Pago } = require('../src/models');
-const { USUARIO_SISTEMA } = require('../src/models/constantes');
+const { ESTADO_CONTRATO_ACTIVO, USUARIO_SISTEMA } = require('../src/models/constantes');
 const { procesarContratos, procesarPagos } = require('../src/services/financialEngine');
 const { cerrarEntorno, identidadFalsa, inmueblesFalso, prepararEntorno } = require('./utiles/entorno');
 
@@ -14,6 +14,19 @@ const { cerrarEntorno, identidadFalsa, inmueblesFalso, prepararEntorno } = requi
  * dobles. Al gateway le llegan sus UUID en `id_inquilino` e `id_inmueble`, que
  * es todo lo que guarda de ellos.
  */
+
+/**
+ * `YYYY-MM-DD` con los componentes LOCALES de la fecha.
+ *
+ * No es `toISOString()`, que da los componentes UTC. Aqui hace falta el dia
+ * local porque el motor compara contra `new Date()`, tambien local; mezclar los
+ * dos convenios es lo que haria esta prueba dependiente de la hora a la que se
+ * ejecute. La conversion a UTC del resto del sistema se arregla en el paso 6.
+ */
+const fechaLocal = (fecha) =>
+    `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(
+        fecha.getDate()
+    ).padStart(2, '0')}`;
 
 /** Pone un inmueble en el doble, sin pasar por la API. */
 const inmuebleEnElDoble = (idPropietario, direccion) => {
@@ -78,10 +91,23 @@ describe('Motor Financiero (Automatizacion)', () => {
             {
                 id_inmueble: inm.id_inmueble,
                 id_inquilino: idInquilino,
-                fecha_inicio: pasadoManana,
-                fecha_fin: new Date(2025, 1, 1),
-                valor_mensual: 1000,
-                estado: 1
+                inicio: pasadoManana,
+                fin: new Date(2025, 1, 1),
+                canon: 1000,
+                // La fecha de corte se pone EXPLICITA en vez de dejar que la
+                // derive el hook. El hook deriva en UTC —que es lo correcto para
+                // una fecha que el usuario escribio como `YYYY-MM-DD`— pero aqui
+                // el inicio es un `Date` con hora, construido con aritmetica
+                // local. Dejarlo derivar ataria el resultado del motor a la hora
+                // del dia en que corra la suite: a las 02:00 en Bogota, el dia
+                // UTC es el siguiente y el recibo dejaria de generarse.
+                //
+                // Escribirlo aqui es ademas lo que hace que esta prueba siga
+                // siendo la referencia del paso 6a: el motor recibe exactamente
+                // el mismo dia de corte que recibia antes del renombre.
+                fecha_inicio_corte: fechaLocal(pasadoManana),
+                fecha_limite_pago: pasadoManana.getDate(),
+                estado: ESTADO_CONTRATO_ACTIVO
             },
             { usuarioAuditor: idPropietario }
         );

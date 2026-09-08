@@ -98,7 +98,7 @@ const Inmuebles = () => {
     };
 
     const getContratoActivo = (id_inmueble) =>
-        contratos.find(c => c.id_inmueble === id_inmueble && c.estado === 1);
+        contratos.find(c => c.id_inmueble === id_inmueble && c.estado === 'activo');
 
     const getUltimoPago = (id_contrato) =>
         pagos
@@ -218,7 +218,7 @@ const Inmuebles = () => {
                                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                                         <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>Canon/mes</div>
                                         <div style={{ fontWeight: '800', fontSize: '1rem', color: '#0f172a' }}>
-                                            ${parseFloat(contrato.valor_mensual).toLocaleString()}
+                                            ${parseFloat(contrato.canon).toLocaleString()}
                                         </div>
                                     </div>
                                 )}
@@ -262,8 +262,8 @@ const Inmuebles = () => {
                                                 <p style={{ fontSize: '0.7rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Contrato Activo</p>
                                                 {[
                                                     { icon: <User size={13} />,      label: 'Inquilino',   value: contrato.id_inquilino },
-                                                    { icon: <Calendar size={13} />,  label: 'Inicio',      value: new Date(contrato.fecha_inicio).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }) },
-                                                    { icon: <Calendar size={13} />,  label: 'Vencimiento', value: new Date(contrato.fecha_fin).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }) },
+                                                    { icon: <Calendar size={13} />,  label: 'Inicio',      value: new Date(contrato.inicio).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }) },
+                                                    { icon: <Calendar size={13} />,  label: 'Vencimiento', value: new Date(contrato.fin).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }) },
                                                 ].map((r, i) => (
                                                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: i < 2 ? '1px solid #f1f5f9' : 'none' }}>
                                                         <span style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{r.icon}{r.label}</span>

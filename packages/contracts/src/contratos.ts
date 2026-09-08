@@ -7,6 +7,37 @@
 import type { DiaDelMes, FechaISO, MontoCOP, UUID } from './comunes';
 
 /**
+ * Estados de un contrato.
+ *
+ * Catalogo CERRADO, igual que `ESTADOS_INMUEBLE`. Emite JavaScript porque lo
+ * comparten tres consumidores: el modelo, que valida contra el; el frontend, que
+ * pinta la etiqueta; y el `CHECK` de la migracion.
+ *
+ * SUSTITUYE A UN ENTERO. La columna guardaba `1`, `2` y `3` sin nada que dijera
+ * que significaban: la traduccion vivia repartida entre el motor financiero, el
+ * dashboard, el guardia de borrado y un ternario del frontend, cada uno con su
+ * copia del mapa. Un `WHERE estado = 1` no se puede leer ni revisar; un
+ * `WHERE estado = 'activo'` si.
+ *
+ * Los valores salen de la vieja tabla `estados_contrato` del modelo legado
+ * —Activo, Finalizado, Cancelado— normalizados a minusculas, que es la
+ * convencion del proyecto para catalogos de negocio y lo mismo que se hizo con
+ * `TIPOS_INMUEBLE` cuando salio de `tipos_inmueble`. Las mayusculas se reservan
+ * para los roles, que viajan en los claims y el Capitulo 2 fija asi.
+ *
+ * `cancelado` no lo produce ningun camino de codigo todavia —el frontend ya lo
+ * pintaba, prevision de un flujo que no existe— pero se declara: un catalogo que
+ * se queda corto obliga a otra migracion, y esta lista ya estaba escrita.
+ */
+export const ESTADOS_CONTRATO = ['activo', 'finalizado', 'cancelado'] as const;
+
+export type EstadoContrato = (typeof ESTADOS_CONTRATO)[number];
+
+/** Es este valor uno de los estados del catalogo? */
+export const esEstadoContrato = (valor: unknown): valor is EstadoContrato =>
+  typeof valor === 'string' && (ESTADOS_CONTRATO as readonly string[]).includes(valor);
+
+/**
  * Cuerpo de `POST /api/contratos`.
  *
  * `id_inmueble` e `id_inquilino` son referencias logicas: apuntan a datos que
@@ -19,15 +50,34 @@ export interface CrearContratoRequest {
   id_inquilino: UUID;
   inicio: FechaISO;
   fin: FechaISO;
-  fecha_inicio_corte: FechaISO;
+  /**
+   * Primera fecha de corte del ciclo de facturacion. Opcional en la peticion:
+   * si no viene, se deriva de `inicio`. Ver `fechasContrato` en el gateway.
+   */
+  fecha_inicio_corte?: FechaISO;
   /**
    * Dia del mes (entero, 1-31) en que vence el pago. NO es una fecha, aunque
-   * los tres campos anteriores si lo sean. El documento lo ejemplifica con `5`.
+   * los campos anteriores si lo sean. El documento lo ejemplifica con `5`.
+   *
+   * Opcional: si no viene, se deriva del dia de `inicio`. Que se pueda mandar es
+   * lo que permite que el formulario lo ofrezca como sugerencia editable.
    */
-  fecha_limite_pago: DiaDelMes;
+  fecha_limite_pago?: DiaDelMes;
   canon: MontoCOP;
-  nombre_deudor_solidario: string;
-  documento_deudor_solidario: string;
+  /**
+   * Deudor solidario. OPCIONALES los dos: no todo arriendo tiene codeudor, y
+   * exigirlos impediria registrar los que no lo tienen.
+   *
+   * No es desviacion del Capitulo 2. El documento los lista como atributos de
+   * `Contratos` y los muestra en el payload de ejemplo, pero no dice que sean
+   * obligatorios; la seccion de Persistencia no fija nulabilidad de ningun
+   * campo. Y CLAUDE.md ya establece como se leen esos ejemplos: lo vinculante
+   * son los campos y sus nombres, no los valores de muestra.
+   */
+  nombre_deudor_solidario?: string;
+  documento_deudor_solidario?: string;
+  /** Texto libre con las condiciones particulares. Opcional. */
+  info_contrato?: string;
 }
 
 /**
