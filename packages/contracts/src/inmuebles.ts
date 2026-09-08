@@ -89,14 +89,12 @@ export interface CrearInmuebleRequest {
   estrato?: number;
 }
 
-/**
- * Cuerpo de `POST /interno/inmuebles/:id/estado`.
- *
- * Lo llama otro servicio, no una persona: el estado de un inmueble lo mueve el
- * ciclo de vida del contrato. Ver `docs/adr/0011`.
+/*
+ * AQUI ESTABA `CambiarEstadoInmuebleRequest`, el cuerpo de
+ * `POST /interno/inmuebles/:id/estado`. Ese endpoint desaparecio en el paso 5:
+ * el estado del inmueble ya no se pide, se deduce de `ContratoFormalizado` y
+ * `ContratoFinalizado`. La forma de esos eventos vive en
+ * `packages/shared/src/eventos.ts` y no aqui, porque un evento no es el cuerpo
+ * de una peticion documentada en el Capitulo 2: es un contrato entre dos
+ * servicios que no se llaman.
  */
-export interface CambiarEstadoInmuebleRequest {
-  estado: EstadoInmueble;
-  /** UUID de la persona cuya accion provoco el cambio, para la auditoria. */
-  solicitado_por: string;
-}

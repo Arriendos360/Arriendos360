@@ -45,23 +45,41 @@ const autorDe = (opciones: unknown): string =>
 /**
  * Registra los hooks de autoria.
  *
- * Van en `beforeValidate` y no en `beforeCreate` por el orden de Sequelize:
- * `beforeValidate` -> validacion -> `beforeCreate`. Como las dos columnas son
- * `allowNull: false`, rellenarlas en `beforeCreate` llega tarde.
+ * SON DOS HOOKS Y NO UNO, y la razon es una trampa de Sequelize que conviene
+ * dejar escrita.
+ *
+ * `beforeValidate` cubre el ALTA. Tiene que ser ahi y no en `beforeCreate` por
+ * el orden de ejecucion —`beforeValidate` -> validacion -> `beforeCreate`— y
+ * porque las dos columnas son `allowNull: false`: rellenarlas despues de la
+ * validacion llega tarde.
+ *
+ * `beforeUpdate` cubre la MODIFICACION, y no vale hacerlo tambien en
+ * `beforeValidate`. `instancia.update(valores)` decide que columnas escribe a
+ * partir de las claves de `valores`, antes de disparar ningun hook; despues
+ * recupera lo que hayan cambiado los hooks de guardado —`beforeUpdate`— pero
+ * descarta expresamente lo que ya estuviera marcado como cambiado antes de
+ * empezar, que es justo el caso si se hubiera tocado en `beforeValidate`. El
+ * sintoma era mudo: `actualizado_por` conservaba para siempre el valor del alta,
+ * y no lo delataba ninguna prueba porque casi siempre quien crea y quien
+ * modifica son la misma persona. Se ve al primer cambio que hace el SISTEMA y no
+ * una persona, que es lo que trajo el bus de eventos.
  */
 export const registrarHooksAuditoria = (modelo: ModelStatic<Model>): void => {
   modelo.addHook('beforeValidate', (instancia, opciones) => {
-    const autor = autorDe(opciones);
     const fila = instancia as Model & { creado_por?: string; actualizado_por?: string };
 
-    if (fila.isNewRecord) {
-      if (!fila.getDataValue('creado_por')) {
-        fila.setDataValue('creado_por', autor);
-      }
-      fila.setDataValue('actualizado_por', fila.getDataValue('creado_por'));
+    if (!fila.isNewRecord) {
       return;
     }
 
-    fila.setDataValue('actualizado_por', autor);
+    const autor = autorDe(opciones);
+    if (!fila.getDataValue('creado_por')) {
+      fila.setDataValue('creado_por', autor);
+    }
+    fila.setDataValue('actualizado_por', fila.getDataValue('creado_por'));
+  });
+
+  modelo.addHook('beforeUpdate', (instancia, opciones) => {
+    (instancia as Model).set('actualizado_por', autorDe(opciones));
   });
 };

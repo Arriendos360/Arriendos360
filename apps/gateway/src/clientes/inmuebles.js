@@ -22,6 +22,10 @@
  *
  * Es la distinción que ya existía entre `usuariosPorIds` y `revocadosVigentes`,
  * aplicada dentro de un solo cliente.
+ *
+ * LOS DOS USOS SON CONSULTAS, y desde el paso 5 no hay ningún tercero. Escribir
+ * en Inmuebles —mover el estado de ocupación— dejó de hacerse por aquí: lo
+ * dispara el evento `ContratoFormalizado`. Ver la nota al final del archivo.
  */
 
 const { cabeceraDeServicio } = require('arriendos360-shared');
@@ -41,18 +45,14 @@ const urlBase = (entorno = process.env) => {
     return limpio === '' ? null : limpio.replace(/\/+$/, '');
 };
 
-const pedirJson = async (url, metodo = 'GET', cuerpo = null) => {
+/** GET a `/interno` con credencial de servicio. Todo lo de aquí son consultas. */
+const pedirJson = async (url) => {
     const respuesta = await fetch(url, {
-        method: metodo,
-        headers: {
-            ...cabeceraDeServicio({
-                emisor: process.env.SERVICIO_NOMBRE || 'gateway',
-                destinatario: DESTINATARIO,
-                secreto: process.env.SERVICIO_JWT_SECRET
-            }),
-            ...(cuerpo ? { 'Content-Type': 'application/json' } : {})
-        },
-        ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}),
+        headers: cabeceraDeServicio({
+            emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+            destinatario: DESTINATARIO,
+            secreto: process.env.SERVICIO_JWT_SECRET
+        }),
         signal: AbortSignal.timeout(TIEMPO_LIMITE_MS)
     });
 
@@ -158,31 +158,24 @@ const propioDe = async (id, sub, opciones = {}) => {
 };
 
 /**
- * Mueve el estado de ocupación de un inmueble.
+ * NOTA — AQUÍ HABÍA UN `cambiarEstado`.
  *
- * Sustituye al `Inmueble.update(...)` que vivía DENTRO de la transacción que
- * guardaba el contrato. Ya no hay transacción que abarque las dos cosas: son
- * bases lógicas distintas. Ver `docs/adr/0011`.
+ * Llamaba a `POST /interno/inmuebles/:id/estado` justo después de guardar el
+ * contrato, y era el mecanismo provisional del ADR 0011: dos escrituras sin
+ * transacción que las abarcara, con una ventana en la que el contrato existía y
+ * el inmueble seguía marcado como libre.
  *
- * PROPAGA el fallo para que el llamante pueda decirlo. Callarlo dejaría un
- * inmueble marcado como libre con un contrato vigente encima, y nadie lo
- * arreglaría porque nadie se habría enterado.
+ * El paso 5 lo reemplaza por el evento `ContratoFormalizado`, que se anota en la
+ * tabla de salida DENTRO de la transacción del contrato. El endpoint `/interno`
+ * que servía a esta función se retiró con él: no le quedaba ningún otro
+ * consumidor, y dejarlo en pie habría sido dejar abierta una segunda puerta al
+ * estado del inmueble que ya nadie usa pero cualquiera podría volver a usar.
+ *
+ * Lo que sí sigue aquí es todo lo demás: consultar inmuebles para autorizar y
+ * para componer. Eso es síncrono porque es una PREGUNTA, y una pregunta necesita
+ * respuesta ahora. Lo que se fue por el bus era una ORDEN, que es justo lo que
+ * puede esperar unos segundos.
  */
-const cambiarEstado = async (idInmueble, estado, solicitadoPor, opciones = {}) => {
-    const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();
-
-    if (base === null) {
-        throw new Error('MS_INMUEBLES_URL no está configurada');
-    }
-
-    return pedirJson(
-        `${base}/interno/inmuebles/${encodeURIComponent(idInmueble)}/estado`,
-        'POST',
-        // Quién lo pidió, para que la auditoría del otro lado registre a la
-        // persona y no al servicio que transmitió.
-        { estado, solicitado_por: solicitadoPor }
-    );
-};
 
 /** Estados, para no repetir literales por los controladores. */
 const ESTADO_DISPONIBLE = 'disponible';
@@ -192,7 +185,6 @@ module.exports = {
     ESTADO_ARRENDADO,
     ESTADO_DISPONIBLE,
     TIEMPO_LIMITE_MS,
-    cambiarEstado,
     dePropietario,
     idsDePropietario,
     porId,

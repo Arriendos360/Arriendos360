@@ -8,6 +8,13 @@
  * 1. El veto de borrado con contrato activo, que depende de Contratos.
  * 2. El estado del inmueble, que lo mueve el ciclo de vida del contrato.
  * 3. Que la composición sustituya al `include` sin cambiar lo observable.
+ *
+ * Desde el paso 5, lo segundo ya no ocurre dentro de la petición: firmar un
+ * contrato anota un evento y el estado del inmueble lo mueve el consumidor
+ * cuando el publicador se lo entrega. Por eso estas pruebas llaman a
+ * `entregarEventos()` donde antes no hacía falta nada — y por eso comprueban
+ * también el instante intermedio, que es la ventana de convergencia que el
+ * diseño acepta. El mecanismo en sí se prueba en `eventos.test.js`.
  */
 
 const request = require('supertest');
@@ -19,11 +26,13 @@ const {
     conToken,
     crearInmueble,
     crearInquilino,
+    entregarEventos,
     iniciarSesion,
     inmueblesFalso,
     prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
+const { USUARIO_SISTEMA } = require('./dobles/inmuebles');
 
 let tokenProp;
 let idProp;
@@ -73,67 +82,56 @@ const contratoSobreInmuebleNuevo = async (direccion) => {
 };
 
 describe('El estado del inmueble lo mueve el contrato', () => {
-    test('firmar un contrato deja el inmueble arrendado', async () => {
+    test('firmar un contrato deja el inmueble arrendado, tras la entrega', async () => {
         const { idInmueble, respuesta } = await contratoSobreInmuebleNuevo('Estado 1');
 
         expect(respuesta.statusCode).toBe(201);
+
+        // ANTES de entregar, el inmueble sigue libre. No es un defecto: es la
+        // ventana de convergencia, y dejarla escrita es lo que impide que
+        // alguien la descubra en la demostración.
+        expect(inmueblesFalso().inmuebles.get(idInmueble).estado).toBe('disponible');
+
+        await entregarEventos();
+
         expect(inmueblesFalso().inmuebles.get(idInmueble).estado).toBe('arrendado');
     });
 
-    test('la auditoría del cambio registra a la persona, no al servicio', async () => {
-        // El `iss` del token de servicio sería "gateway", que ni es un UUID ni
-        // es el dato que importa auditar.
-        const { idInmueble } = await contratoSobreInmuebleNuevo('Estado 2');
+    test('la respuesta ya no lleva aviso: no hay nada que se pueda perder', async () => {
+        // Con la llamada síncrona, el `201` podía venir con un aviso de «el
+        // contrato quedó pero el inmueble no se pudo marcar». Ahora el evento
+        // está en disco dentro de la misma transacción, así que no existe el
+        // caso que aquel aviso describía.
+        const { respuesta } = await contratoSobreInmuebleNuevo('Estado 2');
 
-        expect(inmueblesFalso().inmuebles.get(idInmueble).actualizado_por).toBe(idProp);
+        expect(respuesta.body.aviso).toBeUndefined();
+    });
+
+    test('la auditoría del cambio registra al sistema, no a la persona', async () => {
+        // Cambio respecto del ADR 0011, y deliberado. El sobre del evento no
+        // lleva actor: describe un hecho del dominio de quien lo emite, no la
+        // petición de una persona a ms-inmuebles. Quién firmó queda registrado
+        // en el contrato, que es donde importa.
+        const { idInmueble } = await contratoSobreInmuebleNuevo('Estado 3');
+        await entregarEventos();
+
+        expect(inmueblesFalso().inmuebles.get(idInmueble).actualizado_por).toBe(USUARIO_SISTEMA);
     });
 
     test('finalizar el contrato lo libera', async () => {
-        const { idInmueble, idContrato } = await contratoSobreInmuebleNuevo('Estado 3');
+        const { idInmueble, idContrato } = await contratoSobreInmuebleNuevo('Estado 4');
+        await entregarEventos();
 
         const respuesta = await request(app)
             .put(`/api/contratos/${idContrato}/finalizar`)
             .set(...conToken(tokenProp));
 
         expect(respuesta.statusCode).toBe(200);
+        expect(respuesta.body.aviso).toBeUndefined();
+
+        await entregarEventos();
+
         expect(inmueblesFalso().inmuebles.get(idInmueble).estado).toBe('disponible');
-    });
-});
-
-describe('Cuando el cambio de estado falla, se dice', () => {
-    test('el contrato queda creado y la respuesta lleva un aviso', async () => {
-        // Aquí se pierde la atomicidad que daba la transacción del monolito, y
-        // el punto de esta prueba es que NO se finge lo contrario. Ver
-        // docs/adr/0011: el contrato es el hecho de negocio y no se deshace
-        // porque su reflejo no haya podido escribirse.
-        const { id: idInmueble } = await crearInmueble(tokenProp, { direccion: 'Se cae al marcar' });
-
-        // Solo se tira la ESCRITURA del estado. La consulta de pertenencia
-        // sigue en pie, que es lo que permite llegar hasta el punto que
-        // interesa: el contrato ya guardado y el reflejo sin escribir.
-        inmueblesFalso().caer(503, /\/estado$/);
-
-        const respuesta = await request(app)
-            .post('/api/contratos')
-            .set(...conToken(tokenProp))
-            .send({
-                id_inmueble: idInmueble,
-                id_inquilino: idInquilino,
-                fecha_inicio: '2023-01-01',
-                fecha_fin: '2023-12-31',
-                valor_mensual: 1000
-            });
-
-        inmueblesFalso().levantar();
-
-        expect(respuesta.statusCode).toBe(201);
-        expect(respuesta.body.contrato).toBeDefined();
-        expect(respuesta.body.aviso).toContain('estado del inmueble');
-
-        // Y el contrato existe de verdad, no es solo la respuesta.
-        const Contrato = require('../src/models/Contrato');
-        const guardado = await Contrato.findByPk(respuesta.body.contrato.id_contrato);
-        expect(guardado).not.toBeNull();
     });
 });
 

@@ -31,9 +31,10 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1, 2 y 3a de la migración completados. El sistema sigue siendo un **monolito
-modular funcionando**, ahora dentro de una estructura de monorepo y con el modelo de
-identidad del Capítulo 2 ya implementado:
+Pasos 1 a 5 de la migración completados. El sistema sigue siendo un **monolito
+modular funcionando**, ahora dentro de una estructura de monorepo, con el modelo de
+identidad del Capítulo 2 implementado, dos microservicios extraídos y el bus de eventos
+en pie:
 
 - `apps/gateway/` — el antiguo `backend/`. Express + Sequelize + PostgreSQL en
   JavaScript (CommonJS). Incluye la costura de enrutamiento (cada prefijo se resuelve
@@ -47,9 +48,12 @@ identidad del Capítulo 2 ya implementado:
   `estado`), que emiten JavaScript porque los comparten el servicio, el frontend
   y el `CHECK` de la migración.
 - `packages/shared/` — verificación local del JWT y de revocados, autenticación
-  entre servicios, caché de invalidación, error estándar, cliente HTTP. **El
-  gateway ya lo consume**: su middleware de autenticación es un adaptador de
-  Express sobre este paquete, no una segunda implementación.
+  entre servicios, caché de invalidación, error estándar, cliente HTTP y **el bus
+  de eventos completo**: tipos de evento (`eventos.ts`), tabla de salida y
+  publicador (`salida.ts`), transporte (`entrega.ts`) y consumidor idempotente
+  (`entrada.ts`). **El gateway ya lo consume**: su middleware de autenticación es
+  un adaptador de Express sobre este paquete, no una segunda implementación, y su
+  productor de eventos son treinta líneas de cableado sobre `salida.ts`.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `inmuebles/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver
   `docs/adr/0003`. `dominio/` ya solo guarda contratos, anexos, pagos y abonos.
@@ -61,13 +65,19 @@ identidad del Capítulo 2 ya implementado:
   por la costura. El gateway ya no tiene tabla ni modelo de inmuebles: lo que
   necesita —qué inmuebles son de un propietario, los datos de uno concreto— lo
   pide por HTTP a `/interno/inmuebles` y lo compone
-  (`apps/gateway/src/clientes/inmuebles.js`).
+  (`apps/gateway/src/clientes/inmuebles.js`). Y **ya no le ordena nada**: el
+  estado de ocupación lo deduce el propio servicio de los eventos que consume por
+  `/interno/eventos` (`services/ms-inmuebles/src/eventos/`).
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
 
 El gateway ya no tiene tablas ni modelos de identidad ni de inmuebles. Lo que
 necesita de ellos lo pide por HTTP y lo compone (`apps/gateway/src/clientes/`). La
 revocación la resuelve una copia en memoria que refresca cada 15 s; ver
 `docs/adr/0008`.
+
+Y es, además, el **productor** del bus mientras `contratos` siga siendo suya: su tabla
+de salida es `public.eventos_salida` y su publicador vive en el mismo proceso
+(`apps/gateway/src/eventos/`). En el paso 6 los dos se mudan con `ms-contratos`.
 
 **La política de fallo no es la misma en los dos casos, y la distinción importa.**
 Componer datos para *decorar* una respuesta degrada: si el servicio no contesta, la
@@ -80,8 +90,9 @@ contratos» —una respuesta creíble y falsa— y reduciría la disyunción de 
 Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós a
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
 claims nuevos (`sub`/`email`/`roles`/`jti`), `logout` con `TokensRevocados`, token en
-memoria en la SPA y descargas por blob. Después llegaron el build en contexto raíz y la
-matriz RBAC. Falta el 3b: extraer `ms-identidad`.
+memoria en la SPA y descargas por blob. Después llegaron el build en contexto raíz, la
+matriz RBAC, la extracción de los dos servicios y el bus. Falta el paso 6: separar
+`Pago`/`Abono` en `Cuentas_cobro`/`Transacciones` y extraer Contratos y Financiero.
 
 Desviaciones de la línea base acumuladas, todas con ADR y **todas pendientes de
 incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
@@ -95,7 +106,9 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 | `0009` | Autenticación entre servicios para `/interno`. Resuelve una decisión abierta; el documento no la contempla pero tampoco la contradice. |
 | `0010` | Recuperación de contraseña: endpoints, tabla de tokens, columna `contrasena_cambiada_en` y envío de correo desde `ms-identidad`. Esto último **debe desaparecer** en el paso 7, no documentarse. |
-| `0011` | El estado del inmueble deja de moverse dentro de la transacción del contrato. No se aparta del modelo; registra una **garantía que se pierde**. Provisional: lo reemplaza el evento `ContratoFormalizado` en el paso 5. |
+| `0011` | ~~El estado del inmueble deja de moverse dentro de la transacción del contrato.~~ **Reemplazada por `0012` en el paso 5.** La garantía que registraba como perdida está saldada; no hay nada que tramitar. |
+| `0012` | Bus de eventos sobre PostgreSQL con patrón outbox, en vez de Dapr. Resuelve una decisión abierta y **no se aparta del documento**, que ordena el mecanismo pero no la tecnología. Lo que sí conviene incorporar es la **garantía de entrega**: al-menos-una-vez con descarte de repetidos. |
+| `0013` | El evento `ContratoFinalizado`, que el documento no contempla. **Esta sí es desviación**: añade una pieza al diseño de comunicación entre servicios. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -256,7 +269,8 @@ Arriendos360/
 │  ├─ ms-financiero/  ms-notificaciones/
 ├─ packages/
 │  ├─ contracts/               DTOs compartidos en TypeScript
-│  └─ shared/                  JWT, errores, logger, cliente HTTP, tipos de eventos
+│  └─ shared/                  JWT, errores, cliente HTTP y el bus de eventos:
+│                              tipos, tabla de salida, publicador y consumidor
 ├─ database/                   Migraciones y seeds, una carpeta por esquema
 ├─ infra/                      Dockerfiles, docker-compose, Bicep de Azure
 ├─ docs/                       ADRs, ERD, colección Postman
@@ -308,13 +322,73 @@ ruta?) y ABAC en el controlador (¿este recurso es suyo?). Ninguno reemplaza al 
 
 Coreografía, no orquestación: Contratos no llama a Financiero ni sabe que existe.
 
+### El bus, en concreto
+
+**PostgreSQL con patrón outbox. Sin broker.** Ver `docs/adr/0012`. El mecanismo entero
+vive en `packages/shared` y ningún servicio lo reimplementa:
+
+- **El productor escribe el evento en la misma transacción que el cambio de dominio**,
+  en SU tabla de salida, en SU esquema. Nunca una tabla compartida: sería un punto de
+  acoplamiento y rompería lo único que hace que esto funcione, que es que las dos
+  escrituras quepan en una transacción.
+- **Un publicador aparte** barre la tabla cada 5 s, entrega por `POST /interno/eventos`
+  con credencial de servicio y marca lo entregado. Si la entrega falla, reintenta con
+  espera creciente; el evento no se pierde porque ya está en disco.
+- **Entrega al-menos-una-vez.** Cada consumidor lleva su tabla `eventos_procesados` y
+  descarta repetidos por `id_evento`, anotándolo en la misma transacción en que aplica el
+  efecto. **No se intenta exactamente-una-vez**: exigiría un coordinador distribuido.
+- **Un evento que falla siempre no bloquea la cola ni se reintenta sin fin.** Sólo frena
+  a los que comparten su `clave_orden` (el `id_inmueble`), y tras 10 intentos —unos 13
+  minutos— pasa a `apartado`: deja de intentarse, deja de bloquear y queda a la vista.
+  Se aparta, no se borra.
+
+**El sobre lleva cinco campos**: `id_evento`, `tipo`, `version`, `ocurrido_en` y
+`payload`. La versión va desde el primer evento. **No lleva actor**, y eso tiene una
+consecuencia visible: lo que un consumidor escribe al reaccionar se audita como del
+sistema, no de la persona que provocó el hecho. Quién lo provocó queda registrado en el
+agregado del emisor, que es donde corresponde.
+
+### Eventos definidos
+
+| Evento | Emisor | Carga | Consumidores |
+|---|---|---|---|
+| `ContratoFormalizado` | quien escribe el contrato (hoy el gateway) | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte` | `ms-inmuebles` → `arrendado`. En el paso 6 también `ms-financiero`. |
+| `ContratoFinalizado` | ídem | `id_contrato`, `id_inmueble` | `ms-inmuebles` → `disponible`. Ver `docs/adr/0013`. |
+
+### El sistema es consistente en el tiempo para el estado del inmueble
+
+**Esto hay que saberlo antes de tocar nada que lo mire.** Firmar un contrato ya no deja
+el inmueble en `arrendado` dentro de la misma petición: deja el evento anotado, y el
+estado converge cuando el publicador lo entrega.
+
+**Ventana esperada: unos 5 segundos** —el intervalo del publicador, configurable con
+`EVENTOS_INTERVALO_MS`— más lo que tarde el consumidor. En el peor caso realista, si
+`ms-inmuebles` está caído, la ventana es lo que dure la caída más el reintento pendiente.
+Pasados los 10 intentos el evento se aparta y entonces **ya no converge solo**: hay que
+mirar la tabla de salida y reencolarlo.
+
+No es la ventana del ADR 0011, y la diferencia importa: aquella era una ventana en la que
+el aviso **se perdía** y nadie se enteraba; ésta es una en la que el aviso **todavía no ha
+llegado**. Consecuencias prácticas:
+
+- Una prueba **no puede afirmar el estado del inmueble justo después de firmar**. Tiene
+  que entregar los eventos (`entregarEventos()` en las suites del gateway) o esperar a
+  que converja (`esperarA()` en la de integración). Afirmarlo sin más es afirmar algo que
+  el diseño no promete.
+- La respuesta de `POST /api/contratos` **ya no lleva aviso** de que el estado no se pudo
+  actualizar: ese caso dejó de existir.
+- En una demostración en vivo, la pantalla de Inmuebles puede tardar un barrido en
+  reflejar el contrato recién firmado. Es el comportamiento correcto, no un fallo.
+
 **Generación recurrente:** las cuentas de cobro de meses siguientes las genera
 `MS-Financiero` con un proceso programado que barre fechas de corte. Ese código existe
 parcialmente en `financialEngine.js`.
 
-Los tipos de evento viven en `packages/shared`. Tecnología del bus: pendiente,
-recomendación **Dapr pub/sub** por venir integrado en Container Apps. ADR antes del
-paso 5.
+Los tipos de evento viven en `packages/shared/src/eventos.ts`. **Dapr pub/sub sigue
+siendo el camino natural** el día que haya más de un consumidor por evento y el volumen
+lo justifique; lo que el ADR 0012 decide es el *cuándo*, no el *nunca*, y el cambio está
+acotado a `entrega.ts`. Adoptarlo hoy no habría ahorrado nada: un broker **no elimina el
+outbox**, se pone detrás de él.
 
 ---
 
@@ -394,7 +468,11 @@ remoto lo ya extraído.
      extraer el servicio y dejar los JOIN en pie. La tabla se movió de esquema
      con `database/inmuebles/002` (copia) y `database/dominio/002` (retirada), en
      ese orden y con Compose garantizándolo.
-5. **Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.
+5. ~~**Bus de eventos.** Infraestructura de mensajería y tipos en `packages/shared`.~~
+   **Hecho.** PostgreSQL con patrón outbox, sin broker (`docs/adr/0012`). El productor
+   es el gateway mientras `contratos` sea suya. `ContratoFormalizado` y
+   `ContratoFinalizado` (`docs/adr/0013`) reemplazaron la llamada síncrona del paso 4:
+   el `/interno` que la servía se retiró y el ADR 0011 quedó saldado.
 6. **`ms-contratos`** y **`ms-financiero`.** El trabajo duro: separar `Pago`/`Abono` en
    `Cuentas_cobro`/`Transacciones`, mover el motor de mora a Financiero, obtener datos
    del contrato por API en vez de por `include`, y almacenamiento en la nube para anexos.
@@ -462,7 +540,9 @@ fetch(url, { headers: cabeceraDeServicio({
 ```
 
 Ningún servicio reimplementa esto. Va con `router.use` y no ruta por ruta a propósito:
-así un endpoint nuevo nace protegido.
+así un endpoint nuevo nace protegido. **`POST /interno/eventos`, la entrada del bus, es
+justamente uno de esos**: nació protegido sin tocar nada, y sin ella cualquiera con
+acceso al puerto podría arrendar inmuebles ajenos inventándose un sobre.
 
 `SERVICIO_JWT_SECRET` **no es** `JWT_SECRET`. Si fueran la misma clave, el token de
 cualquier inquilino serviría para llamar a `/interno`. Ver `docs/adr/0009`.
@@ -517,6 +597,16 @@ borde y **no** forma parte de `npm test`; se lanza con `npm run test:integracion
 Al extraer un servicio nuevo: se lleva sus pruebas, el gateway gana un doble suyo, y la
 suite de integración gana un camino sólo si es crítico para la demostración.
 
+**Y el doble consume eventos como el servicio real.** El de ms-inmuebles no sólo aplica el
+efecto: descarta repetidos por `id_evento`. Si sólo hiciera lo primero, un consumidor sin
+idempotencia pasaría las suites en verde y fallaría en producción a la primera reentrega —
+que con entrega al-menos-una-vez no es una posibilidad remota, es una certeza.
+
+**Nada de temporizadores en las suites.** El publicador no se arranca: las pruebas llaman
+a `ciclo()` a mano (`entregarEventos()` en `tests/utiles/entorno.js`). Es lo que hace que
+«todavía no se ha entregado» sea una afirmación comprobable y no una carrera. El publicador
+de las pruebas usa el almacén y la entrega reales; sólo quita la espera entre reintentos.
+
 ## Comandos
 
 ```bash
@@ -548,7 +638,12 @@ Pruebas con `NODE_ENV=test`, apuntando a `arriendos360_test`.
 
 Resuélvelas con un ADR en `docs/adr/` cuando llegue el momento, no antes:
 
-**Tecnología del bus de eventos.** Ver arriba.
+**Un publicador con varias réplicas del gateway.** Hoy hay una, y dos publicadores sobre
+la misma tabla de salida podrían entregar el mismo evento a la vez. Eso ya está cubierto
+—la entrega es al-menos-una-vez y el consumidor descarta repetidos— pero el **orden por
+clave** sí se vería afectado por un bloqueo por fila (`FOR UPDATE SKIP LOCKED`).
+Reconsiderar en el paso 8, cuando Container Apps pueda escalar el gateway. Ver
+`docs/adr/0012`.
 
 **Almacenamiento en la nube para anexos.** Azure Blob Storage es lo natural dado el
 hosting. Hoy los archivos van a disco local, que no sobrevive a scale-to-zero.

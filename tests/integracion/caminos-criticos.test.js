@@ -29,6 +29,33 @@ const INMUEBLES = process.env.URL_INMUEBLES || 'http://localhost:3012';
 /** Sufijo único por ejecución: la suite corre contra una base que no se resetea. */
 const SELLO = Date.now().toString().slice(-9);
 
+/**
+ * El UUID con el que los servicios firman lo que no pide una persona.
+ *
+ * Aparece aquí porque el estado del inmueble lo mueve ahora un evento, y un
+ * evento no tiene un usuario detrás al que atribuirle el cambio.
+ */
+const USUARIO_SISTEMA = '6facbaff-9fcd-4300-9426-e464f45be52d';
+
+/**
+ * Reintenta hasta que la respuesta cumpla la condición, o se agote el plazo.
+ *
+ * Hace falta desde el paso 5 y sólo para lo que el bus resuelve: el sistema pasó
+ * a ser consistente EN EL TIEMPO para el estado del inmueble. Afirmarlo justo
+ * después de la petición sería afirmar algo que el diseño no promete.
+ */
+const esperarA = async (obtener, cumple, limiteMs) => {
+    const limite = Date.now() + limiteMs;
+    let ultima = await obtener();
+
+    while (Date.now() < limite && !cumple(ultima)) {
+        await new Promise((r) => setTimeout(r, 500));
+        ultima = await obtener();
+    }
+
+    return ultima;
+};
+
 const pedir = async (metodo, ruta, { token, cuerpo, base = GATEWAY } = {}) => {
     const respuesta = await fetch(base + ruta, {
         method: metodo,
@@ -168,20 +195,37 @@ describe('Caminos críticos', () => {
         assert.equal(suyo.Inmueble.tipo, 'apartamento');
     });
 
-    it('firmar el contrato dejó el inmueble arrendado, en el otro servicio', async () => {
-        // Es LA prueba que ningún doble puede dar. El gateway guardó el contrato
-        // en su base y llamó por HTTP a ms-inmuebles para mover el estado; que
-        // esas dos escrituras, ya sin transacción que las abarque, acaben
-        // coherentes es justo lo que el ADR 0011 deja en el aire y esto verifica.
-        const detalle = await pedir('GET', `/api/inmuebles/${idInmueble}`, {
-            token: tokenPropietario
-        });
+    it('firmar el contrato dejó el inmueble arrendado, sin llamada síncrona', async () => {
+        // Es LA prueba que ningún doble puede dar, y desde el paso 5 prueba algo
+        // distinto de lo que probaba antes. Ya no hay una llamada HTTP del
+        // gateway a ms-inmuebles: el gateway guardó el contrato y su evento en
+        // una sola transacción, un publicador aparte lo entregó y ms-inmuebles
+        // dedujo por su cuenta qué significaba. Lo que se verifica es que esa
+        // cadena entera funciona contra los servicios reales.
+        //
+        // Se ESPERA a que converja porque el sistema pasó a ser consistente en
+        // el tiempo para este dato. La ventana esperada es el intervalo del
+        // publicador; se da margen para no depender del reloj de la máquina.
+        const intervalo = Number(process.env.EVENTOS_INTERVALO_MS || 5000);
+
+        const detalle = await esperarA(
+            () => pedir('GET', `/api/inmuebles/${idInmueble}`, { token: tokenPropietario }),
+            (r) => r.datos && r.datos.estado === 'arrendado',
+            intervalo * 3
+        );
 
         assert.equal(detalle.estado, 200);
-        assert.equal(detalle.datos.estado, 'arrendado');
+        assert.equal(
+            detalle.datos.estado,
+            'arrendado',
+            'el inmueble debería converger a arrendado tras la entrega del evento'
+        );
 
-        // Y la auditoría guarda a la persona, no al servicio que transmitió.
-        assert.match(detalle.datos.actualizado_por, /^[0-9a-f-]{36}$/);
+        // Y la auditoría registra al SISTEMA, no a la persona. Es el cambio
+        // respecto del ADR 0011: el sobre del evento no lleva actor, porque
+        // describe un hecho del dominio del emisor y no la petición de alguien a
+        // este servicio. Quién firmó está en el contrato.
+        assert.equal(detalle.datos.actualizado_por, USUARIO_SISTEMA);
     });
 
     it('no se puede borrar un inmueble con contrato activo', async () => {
@@ -230,6 +274,27 @@ describe('Caminos críticos', () => {
         assert.equal(respuesta.status, 200);
         assert.equal(respuesta.headers.get('content-type'), 'application/pdf');
         assert.ok((await respuesta.arrayBuffer()).byteLength > 1000);
+    });
+
+    it('finalizar el contrato libera el inmueble por el mismo camino', async () => {
+        // La otra mitad del ciclo. Va por evento y no por llamada síncrona por
+        // coherencia: usar un mecanismo para ocupar y otro para liberar dejaría
+        // media operación con garantía de entrega y la otra media sin ella. Ver
+        // docs/adr/0013.
+        const finalizado = await pedir('PUT', `/api/contratos/${idContrato}/finalizar`, {
+            token: tokenPropietario
+        });
+        assert.equal(finalizado.estado, 200, JSON.stringify(finalizado.datos));
+
+        const intervalo = Number(process.env.EVENTOS_INTERVALO_MS || 5000);
+
+        const detalle = await esperarA(
+            () => pedir('GET', `/api/inmuebles/${idInmueble}`, { token: tokenPropietario }),
+            (r) => r.datos && r.datos.estado === 'disponible',
+            intervalo * 3
+        );
+
+        assert.equal(detalle.datos.estado, 'disponible');
     });
 
     it('el logout revoca y el gateway se entera', async () => {

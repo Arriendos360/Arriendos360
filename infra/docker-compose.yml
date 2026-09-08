@@ -138,10 +138,16 @@ services:
       # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
       # aqui hace que el gateway reenvie ese prefijo al microservicio.
       # Cableados: identidad (dos prefijos) e inmuebles.
+      #
+      # Sirven ADEMAS para el bus: son la lista de suscriptores. El publicador
+      # entrega `ContratoFormalizado` y `ContratoFinalizado` a MS_INMUEBLES_URL.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
       - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
       - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-}
       - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-}
+      # Bus de eventos: cada cuanto barre el publicador su tabla de salida. Ese
+      # numero es la ventana de consistencia del estado del inmueble.
+      - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     depends_on:

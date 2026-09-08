@@ -39,7 +39,6 @@ export {
 } from './inmuebles';
 
 export type {
-  CambiarEstadoInmuebleRequest,
   CrearInmuebleRequest,
   EstadoInmueble,
   TipoInmueble,
