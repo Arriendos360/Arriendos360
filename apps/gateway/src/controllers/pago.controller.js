@@ -1,7 +1,12 @@
 const { Op } = require('sequelize');
 const PDFDocument = require('pdfkit');
 
-const { adjuntarInquilino, adjuntarInmueble } = require('../clientes/composicion');
+const {
+    adjuntarInmueble,
+    adjuntarInmuebleAAbonos,
+    adjuntarInmuebleAPagos,
+    adjuntarInquilino
+} = require('../clientes/composicion');
 const { idsDePropietario, porId: inmueblePorId, propioDe } = require('../clientes/inmuebles');
 const { Pago, Contrato, Abono } = require('../models');
 const { esUuid } = require('../models/uuid');
@@ -93,7 +98,10 @@ const obtenerTodos = async (req, res) => {
             where: esParteDelPago(sub, mios),
             include: [contratoRequerido]
         });
-        res.json(pagos);
+
+        // La pantalla de Pagos imprime `pago.Contrato.Inmueble.direccion`. Antes
+        // venía del `include` anidado; ahora se compone, con la misma forma.
+        res.json(await adjuntarInmuebleAPagos(pagos));
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener pagos');
     }
@@ -123,7 +131,7 @@ const obtenerPorContrato = async (req, res) => {
             where: { id_contrato },
             order: [['mes_correspondiente', 'ASC']]
         });
-        res.json(pagos);
+        res.json(await adjuntarInmuebleAPagos(pagos));
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener pagos', error: error.message });
     }
@@ -208,7 +216,9 @@ const obtenerHistorialGlobalAbonos = async (req, res) => {
             include: [{ model: Pago, required: true, include: [contratoRequerido] }],
             order: [['fecha_abono', 'DESC']]
         });
-        res.json(abonos);
+
+        // Un nivel más abajo: `abono.Pago.Contrato.Inmueble.direccion`.
+        res.json(await adjuntarInmuebleAAbonos(abonos));
     } catch (error) { return responderServicioCaido(res, error, 'obtener historial global'); }
 };
 
@@ -380,7 +390,7 @@ const obtenerPendientes = async (req, res) => {
             include: [contratoRequerido],
             order: [['mes_correspondiente', 'ASC']]
         });
-        res.json(pagos);
+        res.json(await adjuntarInmuebleAPagos(pagos));
     } catch (error) { return responderServicioCaido(res, error, 'obtener pendientes'); }
 };
 

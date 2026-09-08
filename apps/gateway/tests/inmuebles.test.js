@@ -13,11 +13,13 @@
 const request = require('supertest');
 
 const {
+    CONTRASENA_POR_DEFECTO,
     app,
     cerrarEntorno,
     conToken,
     crearInmueble,
     crearInquilino,
+    iniciarSesion,
     inmueblesFalso,
     prepararEntorno,
     registrarPropietario
@@ -242,6 +244,78 @@ describe('El CRUD sigue funcionando a través de la costura', () => {
             .set(...conToken(otro.token));
 
         expect(respuesta.statusCode).toBe(404);
+    });
+});
+
+describe('Los pagos y abonos siguen trayendo el inmueble de su contrato', () => {
+    // Regresión. La pantalla de Pagos imprime `pago.Contrato.Inmueble.direccion`
+    // y `abono.Pago.Contrato.Inmueble.direccion`, rutas que producía un `include`
+    // anidado de dos y tres niveles. Al quitar Inmuebles de esos `include` la
+    // columna pasó a mostrar el UUID del contrato en crudo — la API respondía
+    // 200 y la pantalla salía «bien», que es como esto se coló.
+    let idInmueble;
+    let idPago;
+
+    beforeAll(async () => {
+        const creado = await contratoSobreInmuebleNuevo('Avenida del Pago 7');
+        idInmueble = creado.idInmueble;
+
+        const pago = await request(app)
+            .post('/api/pagos')
+            .set(...conToken(tokenProp))
+            .send({
+                id_contrato: creado.idContrato,
+                monto_total: 1000,
+                mes_correspondiente: '2026-01-01'
+            });
+        idPago = pago.body.pago.id_pago;
+
+        await request(app)
+            .put(`/api/pagos/${idPago}/pagar`)
+            .set(...conToken(tokenProp))
+            .send({ monto_pagado: 400, tipo_transaccion: 'Transferencia' });
+    });
+
+    test('GET /api/pagos compone Contrato.Inmueble', async () => {
+        const respuesta = await request(app)
+            .get('/api/pagos')
+            .set(...conToken(tokenProp));
+
+        const pago = respuesta.body.find((p) => p.id_pago === idPago);
+        expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
+    });
+
+    test('GET /api/pagos/pendientes también', async () => {
+        const respuesta = await request(app)
+            .get('/api/pagos/pendientes')
+            .set(...conToken(tokenProp));
+
+        const pago = respuesta.body.find((p) => p.id_pago === idPago);
+        expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
+    });
+
+    test('El historial de abonos lo compone un nivel más abajo', async () => {
+        const respuesta = await request(app)
+            .get('/api/pagos/historial-abonos')
+            .set(...conToken(tokenProp));
+
+        const abono = respuesta.body.find((a) => a.id_pago === idPago);
+        expect(abono.Pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
+    });
+
+    test('Y el inquilino ve lo mismo sobre el inmueble que arrienda', async () => {
+        // No es suyo, pero es parte del contrato: la composición va por
+        // `/interno` con credencial de servicio, sin filtro de pertenencia, y
+        // quien autoriza es el gateway.
+        const login = await iniciarSesion('inq@inm.com', CONTRASENA_POR_DEFECTO);
+
+        const respuesta = await request(app)
+            .get('/api/pagos')
+            .set(...conToken(login.body.token));
+
+        const pago = respuesta.body.find((p) => p.id_pago === idPago);
+        expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
+        expect(pago.Contrato.Inmueble.id_propietario).not.toBe(login.body.usuario.id);
     });
 });
 

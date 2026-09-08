@@ -45,15 +45,31 @@ const Contratos = () => {
         setTimeout(() => setToast(null), 4000);
     };
 
+    /**
+     * Carga lo que esta pantalla necesita, que NO es lo mismo para los dos roles.
+     *
+     * El listado de inmuebles disponibles sólo alimenta el formulario de alta de
+     * contrato, y ese formulario únicamente se renderiza para el propietario. Un
+     * inquilino no tiene por qué pedirlo — y de hecho no puede: la matriz RBAC
+     * declara todo `/api/inmuebles` como PROPIETARIO y responde 403.
+     *
+     * Pedirlo igualmente rompía la pantalla entera. Al ir dentro de un
+     * `Promise.all`, el 403 rechazaba la promesa combinada, así que el inquilino
+     * veía «Error al cargar datos del servidor» y una lista vacía, aunque su
+     * contrato se hubiera cargado correctamente. El problema no era el 403: era
+     * pedir algo que no le corresponde y dejar que su denegación se llevara por
+     * delante lo que sí.
+     */
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [contratosRes, inmueblesRes] = await Promise.all([
-                api.get('/contratos'),
-                api.get('/inmuebles')
-            ]);
+            const contratosRes = await api.get('/contratos');
             setContratos(contratosRes.data);
-            setInmuebles(inmueblesRes.data.filter(i => i.estado === 'disponible'));
+
+            if (esPropietario) {
+                const inmueblesRes = await api.get('/inmuebles');
+                setInmuebles(inmueblesRes.data.filter(i => i.estado === 'disponible'));
+            }
         } catch (error) {
             showNotify('Error al cargar datos del servidor');
         } finally {
