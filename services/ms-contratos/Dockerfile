@@ -1,9 +1,10 @@
-# MS-Inmuebles — se construye desde la RAIZ del monorepo.
+# MS-Contratos — se construye desde la RAIZ del monorepo.
 #
-#   docker build -f services/ms-inmuebles/Dockerfile .
+#   docker build -f services/ms-contratos/Dockerfile .
 #
-# Mismo patron que el gateway y ms-identidad: contexto raiz porque el servicio
-# depende de `packages/shared` y `packages/contracts` como workspaces.
+# Mismo patron que el gateway, ms-identidad y ms-inmuebles: contexto raiz porque
+# el servicio depende de `packages/shared` y `packages/contracts` como
+# workspaces.
 
 FROM node:18-alpine
 
@@ -27,18 +28,18 @@ COPY services/ms-contratos/package.json   services/ms-contratos/
 COPY packages/ packages/
 
 RUN npm ci --include-workspace-root \
-    --workspace=services/ms-inmuebles \
+    --workspace=services/ms-contratos \
     --workspace=packages/contracts \
     --workspace=packages/shared
 
 # -------------------------------------------------------------------- codigo
-# `database/inmuebles` son SUS migraciones: el esquema es suyo y nadie mas lo
+# `database/contratos` son SUS migraciones: el esquema es suyo y nadie mas lo
 # prepara.
-COPY database/inmuebles/ database/inmuebles/
-COPY services/ms-inmuebles/ services/ms-inmuebles/
+COPY database/contratos/ database/contratos/
+COPY services/ms-contratos/ services/ms-contratos/
 
-WORKDIR /repo/services/ms-inmuebles
+WORKDIR /repo/services/ms-contratos
 
-EXPOSE 3012
+EXPOSE 3013
 
 CMD ["npm", "run", "dev"]
