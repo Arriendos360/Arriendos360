@@ -11,8 +11,9 @@ const { claveUuid, referenciaUuid } = require('./uuid');
  * Contratos, ya con los nombres del modelo canónico.
  *
  * `fecha_inicio` → `inicio`, `fecha_fin` → `fin` y `valor_mensual` → `canon`, y
- * `estado` deja de ser un entero. Lo que sigue faltando frente al Capítulo 2 son
- * los `Anexos`, que hoy son un `url_pdf` suelto y se separan en el paso 6.
+ * `estado` deja de ser un entero. Desde el paso 6b ya no queda nada por alinear:
+ * el `url_pdf` suelto se convirtió en la tabla `Anexos`, que es un archivo por
+ * fila, con tipo y con auditoría propia. Ver `models/Anexo.js`.
  *
  * `id_inmueble` e `id_inquilino` guardan UUID como referencias lógicas puras,
  * sin asociación de Sequelize: cruzan la frontera hacia ms-inmuebles y
@@ -86,13 +87,6 @@ const Contrato = sequelize.define('Contrato', {
     nombre_deudor_solidario: { type: DataTypes.STRING(150) },
     documento_deudor_solidario: { type: DataTypes.STRING(20) },
 
-    /**
-     * PDF del contrato firmado. Es el antecesor de `Anexos` y se va en el paso
-     * 6, cuando esa tabla exista y el archivo se suba a almacenamiento en la
-     * nube en vez de a disco local.
-     */
-    url_pdf: { type: DataTypes.STRING(500) },
-
     id_inmueble: referenciaUuid(),
     id_inquilino: referenciaUuid(),
     ...columnasAuditoria
@@ -110,7 +104,7 @@ registrarHooksAuditoria(Contrato);
  * `NOT NULL`, así que el invariante «un contrato siempre tiene fecha de corte y
  * día límite» es del modelo; dejarlo en el controlador significaría que
  * cualquier otro camino de escritura —el motor financiero, una migración de
- * datos, el `ms-contratos` del paso 6b— tendría que acordarse de repetirlo, y el
+ * datos, el `ms-contratos` del paso 6d— tendría que acordarse de repetirlo, y el
  * día que se olvide falla el `INSERT` en vez de derivarse solo.
  *
  * SÓLO SI NO VIENEN. Un valor explícito gana siempre: es lo que permite que el

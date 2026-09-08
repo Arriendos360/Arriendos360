@@ -31,10 +31,10 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1 a 5 completados, y el 6a (realineación de Contratos con el modelo canónico). El sistema sigue siendo un **monolito
-modular funcionando**, ahora dentro de una estructura de monorepo, con el modelo de
-identidad del Capítulo 2 implementado, dos microservicios extraídos y el bus de eventos
-en pie:
+Pasos 1 a 5 completados, y los 6a y 6b. El sistema sigue siendo un **monolito modular
+funcionando**, ahora dentro de una estructura de monorepo, con el modelo de identidad del
+Capítulo 2 implementado, dos microservicios extraídos, el bus de eventos en pie y
+Contratos ya alineado con el modelo canónico —`Anexos` incluidos:
 
 - `apps/gateway/` — el antiguo `backend/`. Express + Sequelize + PostgreSQL en
   JavaScript (CommonJS). Incluye la costura de enrutamiento (cada prefijo se resuelve
@@ -101,7 +101,11 @@ viviendo en el gateway: `inicio`, `fin`, `canon`, y `estado` como catálogo cerr
 Tiene además `fecha_inicio_corte`, `fecha_limite_pago`, `info_contrato` y los dos
 campos del deudor solidario, que son opcionales. Se fueron `deposito` e
 `inventario_fotografico`, que no están en el modelo canónico y nadie escribía.
-Lo que falta para cerrar el capítulo son los `Anexos`: hoy son un `url_pdf` suelto.
+Y desde el paso 6b tiene sus **`Anexos`**, la octava tabla: un archivo por fila, con
+tipo y auditoría, en vez del `url_pdf` suelto que había. Los archivos ya no viven en
+el disco del contenedor sino detrás de una interfaz de almacenamiento —disco en
+desarrollo, Azure Blob en despliegue— y **sólo salen por la API autenticada**. Con eso
+el modelo canónico de Contratos queda completo. Ver `docs/adr/0014`.
 
 Desviaciones de la línea base acumuladas, todas con ADR y **todas pendientes de
 incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
@@ -118,6 +122,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0011` | ~~El estado del inmueble deja de moverse dentro de la transacción del contrato.~~ **Reemplazada por `0012` en el paso 5.** La garantía que registraba como perdida está saldada; no hay nada que tramitar. |
 | `0012` | Bus de eventos sobre PostgreSQL con patrón outbox, en vez de Dapr. Resuelve una decisión abierta y **no se aparta del documento**, que ordena el mecanismo pero no la tecnología. Lo que sí conviene incorporar es la **garantía de entrega**: al-menos-una-vez con descarte de repetidos. |
 | `0013` | El evento `ContratoFinalizado`, que el documento no contempla. **Esta sí es desviación**: añade una pieza al diseño de comunicación entre servicios. |
+| `0014` | Almacenamiento de anexos detrás de una interfaz, con Azure Blob en despliegue, y servidos por la API en vez de con URL firmada. Resuelve una decisión abierta; **no se aparta del documento**, que no fija proveedor ni forma de servir el archivo. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -159,7 +164,7 @@ No es un cambio de nombres, es un cambio de modelo:
 | `Usuario`, `Propietario`, `Inquilino` (3 tablas) | `Usuarios` + `Roles` + `RolesUsuario` |
 | `Inmueble` | `Inmuebles` |
 | `Contrato` | `Contratos` |
-| — (no existe) | `Anexos` |
+| — (no existía; era `contratos.url_pdf`) | `Anexos` |
 | `Pago` | `Cuentas_cobro` |
 | `Abono` | `Transacciones` |
 
@@ -488,13 +493,19 @@ remoto lo ya extraído.
      **Hecho.** Renombres, `estado` como catálogo, las columnas que faltaban y las
      dos muertas fuera, todo con una migración que TRANSFORMA los datos existentes.
      El evento `ContratoFormalizado` dejó de traducir nombres postizos.
-   - **6b.** Extraer `ms-contratos` con `Contratos` + `Anexos`, y llevarse la tabla
-     de salida del bus con él: el productor se muda con lo que produce.
+   - ~~**6b.** Tabla `Anexos` y almacenamiento fuera del disco local.~~ **Hecho.**
+     Interfaz con dos implementaciones, subida en dos pasos, descarga en streaming
+     por la API autenticada y fuera `express.static('uploads')`. Ver `docs/adr/0014`.
    - **6c.** Separar `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones`, mover el
      motor de mora a Financiero y extraerlo. Es donde se cobra la deuda de
      `financialEngine.js`.
-   - Y en algún punto de los dos: obtener datos del contrato por API en vez de por
-     `include`, y almacenamiento en la nube para los anexos.
+   - **6d.** Extraer `ms-contratos` con `Contratos` + `Anexos`, y llevarse la tabla
+     de salida del bus con él: el productor se muda con lo que produce. Ahí hay que
+     resolver el ABAC de los anexos, que hoy consulta a ms-inmuebles — ver la
+     cabecera de `controllers/anexo.controller.js`, que propone denormalizar
+     `id_propietario` en `Contratos`.
+   - Y en algún punto de los tres: obtener datos del contrato por API en vez de por
+     `include`.
 7. **`ms-notificaciones`.** Mailer y recordatorios.
 8. **Azure Container Apps.** Bicep, pipeline y terminación SSL. Al final.
 
@@ -519,6 +530,11 @@ remoto lo ya extraído.
 - **Errores:** `{ mensaje: "..." }` en el body. 401 sin token o token revocado, 403 rol
   insuficiente o recurso ajeno, 400 validación, 404 no encontrado.
 - **Roles en mayúsculas** en claims y respuestas: `PROPIETARIO`, `INQUILINO`.
+- **Catálogos ABIERTOS y cerrados no son lo mismo.** `tipo` de Anexos es abierto: el
+  Capítulo 2 enumera `CONTRATO_FIRMADO` y `OTROSI` seguidos de «etc.», así que no
+  lleva `CHECK` ni `isIn` y los valores conocidos de `packages/contracts` son una
+  sugerencia para el desplegable. Un catálogo cerrado que se queda corto obliga a una
+  migración; uno abierto que se cierra de más, a una migración y a un enfado.
 - **Catálogos cerrados en `packages/contracts`, en minúsculas.** `tipo` y `estado`
   de Inmuebles son listas fijas que comparten el servicio, el frontend y el
   `CHECK` de la migración. Van en minúsculas, a diferencia de los roles: un rol
@@ -672,9 +688,6 @@ clave** sí se vería afectado por un bloqueo por fila (`FOR UPDATE SKIP LOCKED`
 Reconsiderar en el paso 8, cuando Container Apps pueda escalar el gateway. Ver
 `docs/adr/0012`.
 
-**Almacenamiento en la nube para anexos.** Azure Blob Storage es lo natural dado el
-hosting. Hoy los archivos van a disco local, que no sobrevive a scale-to-zero.
-
 **Frecuencia de refresco de la caché de revocados en el gateway.** Ventana entre el
 logout y su efecto real en las demás réplicas.
 
@@ -737,12 +750,16 @@ buzón de pruebas (Ethereal). El enlace de recuperación se genera y se envía, 
 verlo en desarrollo hay que leerlo del log o de `identidad.tokens_recuperacion`. Es la
 misma razón por la que la contraseña temporal del ADR 0007 se entrega en mano.
 
-**`/uploads/` se sirve sin autenticación.** `express.static('uploads')` va antes de
-cualquier middleware de token, así que los PDF de contrato son públicos para quien
-conozca la URL. El `?token=` que el frontend les pegaba nunca protegió nada. Se
-resuelve en el paso 6, al mover los anexos a almacenamiento en la nube con URL firmada.
+~~**`/uploads/` se sirve sin autenticación.**~~ **Resuelto en el paso 6b.** No queda
+ninguna ruta que sirva archivos sin pasar por la matriz: los anexos salen sólo por
+`GET /api/contratos/:id/anexos/:idAnexo`, con RBAC y ABAC delante. Y **no** se hizo
+con URL firmada, que era lo que este archivo anticipaba: una URL firmada es un
+permiso que viaja solo y no se puede revocar antes de que caduque, que es el mismo
+agujero con mejor presentación. Ver `docs/adr/0014`.
 
-**`backend/uploads/` en disco local.** No sobrevive a un contenedor efímero.
+~~**`backend/uploads/` en disco local.**~~ **Resuelto en el paso 6b.** El disco sigue
+siendo la implementación de desarrollo, pero detrás de una interfaz: en despliegue se
+usa Azure Blob, y la elección la decide una sola variable de entorno.
 
 **Create React App** ya no recibe mantenimiento. Migrar a Vite es barato y acelera el
 build en CI, pero no es urgente.

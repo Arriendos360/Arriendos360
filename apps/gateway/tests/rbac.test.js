@@ -171,6 +171,13 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
         ['POST', '/api/contratos', PROPIETARIO, INQUILINO],
         ['PUT', '/api/contratos/abc/finalizar', PROPIETARIO, INQUILINO],
         ['POST', '/api/contratos/abc/contrasena-inquilino', PROPIETARIO, INQUILINO],
+        // Anexos: las dos partes leen, solo el propietario escribe. Que el
+        // inquilino pueda LLEGAR no significa que pueda ver cualquier contrato;
+        // de eso responde el ABAC del controlador (regla dura 8).
+        ['GET', '/api/contratos/abc/anexos', INQUILINO, SIN_ROLES],
+        ['GET', '/api/contratos/abc/anexos/def', INQUILINO, SIN_ROLES],
+        ['POST', '/api/contratos/abc/anexos', PROPIETARIO, INQUILINO],
+        ['DELETE', '/api/contratos/abc/anexos/def', PROPIETARIO, INQUILINO],
         // Sin cobertura hasta esta consolidación.
         ['DELETE', '/api/contratos/abc', PROPIETARIO, INQUILINO],
 
@@ -245,7 +252,12 @@ describe('Resolución de patrones', () => {
         ['GET', '/api/inmuebles', '/api/inmuebles/**'],
         ['GET', '/api/inmuebles/abc', '/api/inmuebles/**'],
         ['GET', '/api/contratos/abc', '/api/contratos/**'],
-        ['POST', '/api/contratos/abc/anexos', '/api/contratos/**'],
+        // Desde el paso 6b los anexos tienen fila propia, y gana ella: va antes
+        // que el comodin y la matriz resuelve por orden.
+        ['POST', '/api/contratos/abc/anexos', '/api/contratos/:id/anexos'],
+        ['DELETE', '/api/contratos/abc/anexos/def', '/api/contratos/:id/anexos/:idAnexo'],
+        // Lo que NO son anexos sigue cayendo en el comodin.
+        ['POST', '/api/contratos/abc/otra-cosa', '/api/contratos/**'],
         ['GET', '/api/usuarios/buscar', '/api/usuarios/**'],
         ['GET', '/api/dashboard/mora', '/api/dashboard/**'],
         ['PUT', '/api/pagos/abc/pagar', '/api/pagos/:id/pagar']

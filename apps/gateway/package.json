@@ -11,6 +11,7 @@
     "motor": "node src/scripts/motor.js"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.33.0",
     "arriendos360-shared": "*",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",

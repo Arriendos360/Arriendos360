@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, ExternalLink, X, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { FileText, Plus, X, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import api from '../services/api';
-import { urlArchivoSubido } from '../services/descargas';
 
 /**
  * Estados de contrato.
@@ -52,7 +52,6 @@ const Contratos = () => {
     const [diaLimitePago, setDiaLimitePago] = useState('');
     const [nombreDeudor, setNombreDeudor] = useState('');
     const [documentoDeudor, setDocumentoDeudor] = useState('');
-    const [pdf, setPdf] = useState(null);
 
     // Tenant Modal state
     const [showTenantModal, setShowTenantModal] = useState(false);
@@ -138,7 +137,6 @@ const Contratos = () => {
         if (documentoDeudor.trim()) {
             formData.append('documento_deudor_solidario', documentoDeudor.trim());
         }
-        if (pdf) formData.append('pdf', pdf);
 
         await api.post('/contratos', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
@@ -230,7 +228,6 @@ const Contratos = () => {
         setDiaLimitePago('');
         setNombreDeudor('');
         setDocumentoDeudor('');
-        setPdf(null);
     };
 
     const formatDate = (dateString) => {
@@ -341,9 +338,9 @@ const Contratos = () => {
                             <input type="text" placeholder="Ej: 10203040" value={documentoDeudor} onChange={(e) => setDocumentoDeudor(e.target.value)} />
                         </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>PDF del Contrato</label>
-                            <input type="file" accept="application/pdf" onChange={(e) => setPdf(e.target.files[0])} />
+                        <div style={{ gridColumn: 'span 2', fontSize: '0.8rem', color: '#64748b' }}>
+                            El contrato escaneado se adjunta despues, desde el detalle del
+                            contrato: el anexo necesita un contrato que ya exista.
                         </div>
 
                         <div style={{ gridColumn: 'span 2', marginTop: '1rem' }}>
@@ -443,7 +440,7 @@ const Contratos = () => {
                                 <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Vigencia</th>
                                 <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Valor</th>
                                 <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Estado</th>
-                                {esPropietario && <th style={{ padding: '1rem', color: '#64748b', textAlign: 'center' }}>Acciones</th>}
+                                <th style={{ padding: '1rem', color: '#64748b', textAlign: 'center' }}>Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -467,12 +464,19 @@ const Contratos = () => {
                                             {ETIQUETA_ESTADO[contrato.estado] || contrato.estado}
                                         </span>
                                     </td>
-                                    {esPropietario && <td style={{ padding: '1rem', textAlign: 'center', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                                        {contrato.url_pdf && (
-                                            <a href={urlArchivoSubido(contrato.url_pdf)} target="_blank" rel="noopener noreferrer" className="btn" style={{ color: '#2563eb', padding: '0.4rem' }}>
-                                                <ExternalLink size={18} />
-                                            </a>
-                                        )}
+                                    <td style={{ padding: '1rem', textAlign: 'center', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                                        {/* El detalle es de las dos partes: el inquilino se descarga
+                                            alli su contrato firmado. Antes esta columna entera era
+                                            solo del propietario porque lo unico que tenia era el
+                                            enlace al PDF publico. */}
+                                        <Link
+                                            to={`/contratos/${contrato.id_contrato}`}
+                                            className="btn"
+                                            style={{ color: '#2563eb', padding: '0.4rem' }}
+                                            title="Ver detalle y anexos"
+                                        >
+                                            <FileText size={18} />
+                                        </Link>
                                         {esPropietario && contrato.estado === ESTADO_ACTIVO && (
                                             <button
                                                 title="Finalizar contrato"
@@ -491,7 +495,7 @@ const Contratos = () => {
                                                 Finalizar
                                             </button>
                                         )}
-                                    </td>}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

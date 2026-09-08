@@ -81,13 +81,37 @@ export interface CrearContratoRequest {
 }
 
 /**
+ * Tipos de anexo CONOCIDOS. No es un catalogo cerrado.
+ *
+ * Es la diferencia deliberada con `TIPOS_INMUEBLE` y `ESTADOS_CONTRATO`, que si
+ * lo son: alli la lista esta fijada y un valor nuevo es un error, aqui el
+ * documento enumera `CONTRATO_FIRMADO` y `OTROSI` seguidos de "etc.". Por eso
+ * la tabla `anexos` no lleva CHECK sobre `tipo` y el modelo no valida contra
+ * esta lista — un otrosi de una modalidad que nadie previo no puede quedar
+ * bloqueado por una migracion.
+ *
+ * Lo que si hace esta lista es alimentar el desplegable del formulario, que es
+ * donde tiene sentido sugerir sin obligar.
+ */
+export const TIPOS_ANEXO_CONOCIDOS = ['CONTRATO_FIRMADO', 'OTROSI'] as const;
+
+/**
  * Tipo de anexo de un contrato.
  *
- * El documento enumera `CONTRATO_FIRMADO` y `OTROSI` seguidos de "etc.", asi que
- * la lista queda abierta. La interseccion `string & {}` conserva el autocompletado
- * de los valores conocidos sin cerrar el tipo a solo esos dos.
+ * La interseccion `string & {}` conserva el autocompletado de los valores
+ * conocidos sin cerrar el tipo a solo esos dos.
  */
-export type TipoAnexo = 'CONTRATO_FIRMADO' | 'OTROSI' | (string & {});
+export type TipoAnexo = (typeof TIPOS_ANEXO_CONOCIDOS)[number] | (string & {});
+
+/**
+ * Tope de tamano por anexo, en megabytes.
+ *
+ * Un contrato de arriendo escaneado son entre 5 y 15 paginas; a 300 ppp en
+ * escala de grises cada una ronda los 300 KB, asi que 10 MB dan para unas
+ * treinta. Vive aqui y no solo en el gateway para que el formulario pueda
+ * avisar ANTES de subir 10 MB por una red movil y recibir un 413.
+ */
+export const TAMANO_MAXIMO_ANEXO_MB = 10;
 
 /**
  * Campos del `multipart/form-data` de
@@ -100,6 +124,10 @@ export type TipoAnexo = 'CONTRATO_FIRMADO' | 'OTROSI' | (string & {});
  * `file` queda como `unknown` a proposito: su representacion concreta depende
  * del runtime (`Buffer` o stream en Node, `File` en el navegador) y este paquete
  * es solo de tipos, sin dependencias de entorno.
+ *
+ * El archivo se valida POR CONTENIDO, no por el `Content-Type` que declare el
+ * cliente ni por la extension del nombre: las dos son afirmaciones de quien
+ * sube, no comprobaciones. Ver `middlewares/upload.middleware.js`.
  */
 export interface CrearAnexoFormData {
   file: unknown;

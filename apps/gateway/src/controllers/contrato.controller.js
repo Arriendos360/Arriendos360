@@ -171,10 +171,10 @@ const crear = async (req, res) => {
             });
         }
 
-        // 3. Manejar archivos
-        if (req.file) {
-            contratoData.url_pdf = `/uploads/contratos/${req.file.filename}`;
-        }
+        // 3. El PDF ya NO viaja aqui. El Capitulo 2 pide que el anexo sea un
+        //    paso aparte —primero tiene que existir el `id_contrato`— y eso
+        //    ademas permite varios archivos por contrato, con su tipo, en vez
+        //    del unico `url_pdf` que habia. Ver `anexo.controller.js`.
 
         // `fecha_inicio_corte` y `fecha_limite_pago` NO se calculan aquí: si no
         // vienen en el cuerpo, las deriva de `inicio` el hook del modelo, que es
