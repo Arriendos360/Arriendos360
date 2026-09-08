@@ -1,14 +1,38 @@
 # ADR 0011 — El estado del inmueble deja de ser transaccional
 
-- Estado: Aceptada
+- Estado: **Reemplazada** por el [ADR 0012](0012-bus-de-eventos-sobre-postgresql-con-outbox.md), en el paso 5
 - Fecha: 2026-09-07
+- Fecha de reemplazo: 2026-09-08
 - Paso de la migración: 4
 
-> **Provisional por diseño.** Este ADR documenta un mecanismo que **está previsto que
-> desaparezca**: en el paso 5 lo reemplaza el consumo del evento `ContratoFormalizado`, y
-> en el paso 6 el llamante deja de ser el gateway. No se incorpora al Capítulo 2; se
-> registra para que quede constancia de la pérdida de garantía y de quién la asume
-> mientras dure.
+> **REEMPLAZADA. La pérdida de atomicidad que este ADR registraba queda saldada.**
+>
+> Era provisional por diseño y duró lo que tenía que durar: un paso. El paso 5 montó el
+> bus de eventos sobre PostgreSQL con patrón outbox, y con él **desapareció el mecanismo
+> entero que se describe abajo** — la llamada síncrona, el endpoint que la servía y el
+> aviso en la respuesta.
+>
+> **Lo que cambia, en una frase:** guardar el contrato y registrar el evento que lo
+> anuncia son ahora **una sola operación atómica**, porque las dos escrituras van a la
+> misma base en la misma transacción; el estado del inmueble converge después.
+>
+> Ya no hay una ventana en la que el aviso **se pierde**: hay una ventana en la que el
+> aviso **todavía no ha llegado**, que es otra cosa. El evento está en disco antes de que
+> nadie intente entregarlo, así que un fallo de red lo retrasa pero no lo borra. La
+> garantía pasa de «ojalá salga bien» a «acabará pasando».
+>
+> El texto original se conserva íntegro más abajo: es lo que explica por qué el sistema
+> estuvo un paso así y qué se hizo para que se notara lo menos posible. Lo que ya no
+> describe es cómo funciona el sistema. Ver el [ADR 0012](0012-bus-de-eventos-sobre-postgresql-con-outbox.md)
+> para el mecanismo actual y el [ADR 0013](0013-evento-contrato-finalizado.md) para la
+> otra mitad del ciclo.
+>
+> **Qué queda en pie de lo de abajo.** Dos cosas, y las dos por sus razones originales:
+> ms-inmuebles sigue sin validar reglas de Contratos (punto 2 de la decisión), porque es
+> Soporte y comprobarlas invertiría la dirección de las dependencias; y el orden sigue
+> siendo «primero el hecho, después el reflejo». **Qué deja de ser cierto:** el punto 4
+> —la auditoría registra ahora al *sistema*, no a la persona, porque el sobre de un evento
+> no lleva actor— y el punto 5, porque ya no hay fallo que declarar en la respuesta.
 
 ## Contexto
 
@@ -95,12 +119,18 @@ destructivo. Ningún dinero ni ningún contrato se pierden.
 vigente editando el formulario, que sería la forma fácil de crear la misma inconsistencia a
 mano.
 
-**Cuándo desaparece esto.** En el **paso 5**, `ms-contratos` emitirá `ContratoFormalizado` y
-`ms-inmuebles` lo consumirá: la consistencia pasa a ser eventual pero *garantizada* por el
-bus, con reintentos, en vez de depender de que una llamada HTTP salga bien a la primera. En
-el **paso 6**, al extraerse `ms-contratos`, el llamante deja de ser el gateway. El endpoint
-`/interno` puede sobrevivir como camino de reconciliación, pero deja de estar en el camino
-crítico.
+**Cuándo desaparece esto.** ~~En el **paso 5**~~ — **ocurrió en el paso 5**, tal como se
+preveía y con una diferencia: `ContratoFormalizado` lo emite el gateway y no
+`ms-contratos`, porque `contratos` sigue siendo suya hasta el paso 6. Lo que importaba se
+cumplió: la consistencia es eventual pero *garantizada* por el bus, con reintentos, en vez
+de depender de que una llamada HTTP salga bien a la primera.
+
+El endpoint `/interno/inmuebles/:id/estado` **no sobrevivió como camino de
+reconciliación**, que era la otra posibilidad que este párrafo dejaba abierta. Se retiró
+entero. La razón es la que se ve al escribirlo: no le quedaba ningún consumidor, y un
+endpoint sin consumidores es una superficie que nadie prueba y una segunda puerta al
+estado del inmueble por la que es fácil reintroducir la escritura síncrona sin darse
+cuenta. Si algún día hace falta reconciliar, se escribirá entonces y con ese nombre.
 
 ## Alternativas descartadas
 

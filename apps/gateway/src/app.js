@@ -19,6 +19,7 @@ const {
 } = require('./routing');
 const { crearCacheRevocados } = require('./routing/cacheRevocados');
 const { aplicarMigraciones } = require('./database/migraciones');
+const { publicador } = require('./eventos');
 
 // Crear aplicación Express
 const app = express();
@@ -104,6 +105,17 @@ if (process.env.NODE_ENV !== 'test') {
 
             // Iniciar Motor Financiero (Background Tasks)
             iniciarMotorFinanciero();
+
+            // Publicador del bus de eventos. Arranca DESPUÉS de las migraciones
+            // —necesita su tabla de salida— y con un primer barrido inmediato,
+            // para que lo que quedó sin entregar en la caída anterior salga ya y
+            // no dentro de un intervalo.
+            await publicador.iniciar();
+            const salida = publicador.estado();
+            console.log(
+                `📤 Publicador de eventos: barrido cada ${salida.intervaloMs / 1000}s, ` +
+                    `hasta ${salida.maxIntentos} intentos por evento antes de apartarlo`
+            );
 
             await cacheRevocados.iniciar();
             const estado = cacheRevocados.estado();

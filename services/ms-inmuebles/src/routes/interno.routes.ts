@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { exigirServicio } from 'arriendos360-shared';
 
-import { cambiarEstado, listar } from '../controllers/interno.controller';
+import { recibir } from '../controllers/eventos.controller';
+import { listar } from '../controllers/interno.controller';
 
 const router: Router = Router();
 
@@ -23,7 +24,15 @@ router.use(
 // GET /interno/inmuebles?propietario=<uuid> | ?ids=<uuid>,<uuid>
 router.get('/inmuebles', listar);
 
-// POST /interno/inmuebles/:id/estado
-router.post('/inmuebles/:id/estado', cambiarEstado);
+// POST /interno/eventos — entrada del bus. Ver `src/eventos/`.
+router.post('/eventos', recibir);
+
+// AQUI ESTABA `POST /interno/inmuebles/:id/estado`, que el gateway llamaba tras
+// guardar un contrato. Lo reemplazo el consumo de `ContratoFormalizado` y
+// `ContratoFinalizado`, y se retiro con el: no le quedaba ningun otro
+// consumidor. Dejarlo «por si acaso» habria mantenido abierta una segunda
+// puerta al estado del inmueble, con las dos consecuencias de siempre — una
+// superficie que nadie prueba y un camino por el que reintroducir la escritura
+// sincrona sin darse cuenta.
 
 export default router;

@@ -17,6 +17,7 @@ const request = require('supertest');
 
 const app = require('../../src/app');
 const { sequelize } = require('../../src/config/database');
+const { almacen, crearPublicadorDeSalida } = require('../../src/eventos');
 const { recrearEsquema } = require('../../src/database/migraciones');
 const { crearIdentidadFalsa } = require('../dobles/identidad');
 const { crearInmueblesFalso } = require('../dobles/inmuebles');
@@ -26,6 +27,30 @@ const CONTRASENA_POR_DEFECTO = 'pass123';
 /** Los dobles activos. Los comparten los helpers de este módulo. */
 let identidad = null;
 let inmuebles = null;
+
+/**
+ * El publicador de las pruebas.
+ *
+ * Usa el almacén y la entrega REALES —la tabla de salida de verdad y un POST de
+ * verdad al doble— y sólo cambia dos cosas: no espera entre reintentos y no
+ * escribe en la consola. Sin lo primero, comprobar que un evento se reintenta
+ * exigiría dormir dos segundos en mitad de una suite.
+ *
+ * Y no se arranca nunca: las entregas ocurren cuando la prueba llama a
+ * `entregarEventos()`, no cuando salta un temporizador. Es lo que hace que
+ * «todavía no se ha entregado» sea una afirmación comprobable y no una carrera.
+ */
+const publicador = crearPublicadorDeSalida({ esperaBaseMs: 0, registrar: () => {} });
+
+/**
+ * Corre un barrido del publicador: entrega lo pendiente de la tabla de salida.
+ *
+ * @returns {Promise<object>} el recuento del ciclo (entregados, fallidos, ...).
+ */
+const entregarEventos = () => publicador.ciclo();
+
+/** Lo que hay en la tabla de salida, por si una prueba necesita contarlo. */
+const contarEventos = () => almacen.contar();
 
 /**
  * Levanta los dobles, los cablea y deja el esquema del gateway limpio.
@@ -133,12 +158,15 @@ module.exports = {
     app,
     cerrarEntorno,
     conToken,
+    contarEventos,
     crearInmueble,
     crearInquilino,
+    entregarEventos,
     identidadFalsa,
     iniciarSesion,
     inmueblesFalso,
     prepararEntorno,
+    publicador,
     registrarPropietario,
     sequelize
 };

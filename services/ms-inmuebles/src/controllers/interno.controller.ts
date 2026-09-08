@@ -9,7 +9,6 @@
 
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
-import { esEstadoInmueble } from 'arriendos360-contracts';
 
 import { Inmueble } from '../models/Inmueble';
 import { esUuid } from '../models/uuid';
@@ -58,53 +57,15 @@ export const listar = async (req: Request, res: Response): Promise<Response> => 
 };
 
 /**
- * POST /interno/inmuebles/:id/estado
+ * AQUI VIVIA `cambiarEstado`, el manejador de `POST /interno/inmuebles/:id/estado`.
  *
- * Mueve el estado de ocupacion. Es la operacion que antes hacia
- * `contrato.controller.js` con un `Inmueble.update(...)` DENTRO de la misma
- * transaccion que guardaba el contrato. Eso ya no es posible: son dos bases
- * logicas distintas y no hay transaccion que las abarque.
+ * Movia el estado de ocupacion cuando el gateway lo pedia justo despues de
+ * guardar un contrato: el mecanismo provisional del ADR 0011, con su ventana sin
+ * atomicidad. El paso 5 lo sustituyo por el consumo de `ContratoFormalizado` y
+ * `ContratoFinalizado` (`src/eventos/`), y el endpoint se retiro por completo.
  *
- * NO VALIDA SI EL CAMBIO TIENE SENTIDO DE NEGOCIO. Que un inmueble deba pasar a
- * `arrendado` porque se firmo un contrato, o volver a `disponible` porque se
- * finalizo, son reglas de Contratos. Este servicio es de Soporte y no conoce la
- * existencia de los contratos; comprobarlo aqui invertiria la direccion de las
- * dependencias. Lo que si valida es que el estado exista en el catalogo y que el
- * inmueble tambien.
- *
- * ES IDEMPOTENTE: poner `arrendado` sobre un inmueble ya arrendado responde 200
- * y no cambia nada. Es deliberado, y es lo que hace que el reintento del
- * llamante sea seguro cuando la primera llamada fallo despues de aplicarse.
- * Ver `docs/adr/0011`.
+ * Lo que NO cambio es de quien es la decision: este servicio sigue sin saber que
+ * existen los contratos. Antes obedecia una orden, ahora interpreta un hecho;
+ * en los dos casos la regla «un contrato firmado ocupa el inmueble» es de
+ * Contratos, y comprobarla aqui invertiria la direccion de las dependencias.
  */
-export const cambiarEstado = async (req: Request, res: Response): Promise<Response> => {
-  try {
-    const id = req.params['id'];
-    const cuerpo = (req.body ?? {}) as Record<string, unknown>;
-    const estado = cuerpo['estado'];
-    const solicitadoPor = cuerpo['solicitado_por'];
-
-    if (!esEstadoInmueble(estado)) {
-      return res.status(400).json(crearError('Estado no válido'));
-    }
-
-    const inmueble = esUuid(id) ? await Inmueble.findByPk(id) : null;
-
-    if (!inmueble) {
-      return res.status(404).json(crearError('Inmueble no encontrado'));
-    }
-
-    await inmueble.update(
-      { estado },
-      // Quien lo PIDIO, no quien lo transmitio: el gateway manda el `sub` del
-      // propietario. El `iss` del token de servicio seria "gateway", que no es
-      // un UUID y ademas perderia el dato que importa auditar.
-      { usuarioAuditor: esUuid(solicitadoPor) ? solicitadoPor : undefined } as never,
-    );
-
-    return res.json({ mensaje: 'Estado actualizado', inmueble });
-  } catch (error) {
-    console.error('Error al cambiar el estado del inmueble:', (error as Error).message);
-    return res.status(500).json(crearError('Error al cambiar el estado del inmueble'));
-  }
-};

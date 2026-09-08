@@ -275,11 +275,19 @@ describe('Borrado', () => {
     // invertiría la dirección de las dependencias. Ver docs/adr/0011.
     const { id } = await crearInmueble(dueno.token, { direccion: 'Con contrato imaginario' });
 
+    // Se ocupa como lo ocupa el sistema de verdad desde el paso 5: entregando
+    // `ContratoFormalizado` por el bus. Ya no hay endpoint que mueva el estado.
     const arrendado = await request(app)
-      .post(`/interno/inmuebles/${id}/estado`)
+      .post('/interno/eventos')
       .set(...conServicio())
-      .send({ estado: 'arrendado', solicitado_por: dueno.sub });
-    expect(arrendado.body.inmueble.estado).toBe('arrendado');
+      .send({
+        id_evento: crypto.randomUUID(),
+        tipo: 'ContratoFormalizado',
+        version: 1,
+        ocurrido_en: new Date().toISOString(),
+        payload: { id_contrato: crypto.randomUUID(), id_inmueble: id, canon: 1000, fecha_inicio_corte: '2026-01-01' }
+      });
+    expect(arrendado.statusCode).toBe(200);
 
     const respuesta = await request(app)
       .delete(`/api/inmuebles/${id}`)

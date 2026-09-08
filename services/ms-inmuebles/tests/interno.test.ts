@@ -1,5 +1,4 @@
 import request from 'supertest';
-import crypto from 'crypto';
 
 import {
   app,
@@ -57,10 +56,10 @@ describe('Credencial de servicio', () => {
     expect(respuesta.statusCode).toBe(200);
   });
 
-  test('El endpoint de estado exige la misma credencial', async () => {
-    const respuesta = await request(app)
-      .post(`/interno/inmuebles/${idA}/estado`)
-      .send({ estado: 'arrendado' });
+  test('La entrada del bus exige la misma credencial', async () => {
+    // Va como `router.use` para todo `/interno`, asi que un endpoint nuevo nace
+    // protegido. Esta prueba es la que lo comprueba con el mas reciente.
+    const respuesta = await request(app).post('/interno/eventos').send({});
 
     expect(respuesta.statusCode).toBe(401);
   });
@@ -115,90 +114,12 @@ describe('GET /interno/inmuebles', () => {
   });
 });
 
-describe('POST /interno/inmuebles/:id/estado', () => {
-  test('Mueve el estado a arrendado', async () => {
-    const respuesta = await request(app)
-      .post(`/interno/inmuebles/${idA}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'arrendado', solicitado_por: dueno.sub });
-
-    expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.body.inmueble.estado).toBe('arrendado');
-  });
-
-  test('La auditoría registra a la persona, no al servicio', async () => {
-    // `iss` sería "gateway", que no es un UUID: escribirlo en la columna daría
-    // un 500, y aunque cupiera perdería el dato que importa auditar.
-    const consulta = await request(app)
-      .get(`/api/inmuebles/${idA}`)
-      .set(...conToken(dueno.token));
-
-    expect(consulta.body.actualizado_por).toBe(dueno.sub);
-  });
-
-  test('Y de vuelta a disponible', async () => {
-    const respuesta = await request(app)
-      .post(`/interno/inmuebles/${idA}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'disponible', solicitado_por: dueno.sub });
-
-    expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.body.inmueble.estado).toBe('disponible');
-  });
-
-  test('Es idempotente: repetirlo no falla', async () => {
-    // Lo que hace seguro el reintento del gateway cuando la primera llamada
-    // falló después de aplicarse. Ver docs/adr/0011.
-    const primera = await request(app)
-      .post(`/interno/inmuebles/${idB}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'arrendado', solicitado_por: dueno.sub });
-
-    const segunda = await request(app)
-      .post(`/interno/inmuebles/${idB}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'arrendado', solicitado_por: dueno.sub });
-
-    expect(primera.statusCode).toBe(200);
-    expect(segunda.statusCode).toBe(200);
-    expect(segunda.body.inmueble.estado).toBe('arrendado');
-  });
-
-  test('Un estado fuera del catálogo devuelve 400', async () => {
-    const respuesta = await request(app)
-      .post(`/interno/inmuebles/${idA}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'en_obra', solicitado_por: dueno.sub });
-
-    expect(respuesta.statusCode).toBe(400);
-  });
-
-  test('Un inmueble inexistente devuelve 404', async () => {
-    const respuesta = await request(app)
-      .post(`/interno/inmuebles/${crypto.randomUUID()}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'arrendado', solicitado_por: dueno.sub });
-
-    expect(respuesta.statusCode).toBe(404);
-  });
-
-  test('Un id con forma inválida devuelve 404, no 500', async () => {
-    const respuesta = await request(app)
-      .post('/interno/inmuebles/no-soy-uuid/estado')
-      .set(...conServicio())
-      .send({ estado: 'arrendado', solicitado_por: dueno.sub });
-
-    expect(respuesta.statusCode).toBe(404);
-  });
-
-  test('Sin solicitado_por sigue funcionando, con el sistema como autor', async () => {
-    // El llamante debería mandarlo siempre, pero un endpoint interno no puede
-    // quedarse a medias por un campo de auditoría.
-    const respuesta = await request(app)
-      .post(`/interno/inmuebles/${idB}/estado`)
-      .set(...conServicio())
-      .send({ estado: 'disponible' });
-
-    expect(respuesta.statusCode).toBe(200);
-  });
-});
+/*
+ * AQUI ESTABAN LAS PRUEBAS DE `POST /interno/inmuebles/:id/estado`.
+ *
+ * Ese endpoint desaparecio en el paso 5: el estado del inmueble ya no se pide
+ * por HTTP, se deduce de `ContratoFormalizado` y `ContratoFinalizado`. Lo que
+ * comprobaban —que el estado se mueve, que es idempotente, que valida el
+ * catalogo— lo comprueba ahora `eventos.test.ts` sobre el camino que de verdad
+ * se despliega.
+ */

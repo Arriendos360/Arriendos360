@@ -6,14 +6,12 @@ const {
     adjuntarInquilinosEInmuebles
 } = require('../clientes/composicion');
 const { reemitirContrasenaTemporal, usuarioPorId } = require('../clientes/identidad');
-const {
-    ESTADO_ARRENDADO,
-    ESTADO_DISPONIBLE,
-    cambiarEstado,
-    idsDePropietario,
-    propioDe
-} = require('../clientes/inmuebles');
+const { idsDePropietario, propioDe } = require('../clientes/inmuebles');
 const { sequelize } = require('../config/database');
+const {
+    registrarContratoFinalizado,
+    registrarContratoFormalizado
+} = require('../eventos');
 const Contrato = require('../models/Contrato');
 const { ROL_INQUILINO } = require('../models/constantes');
 const { esUuid } = require('../models/uuid');
@@ -31,6 +29,13 @@ const { esUuid } = require('../models/uuid');
  * donde había uno, y el primero puede fallar — por eso `idsDePropietario`
  * propaga el error en vez de devolver una lista vacía: una lista vacía haría
  * que un propietario viera «no tienes contratos», que es creíble y falso.
+ *
+ * LO QUE CAMBIÓ EN EL PASO 5. Formalizar y finalizar ya no llaman a
+ * ms-inmuebles: anotan un evento en la tabla de salida DENTRO de la misma
+ * transacción que escribe el contrato, y el publicador lo entrega después. El
+ * contrato y el anuncio del contrato vuelven a ser una sola operación atómica;
+ * lo que queda fuera es el estado del inmueble, que converge en segundos. Ver
+ * `src/eventos/` y `docs/adr/0011`.
  */
 
 /** 502 con el formato de error del proyecto. Un servicio caído no es un 500 nuestro. */
@@ -162,41 +167,32 @@ const crear = async (req, res) => {
             }
         }
 
-        // 4. Guardar el contrato. La transacción ya solo cubre esto, que es lo
-        //    único que sigue siendo del gateway.
+        // 4. Guardar el contrato Y ANUNCIARLO, en una sola transacción.
+        //
+        //    Las dos escrituras van a la misma base, así que o quedan las dos o
+        //    no queda ninguna. Esto es lo que devuelve la atomicidad que el
+        //    ADR 0011 dio por perdida: no la del contrato con el estado del
+        //    inmueble —eso ya no es posible ni deseable— sino la del contrato
+        //    con el HECHO DE HABERLO ANUNCIADO, que es la que se puede tener y
+        //    la que hace que el estado del inmueble acabe convergiendo.
+        //
+        //    Si el registro del evento falla, el contrato no se guarda. Es el
+        //    orden correcto: un contrato que nadie anuncia deja el sistema
+        //    inconsistente en silencio; un contrato que no se firma se le dice
+        //    al usuario, que vuelve a intentarlo.
         t = await sequelize.transaction();
         const nuevoContrato = await Contrato.create(contratoData, {
             transaction: t,
             usuarioAuditor: sub
         });
+        await registrarContratoFormalizado(nuevoContrato, t);
         await t.commit();
         t = null;
 
-        // 5. Y DESPUÉS, marcar el inmueble como arrendado.
-        //
-        //    Aquí se pierde la atomicidad, y no se finge lo contrario. El orden
-        //    es «primero el hecho, después el reflejo»: al revés, un fallo
-        //    dejaría un inmueble marcado como arrendado sin contrato detrás, que
-        //    es la inconsistencia más difícil de detectar de las dos.
-        //
-        //    Si esto falla, el contrato SIGUE CREADO y la respuesta lo dice. Un
-        //    500 sería mentir; callarlo sería peor. Ver docs/adr/0011.
-        try {
-            await cambiarEstado(id_inmueble, ESTADO_ARRENDADO, sub);
-        } catch (error) {
-            console.error(
-                `⚠️  Contrato ${nuevoContrato.id_contrato} creado, pero el inmueble ` +
-                    `${id_inmueble} NO se pudo marcar como arrendado:`,
-                error.message
-            );
-
-            return res.status(201).json({
-                mensaje: 'Contrato creado exitosamente',
-                contrato: nuevoContrato,
-                aviso: 'El contrato quedó registrado, pero el estado del inmueble no pudo actualizarse. Revísalo en la pantalla de Inmuebles.'
-            });
-        }
-
+        // Ya no se llama a ms-inmuebles. El publicador entrega el evento y el
+        // inmueble pasa a `arrendado` en cuestión de segundos; la respuesta no
+        // espera a eso y tampoco necesita avisar de nada, porque no hay nada que
+        // se pueda haber perdido.
         res.status(201).json({
             mensaje: 'Contrato creado exitosamente',
             contrato: nuevoContrato
@@ -253,26 +249,15 @@ const finalizar = async (req, res) => {
             return res.status(404).json({ mensaje: 'Contrato no encontrado o no tienes permisos' });
         }
 
-        // Cambiar estado a finalizado (2). Sin transacción: es una sola fila.
-        await contrato.update({ estado: 2 }, { usuarioAuditor: sub });
+        // Estado finalizado (2) y anuncio, en la misma transacción. Antes esto
+        // no tenía transacción porque era una sola fila; ahora son dos, y son
+        // justamente las dos que no pueden quedar desparejadas.
+        await sequelize.transaction(async (transaccion) => {
+            await contrato.update({ estado: 2 }, { transaction: transaccion, usuarioAuditor: sub });
+            await registrarContratoFinalizado(contrato, transaccion);
+        });
 
-        // Y liberar el inmueble, con el mismo tratamiento que al crear.
-        try {
-            await cambiarEstado(contrato.id_inmueble, ESTADO_DISPONIBLE, sub);
-        } catch (error) {
-            console.error(
-                `⚠️  Contrato ${contrato.id_contrato} finalizado, pero el inmueble ` +
-                    `${contrato.id_inmueble} NO se pudo liberar:`,
-                error.message
-            );
-
-            return res.json({
-                mensaje: 'Contrato finalizado',
-                contrato,
-                aviso: 'El contrato quedó finalizado, pero el inmueble sigue marcado como arrendado. Revísalo en la pantalla de Inmuebles.'
-            });
-        }
-
+        // La liberación del inmueble la hace ms-inmuebles al consumir el evento.
         res.json({ mensaje: 'Contrato finalizado', contrato });
     } catch (error) {
         console.error('Error al finalizar contrato:', error.message);
