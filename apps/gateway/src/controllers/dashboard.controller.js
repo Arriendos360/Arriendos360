@@ -1,6 +1,6 @@
 /**
  * Dashboard. Vive en el gateway y no tiene tablas propias: agrega lo que ya
- * guardan Contratos, Inmuebles y Pagos (regla dura 5).
+ * guardan Contratos, Inmuebles y Financiero (regla dura 5).
  *
  * Todas sus rutas exigen PROPIETARIO en `dashboard.routes.js`, así que aquí el
  * `sub` del token es siempre el del dueño.
@@ -17,14 +17,29 @@
  * Pedirla una vez y no una por métrica no es microoptimización: `obtenerResumen`
  * calcula seis cosas, y una llamada de red por cada una convertiría el dashboard
  * en la pantalla más lenta de la aplicación.
+ *
+ * EN EL PASO 6c cambia de dónde salen las cifras de dinero. `Pago` es ahora
+ * `CuentaCobro`, `monto_total` es `valor`, los estados son un catálogo y no
+ * enteros, y —lo que más se nota aquí— `saldo_pendiente` ya no es una columna
+ * que se pueda sumar en SQL: se deriva de las transacciones confirmadas. La
+ * mora, que es la única métrica que lo necesita, lo pide a `conSaldos()`, que
+ * resuelve la lista entera con una consulta agrupada.
  */
 const { Sequelize } = require('sequelize');
 
 const { dePropietario, ESTADO_ARRENDADO, ESTADO_DISPONIBLE } = require('../clientes/inmuebles');
 const { adjuntarInmuebles } = require('../clientes/composicion');
-const Pago = require('../models/Pago');
+const CuentaCobro = require('../models/CuentaCobro');
 const Contrato = require('../models/Contrato');
-const { ESTADO_CONTRATO_ACTIVO, ESTADO_CONTRATO_FINALIZADO } = require('../models/constantes');
+const {
+    ESTADO_CONTRATO_ACTIVO,
+    ESTADO_CONTRATO_FINALIZADO,
+    ESTADO_CUENTA_EN_MORA,
+    ESTADO_CUENTA_PAGADA,
+    ESTADO_CUENTA_PENDIENTE
+} = require('../models/constantes');
+const { hoyEnZonaNegocio } = require('../models/fechasContrato');
+const { conSaldos } = require('../services/saldos');
 
 /**
  * 502 con el formato de error del proyecto.
@@ -52,11 +67,11 @@ const obtenerIngresos = async (req, res) => {
         const { sub } = req.usuario;
         const mios = (await dePropietario(sub)).map((i) => i.id_inmueble);
 
-        const resultado = await Pago.findAll({
-            where: { estado: 2 }, // 2 = Pagado
+        const resultado = await CuentaCobro.findAll({
+            where: { estado: ESTADO_CUENTA_PAGADA },
             attributes: [
-                [Sequelize.fn('SUM', Sequelize.col('monto_total')), 'total_ingresos'],
-                [Sequelize.fn('COUNT', Sequelize.col('id_pago')), 'cantidad_pagos']
+                [Sequelize.fn('SUM', Sequelize.col('valor')), 'total_ingresos'],
+                [Sequelize.fn('COUNT', Sequelize.col('id_cuenta_cobro')), 'cantidad_pagos']
             ],
             include: [contratoDe(mios, { attributes: [] })],
             raw: true
@@ -71,36 +86,39 @@ const obtenerIngresos = async (req, res) => {
     }
 };
 
-// Obtener pagos en mora (vencidos o pendientes con fecha pasada)
+// Obtener cuentas de cobro en mora (vencidas o pendientes con corte pasado)
 const obtenerMora = async (req, res) => {
     try {
         const { sub } = req.usuario;
-        const hoy = new Date();
+        const hoy = hoyEnZonaNegocio();
         const mios = (await dePropietario(sub)).map((i) => i.id_inmueble);
 
-        const pagosEnMora = await Pago.findAll({
+        const enMora = await CuentaCobro.findAll({
             where: {
                 [Sequelize.Op.or]: [
                     {
-                        estado: 1, // Pendiente
-                        mes_correspondiente: { [Sequelize.Op.lt]: hoy }
+                        estado: ESTADO_CUENTA_PENDIENTE,
+                        inicio: { [Sequelize.Op.lt]: hoy }
                     },
-                    { estado: 3 } // Vencido
+                    { estado: ESTADO_CUENTA_EN_MORA }
                 ]
             },
             include: [contratoDe(mios)]
         });
 
-        const totalMora = pagosEnMora.reduce((sum, pago) => {
-            const pendiente = parseFloat(pago.saldo_pendiente);
-            const total = parseFloat(pago.monto_total);
-            return sum + (pendiente > 0 ? pendiente : total);
+        // El saldo se deriva para toda la lista de una vez, y el detalle sale de
+        // aquí ya con el campo `saldo_pendiente` que la pantalla espera.
+        const conSaldo = await conSaldos(enMora);
+
+        const totalMora = conSaldo.reduce((sum, cuenta) => {
+            const pendiente = cuenta.saldo_pendiente;
+            return sum + (pendiente > 0 ? pendiente : parseFloat(cuenta.valor));
         }, 0);
 
         res.json({
-            cantidad_en_mora: pagosEnMora.length,
+            cantidad_en_mora: conSaldo.length,
             total_mora: totalMora,
-            detalle: pagosEnMora
+            detalle: conSaldo
         });
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener mora');
@@ -139,15 +157,18 @@ const obtenerResumen = async (req, res) => {
 
         const [ingresos, contratosActivos, contratosFinalizados, pagosPendientes] =
             await Promise.all([
-                Pago.findAll({
-                    where: { estado: 2 },
-                    attributes: [[Sequelize.fn('SUM', Sequelize.col('monto_total')), 'total']],
+                CuentaCobro.findAll({
+                    where: { estado: ESTADO_CUENTA_PAGADA },
+                    attributes: [[Sequelize.fn('SUM', Sequelize.col('valor')), 'total']],
                     include: [contratoDe(mios, { attributes: [] })],
                     raw: true
                 }),
                 Contrato.count({ where: { estado: ESTADO_CONTRATO_ACTIVO, id_inmueble: mios } }),
                 Contrato.count({ where: { estado: ESTADO_CONTRATO_FINALIZADO, id_inmueble: mios } }),
-                Pago.count({ where: { estado: 1 }, include: [contratoDe(mios)] })
+                CuentaCobro.count({
+                    where: { estado: ESTADO_CUENTA_PENDIENTE },
+                    include: [contratoDe(mios)]
+                })
             ]);
 
         // Los dos `COUNT` contra la tabla de inmuebles se convierten en contar

@@ -31,10 +31,11 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1 a 5 completados, y los 6a y 6b. El sistema sigue siendo un **monolito modular
-funcionando**, ahora dentro de una estructura de monorepo, con el modelo de identidad del
-Capítulo 2 implementado, dos microservicios extraídos, el bus de eventos en pie y
-Contratos ya alineado con el modelo canónico —`Anexos` incluidos:
+Pasos 1 a 5 completados, y los 6a, 6b y 6c. El sistema sigue siendo un **monolito
+modular funcionando**, ahora dentro de una estructura de monorepo, con el modelo de
+identidad del Capítulo 2 implementado, dos microservicios extraídos, el bus de eventos en
+pie y **las ocho tablas de dominio del Capítulo 2 completas**: Contratos con sus `Anexos`,
+y Financiero ya partido en `Cuentas_cobro` y `Transacciones`.
 
 - `apps/gateway/` — el antiguo `backend/`. Express + Sequelize + PostgreSQL en
   JavaScript (CommonJS). Incluye la costura de enrutamiento (cada prefijo se resuelve
@@ -56,8 +57,8 @@ Contratos ya alineado con el modelo canónico —`Anexos` incluidos:
   productor de eventos son treinta líneas de cableado sobre `salida.ts`.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
   (`identidad/`, `inmuebles/`, `dominio/`). Reemplazan a `sequelize.sync()`; ver
-  `docs/adr/0003`. `dominio/` ya solo guarda contratos, pagos y abonos, y la
-  tabla de salida del bus.
+  `docs/adr/0003`. `dominio/` ya solo guarda contratos, anexos, cuentas de cobro,
+  transacciones y la tabla de salida del bus.
 - `services/ms-identidad/` — primer microservicio real y **ya en producción de la
   demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
   Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
@@ -107,6 +108,31 @@ el disco del contenedor sino detrás de una interfaz de almacenamiento —disco 
 desarrollo, Azure Blob en despliegue— y **sólo salen por la API autenticada**. Con eso
 el modelo canónico de Contratos queda completo. Ver `docs/adr/0014`.
 
+**Y Financiero habla el idioma del Capítulo 2 desde el paso 6c**, aunque también siga
+viviendo en el gateway. `Pago` y `Abono` no se renombraron: se **partieron** en los dos
+conceptos que mezclaban. `Cuentas_cobro` es la factura —`valor`, el periodo explícito
+`inicio`/`fin`, `detalle`, y `estado` como catálogo cerrado (`PENDIENTE`, `PAGADA`,
+`PARCIAL`, `EN_MORA`) en vez de los enteros 1, 2, 4 y 3—; `Transacciones` es el
+movimiento de dinero contra ella, con `tipo`, `medio_pago` y un `estado` que permite
+anular sin borrar. Tres cosas de ahí conviene tenerlas presentes antes de tocar nada:
+
+- **`saldo_pendiente` ya no es una columna.** Se deriva de `valor` menos la suma de las
+  transacciones CONFIRMADAS (`apps/gateway/src/services/saldos.js`) y se adjunta a la
+  respuesta con ese mismo nombre, así que el frontend recibe lo de siempre. La
+  consecuencia buena es que anular una transacción no tiene que «devolver» nada: la suma
+  deja de contarla y el saldo se corrige solo.
+- **`saldo_restante_momento` de las transacciones NO se deriva y no se toca.** Es la foto
+  del saldo en el instante en que se emitió ese comprobante, y ese comprobante ya está
+  impreso en casa de alguien. Es la única cifra de saldo que se guarda.
+- **`tipo_transaccion` no se convirtió en `tipo`.** Guardaba "Transferencia Bancaria" y
+  "Efectivo", que son MEDIOS de pago; su destino es `medio_pago`. Mapearlo por el
+  parecido del nombre habría puesto el dato en el campo equivocado y sólo se habría
+  notado al imprimir un comprobante.
+
+`PUT /api/pagos/:id/pagar` desapareció: registrar un pago es `POST /api/pagos` con el
+cuerpo del Capítulo 2, y el alta manual de un cobro se movió a
+`POST /api/pagos/cuentas-cobro`. Ver `docs/adr/0015` y `docs/adr/0016`.
+
 Desviaciones de la línea base acumuladas, todas con ADR y **todas pendientes de
 incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 
@@ -123,6 +149,8 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0012` | Bus de eventos sobre PostgreSQL con patrón outbox, en vez de Dapr. Resuelve una decisión abierta y **no se aparta del documento**, que ordena el mecanismo pero no la tecnología. Lo que sí conviene incorporar es la **garantía de entrega**: al-menos-una-vez con descarte de repetidos. |
 | `0013` | El evento `ContratoFinalizado`, que el documento no contempla. **Esta sí es desviación**: añade una pieza al diseño de comunicación entre servicios. |
 | `0014` | Almacenamiento de anexos detrás de una interfaz, con Azure Blob en despliegue, y servidos por la API en vez de con URL firmada. Resuelve una decisión abierta; **no se aparta del documento**, que no fija proveedor ni forma de servir el archivo. |
+| `0015` | `Transacciones` conserva `observaciones`, que el modelo canónico no lista. **Es desviación por adición**: la imprime el comprobante en «Referencia trans.». |
+| `0016` | Anulación de transacciones: endpoint, estado `ANULADA` y 409 al repetir. **Es desviación**: el documento no contempla ni el endpoint ni el estado. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -148,6 +176,14 @@ seguridad (`TokensRevocados`, ver módulo de seguridad).
 | `Cuentas_cobro` | detalle, valor, inicio, fin, fecha_pago, estado | `id_contrato` |
 | `Transacciones` | monto, tipo, fecha_pago, medio_pago, estado | `id_cuenta_cobro` |
 
+Dos columnas que el código tiene y esta tabla no, las dos con ADR: `observaciones` en
+`Transacciones` (`docs/adr/0015`) y `saldo_restante_momento`, que ya estaba en `abonos` y
+sobrevive porque es la foto que imprime un comprobante ya emitido.
+
+**El saldo de una cuenta de cobro NO es una columna.** No está aquí porque no debe estar:
+es `valor` menos la suma de sus transacciones confirmadas. Se calcula en
+`apps/gateway/src/services/saldos.js` y se expone como `saldo_pendiente`.
+
 **Toda tabla de dominio lleva columnas de auditoría:** `creado_por`, `fecha_creacion`,
 `ultima_actualizacion`, `actualizado_por`.
 
@@ -170,9 +206,9 @@ No es un cambio de nombres, es un cambio de modelo:
 
 `Cuentas_cobro` y `Transacciones` **no son sinónimos** de `Pago` y `Abono`. Una cuenta de
 cobro es la factura mensual que el sistema genera solo; una transacción es el movimiento
-de dinero contra esa factura. El modelo actual mezcla ambos conceptos y
-`financialEngine.js` está escrito sobre esa confusión. Separarlos es el trabajo más
-delicado de la migración.
+de dinero contra esa factura. **Hecho en el paso 6c**, con una migración que transforma
+los datos existentes (`database/dominio/006`) y que antes de borrar `saldo_pendiente`
+comprueba fila a fila que lo guardado cuadre con lo derivado.
 
 Las tablas `propietarios` e `inquilinos` **desaparecen**. La distinción pasa a ser un rol
 en `RolesUsuario`. Un mismo usuario puede ser ambas cosas.
@@ -496,14 +532,20 @@ remoto lo ya extraído.
    - ~~**6b.** Tabla `Anexos` y almacenamiento fuera del disco local.~~ **Hecho.**
      Interfaz con dos implementaciones, subida en dos pasos, descarga en streaming
      por la API autenticada y fuera `express.static('uploads')`. Ver `docs/adr/0014`.
-   - **6c.** Separar `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones`, mover el
-     motor de mora a Financiero y extraerlo. Es donde se cobra la deuda de
-     `financialEngine.js`.
-   - **6d.** Extraer `ms-contratos` con `Contratos` + `Anexos`, y llevarse la tabla
-     de salida del bus con él: el productor se muda con lo que produce. Ahí hay que
-     resolver el ABAC de los anexos, que hoy consulta a ms-inmuebles — ver la
-     cabecera de `controllers/anexo.controller.js`, que propone denormalizar
-     `id_propietario` en `Contratos`.
+   - ~~**6c.** Separar `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones`, sin
+     extraer nada.~~ **Hecho.** Las dos tablas, el saldo derivado, la anulación,
+     `POST /api/pagos` con el cuerpo del Capítulo 2 y el motor comparando contra
+     el calendario de Bogotá. Todo con una migración que TRANSFORMA los datos y
+     que se niega a borrar `saldo_pendiente` si no cuadra con lo derivado.
+     **Queda pendiente extraer `ms-financiero`**, que va con el 6d.
+   - **6d.** Extraer `ms-contratos` con `Contratos` + `Anexos` y `ms-financiero` con
+     `Cuentas_cobro` + `Transacciones`, y llevarse la tabla de salida del bus con
+     Contratos: el productor se muda con lo que produce. Ahí hay que resolver el ABAC
+     de los anexos, que hoy consulta a ms-inmuebles — ver la cabecera de
+     `controllers/anexo.controller.js`, que propone denormalizar `id_propietario` en
+     `Contratos`— y encadenar el salto Financiero → Contratos, que hoy sigue siendo
+     un `include`. `ContratoFormalizado` gana entonces su segundo consumidor:
+     ms-financiero, que inserta la primera cuenta de cobro.
    - Y en algún punto de los tres: obtener datos del contrato por API en vez de por
      `include`.
 7. **`ms-notificaciones`.** Mailer y recordatorios.
@@ -540,13 +582,31 @@ remoto lo ya extraído.
   `CHECK` de la migración. Van en minúsculas, a diferencia de los roles: un rol
   viaja en los claims y el Capítulo 2 lo fija en mayúsculas; esto es un atributo
   de negocio. Si agregas un valor, tócalo en los dos sitios — nada los sincroniza.
+- **Los catálogos de Financiero son la excepción: van en MAYÚSCULAS.** Los cuatro
+  —`ESTADOS_CUENTA_COBRO`, `ESTADOS_TRANSACCION`, `TIPOS_TRANSACCION` y el abierto
+  `MedioPago`— porque el Capítulo 2 fija `"tipo": "INGRESO"` y
+  `"medio_pago": "TRANSFERENCIA"` en el cuerpo de `POST /api/pagos`, que es un
+  contrato de interfaz. Bajar esos dos a minúsculas obligaría a traducir en el
+  límite de la API; subir los otros dos deja las cuatro columnas del servicio con
+  el mismo aspecto. Dentro de un servicio pesa más la coherencia con sus propias
+  columnas que con las de otro.
 - **Dinero:** pesos colombianos. `NUMERIC` en PostgreSQL, nunca `float`.
-- **Fechas:** guardar en UTC, presentar en `America/Bogota`. **A medio arreglar.** El
-  paso 6a cerró la parte que tocaba: `fecha_inicio_corte` y `fecha_limite_pago` se
-  derivan en UTC (`models/fechasContrato.js`) y la migración las rellenó con
-  `AT TIME ZONE 'UTC'`, así que el día que se guarda es el que el usuario escribió.
-  El resto del motor de mora sigue comparando contra `new Date()` local; se arregla
-  al mudarlo a Financiero en el paso 6c.
+- **Fechas:** guardar en UTC, presentar en `America/Bogota`. **Cerrado en el paso 6c.**
+  El 6a arregló la mitad: `fecha_inicio_corte` y `fecha_limite_pago` se derivan en UTC
+  (`models/fechasContrato.js`) y la migración las rellenó con `AT TIME ZONE 'UTC'`. El
+  6c cerró la otra: el motor de mora ya no compara contra `new Date()` local sino
+  contra `hoyEnZonaNegocio()`, que devuelve el día de calendario en `America/Bogota`,
+  y `diasEntre()` cuenta días de calendario en vez de intervalos de 24 horas. La zona
+  es la del NEGOCIO y no la del servidor: quien decide que un arriendo entró en mora al
+  sexto día lo hace en Bogotá, y en un contenedor en UTC el corte se adelantaría cinco
+  horas. Tuvo que decidirse aquí porque `inicio` pasó de `TIMESTAMPTZ` a `DATE`, y una
+  fecha de calendario no significa nada sin decir en qué zona se lee.
+- **Periodo de una cuenta de cobro:** `inicio` es la fecha de corte del mes que se
+  factura y `fin` es el día ANTERIOR al siguiente corte. Así definidos, los periodos
+  **teselan** el calendario: cada día pertenece a uno y sólo a uno, sin huecos ni
+  solapes, sea cual sea el día pactado. «Un mes menos un día» lo rompería en cuanto un
+  mes tuviera 28 días y el siguiente 31. La regla está en `periodoDeCorte()`, en
+  `models/fechasContrato.js`, y no se calcula en ningún otro sitio.
 - **Días del mes que no existen:** un contrato que vence el 31 no tiene ese día en
   febrero. La regla es **recortar al último día del mes**, y el día pactado se guarda
   sin tocar: el recorte se aplica al resolverlo contra cada mes, no al guardarlo. Ver
@@ -701,8 +761,8 @@ mitad de sus datos—, pero hoy se resuelve con un `Op.or` sobre columnas alcanz
 | Controlador | Ruta de la condición | Contextos que cruza |
 |---|---|---|
 | `contrato.controller.js` | `$Inmueble.id_propietario$` | Contratos → Inmuebles |
-| `pago.controller.js` (pagos) | `$Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
-| `pago.controller.js` (abonos) | `$Pago.Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
+| `pago.controller.js` (cuentas) | `$Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
+| `pago.controller.js` (transacciones) | `$CuentaCobro.Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
 
 **La mitad de esto ya está hecha.** El paso 4 tuvo que adelantarlo: al irse Inmuebles,
 los tres `include` dejaron de existir y la disyunción se resolvió como manda el plan
@@ -711,16 +771,17 @@ los tres `include` dejaron de existir y la disyunción se resolvió como manda e
 string, así que el problema del tamaño no llegó a plantearse.
 
 Lo que queda es el salto **Financiero → Contratos**, que hoy sigue siendo un `include`
-porque las dos tablas viven todavía en el gateway. En el paso 6, al extraerse
-`ms-contratos`, hay que encadenar un salto más: pedir a Contratos los contratos de esos
-inmuebles y filtrar los pagos por esa segunda lista. Ahí sí habrá que decidir si el
-gateway pagina o si Contratos acepta una lista de IDs.
+porque las dos tablas viven todavía en el gateway. El paso 6c no lo cambió: partir
+`pagos` en dos no mueve la frontera, sólo renombra los tramos de la condición. En el
+6d, al extraerse los dos servicios, hay que encadenar un salto más: pedir a Contratos
+los contratos de esos inmuebles y filtrar las cuentas de cobro por esa segunda lista.
+Ahí sí habrá que decidir si el gateway pagina o si Contratos acepta una lista de IDs.
 
 **`database/dominio/` es provisional.** Agrupaba inmuebles, contratos, pagos y abonos
 en una sola carpeta porque todavía no había servicios que las separaran.
 `database/inmuebles/` ya salió de ahí —con una migración que copia y otra que retira,
 en ese orden— y quedan `database/contratos/` y `database/financiero/`, que se van en el
-paso 6 por el mismo camino. Ver `docs/adr/0003`.
+paso 6d por el mismo camino. Ver `docs/adr/0003`.
 
 **Clave por servicio para las llamadas internas.** Hoy todos comparten
 `SERVICIO_JWT_SECRET`, así que comprometer un servicio permite suplantar a los demás. El
@@ -733,10 +794,18 @@ la identidad administrada de Azure puede hacerlo innecesario. Ver `docs/adr/0009
 problema es de toda la API, no de un endpoint. Decidir antes del paso 8: en Container
 Apps puede resolverse en el ingreso en vez de en código.
 
-**Autoservicio de pago del inquilino.** `docs/adr/0006` deja el registro de abonos en
+**Autoservicio de pago del inquilino.** `docs/adr/0006` deja el registro de pagos en
 manos del propietario porque el sistema no puede verificar un pago. Si el producto
 quiere autoservicio, hace falta otro diseño: reporte del inquilino + confirmación del
-propietario, o pasarela que dispare el asiento. Paso 6.
+propietario, o pasarela que dispare el asiento. Sigue abierta después del 6c: la
+anulación del `docs/adr/0016` da la mitad que faltaba —poder corregir un registro
+equivocado sin borrarlo— pero no resuelve quién puede registrarlo.
+
+**Devoluciones.** `TIPOS_TRANSACCION` está cerrado con un solo valor, `INGRESO`, porque
+es lo único que el sistema produce. El día que haya que devolver dinero —un depósito que
+se reintegra, un cobro de más— hace falta `EGRESO` aquí y en el `CHECK` de una migración.
+No confundirlo con anular: anular corrige un registro que no debió existir; un egreso
+registra dinero que de verdad salió. Ver `docs/adr/0016`.
 
 **Comprobantes.** El frontend tiene una pantalla que no aparece entre las cinco del
 documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
@@ -760,6 +829,13 @@ agujero con mejor presentación. Ver `docs/adr/0014`.
 ~~**`backend/uploads/` en disco local.**~~ **Resuelto en el paso 6b.** El disco sigue
 siendo la implementación de desarrollo, pero detrás de una interfaz: en despliegue se
 usa Azure Blob, y la elección la decide una sola variable de entorno.
+
+**Un contrato de 16 líneas de mora no existe: `verificar-mora` y el motor no aplican la
+misma regla.** `POST /api/pagos/verificar-mora` marca EN_MORA toda cuenta PENDIENTE o
+PARCIAL cuyo corte ya pasó —un solo día basta— mientras que `procesarPagos()` espera al
+sexto. Venía de antes del paso 6c y sigue igual: es un endpoint manual que el frontend no
+llama, pero si alguien lo dispara desde Postman deja cuentas en mora que el motor no
+habría marcado. Unificarlo es trabajo del 6d, cuando el motor se mude a Financiero.
 
 **Create React App** ya no recibe mantenimiento. Migrar a Vite es barato y acelera el
 build en CI, pero no es urgente.

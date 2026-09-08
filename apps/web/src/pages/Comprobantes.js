@@ -12,7 +12,7 @@ const Comprobantes = () => {
     useEffect(() => {
         const fetchHistorial = async () => {
             try {
-                const response = await api.get('/pagos/historial-abonos');
+                const response = await api.get('/pagos/historial-transacciones');
                 setAbonos(response.data);
             } catch (error) {
                 console.error('Error al cargar historial:', error);
@@ -24,8 +24,8 @@ const Comprobantes = () => {
     }, []);
 
     const abonosFiltrados = abonos.filter(abono =>
-        abono.Pago?.Contrato?.Inmueble?.direccion?.toLowerCase().includes(filtro.toLowerCase()) ||
-        abono.tipo_transaccion?.toLowerCase().includes(filtro.toLowerCase())
+        abono.CuentaCobro?.Contrato?.Inmueble?.direccion?.toLowerCase().includes(filtro.toLowerCase()) ||
+        abono.medio_pago?.toLowerCase().includes(filtro.toLowerCase())
     );
 
     const totalPagado = abonosFiltrados.reduce((sum, a) => sum + parseFloat(a.monto || 0), 0);
@@ -80,7 +80,7 @@ const Comprobantes = () => {
                     {abonosFiltrados.map((abono, idx) => {
                         const esPagado = parseFloat(abono.saldo_restante_momento) === 0;
                         return (
-                            <div key={abono.id_abono} style={{
+                            <div key={abono.id_transaccion} style={{
                                 background: '#fff',
                                 borderRadius: '1rem',
                                 border: '1px solid #e2e8f0',
@@ -118,13 +118,13 @@ const Comprobantes = () => {
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                                             <span style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                                <MapPin size={12} /> {abono.Pago?.Contrato?.Inmueble?.direccion}
+                                                <MapPin size={12} /> {abono.CuentaCobro?.Contrato?.Inmueble?.direccion}
                                             </span>
                                             <span style={{ fontSize: '0.8rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                                 <Calendar size={12} />
-                                                {formatDate(abono.fecha_abono)}
+                                                {formatDate(abono.fecha_pago)}
                                             </span>
-                                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{abono.tipo_transaccion}</span>
+                                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{abono.medio_pago}</span>
                                         </div>
                                     </div>
 
@@ -144,7 +144,7 @@ const Comprobantes = () => {
                                 {/* Botón descarga */}
                                 <div style={{ padding: '1rem', display: 'flex', alignItems: 'center', borderLeft: '1px solid #f1f5f9' }}>
                                     <button
-                                        onClick={() => abrirPdf(`/pagos/abono/${abono.id_abono}`, `Comprobante_${abono.id_abono}.pdf`)}
+                                        onClick={() => abrirPdf(`/pagos/transacciones/${abono.id_transaccion}/comprobante`, `Comprobante_${abono.id_transaccion}.pdf`)}
                                         style={{
                                             background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
                                             color: '#fff', border: 'none', borderRadius: '0.6rem',

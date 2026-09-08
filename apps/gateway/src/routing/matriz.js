@@ -40,7 +40,8 @@ const SOLO_PROPIETARIO = [ROL_PROPIETARIO];
  * dieran el mismo resultado, y el motivo es el que justifica que la matriz sea
  * declarativa: son cuatro operaciones sobre archivos con reparto asimétrico
  * —dos roles leen, uno escribe— y auditar eso leyendo dos comodines de método
- * obliga a reconstruir mentalmente qué rutas cubren. Escritas, se leen.
+ * obliga a reconstruir mentalmente qué rutas cubren. Escritas, se leen. Las
+ * escrituras de Financiero se declaran aparte por lo mismo desde el paso 6c.
  */
 const MATRIZ = [
     // ── Identidad ──────────────────────────────────────────────────────────
@@ -95,17 +96,29 @@ const MATRIZ = [
     { metodo: 'DELETE', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },
 
     // ── Financiero ─────────────────────────────────────────────────────────
+    // El inquilino LEE: sus cuentas de cobro, sus transacciones y los PDF de
+    // las dos cosas. El ABAC del controlador comprueba además que sean suyas.
     { metodo: 'GET', patron: '/api/pagos/**', acceso: AMBOS },
-    { metodo: 'POST', patron: '/api/pagos/**', acceso: SOLO_PROPIETARIO },
-    // El enunciado de la matriz sólo nombraba GET y POST para pagos. Sin esta
-    // fila, `PUT /api/pagos/:id/pagar` caería en la denegación por defecto y el
-    // registro de abonos dejaría de funcionar para todo el mundo.
+
+    // Las tres escrituras van escritas una a una, aunque el comodín de POST
+    // que las sigue diera el mismo resultado. Es el mismo criterio que con los
+    // anexos: son operaciones con consecuencias contables distintas —emitir un
+    // cobro, recibir dinero, deshacer un movimiento ya registrado— y auditar
+    // eso leyendo un comodín obliga a reconstruir mentalmente qué rutas cubre.
     //
-    // Es del propietario, no de los dos roles: quien lleva la contabilidad del
-    // arriendo es él, y un inquilino registrando su propio pago sería declararlo
-    // sin contrapartida. La API lo permitía —la ruta sólo exigía token— aunque
-    // la SPA nunca ofreció el botón al inquilino. Ver docs/adr/0006.
-    { metodo: 'PUT', patron: '/api/pagos/:id/pagar', acceso: SOLO_PROPIETARIO },
+    // Las tres son del propietario, no de los dos roles: quien lleva la
+    // contabilidad del arriendo es él, y un inquilino registrando su propio
+    // pago sería declararlo sin contrapartida. Ver docs/adr/0006.
+    { metodo: 'POST', patron: '/api/pagos/cuentas-cobro', acceso: SOLO_PROPIETARIO },
+    {
+        metodo: 'POST',
+        patron: '/api/pagos/transacciones/:id/anular',
+        acceso: SOLO_PROPIETARIO
+    },
+    // `POST /api/pagos` es el registro de un pago desde el paso 6c —antes era
+    // `PUT /api/pagos/:id/pagar`, que ya no existe— y el comodín lo cubre junto
+    // con `verificar-mora`.
+    { metodo: 'POST', patron: '/api/pagos/**', acceso: SOLO_PROPIETARIO },
 
     // ── Dashboard ──────────────────────────────────────────────────────────
     // Vive en el gateway y agrega datos del propietario (regla dura 5).

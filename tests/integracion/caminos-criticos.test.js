@@ -120,7 +120,7 @@ let tokenPropietario;
 let idInquilino;
 let idInmueble;
 let idContrato;
-let idPago;
+let idCuentaCobro;
 
 describe('Caminos críticos', () => {
     before(async () => {
@@ -391,28 +391,62 @@ describe('Caminos críticos', () => {
     });
 
     it('registrar un pago funciona de punta a punta', async () => {
-        const pago = await pedir('POST', '/api/pagos', {
+        // Desde el paso 6c son dos recursos distintos: la cuenta de cobro se
+        // emite en `/cuentas-cobro` y el dinero entra por `POST /api/pagos`,
+        // con el cuerpo del Capítulo 2.
+        const cuenta = await pedir('POST', '/api/pagos/cuentas-cobro', {
             token: tokenPropietario,
             cuerpo: {
                 id_contrato: idContrato,
-                monto_total: 1500000,
-                mes_correspondiente: '2026-01-01'
+                valor: 1500000,
+                inicio: '2026-01-01'
             }
         });
-        assert.equal(pago.estado, 201);
-        idPago = pago.datos.pago.id_pago;
+        assert.equal(cuenta.estado, 201);
+        idCuentaCobro = cuenta.datos.cuenta_cobro.id_cuenta_cobro;
 
-        const abono = await pedir('PUT', `/api/pagos/${idPago}/pagar`, {
+        const transaccion = await pedir('POST', '/api/pagos', {
             token: tokenPropietario,
-            cuerpo: { monto_pagado: 500000, tipo_transaccion: 'Transferencia' }
+            cuerpo: {
+                id_cuenta_cobro: idCuentaCobro,
+                monto: 500000,
+                tipo: 'INGRESO',
+                medio_pago: 'Transferencia'
+            }
         });
 
-        assert.equal(abono.estado, 200);
-        assert.equal(abono.datos.pago.estado, 4, 'debería quedar en pago parcial');
+        assert.equal(transaccion.estado, 201);
+        assert.equal(
+            transaccion.datos.cuenta_cobro.estado,
+            'PARCIAL',
+            'debería quedar en pago parcial'
+        );
+
+        // El saldo lo calcula el servidor sumando las transacciones
+        // confirmadas; que la API lo siga devolviendo con el mismo nombre es
+        // parte del contrato con el frontend.
+        assert.equal(transaccion.datos.cuenta_cobro.saldo_pendiente, 1000000);
+    });
+
+    it('anular la transacción devuelve el saldo y el estado', async () => {
+        const transacciones = await pedir('GET', `/api/pagos/${idCuentaCobro}/transacciones`, {
+            token: tokenPropietario
+        });
+        assert.equal(transacciones.estado, 200);
+
+        const anulacion = await pedir(
+            `POST`,
+            `/api/pagos/transacciones/${transacciones.datos[0].id_transaccion}/anular`,
+            { token: tokenPropietario }
+        );
+
+        assert.equal(anulacion.estado, 200, JSON.stringify(anulacion.datos));
+        assert.equal(anulacion.datos.cuenta_cobro.saldo_pendiente, 1500000);
+        assert.equal(anulacion.datos.cuenta_cobro.estado, 'PENDIENTE');
     });
 
     it('el recibo en PDF compone al arrendatario', async () => {
-        const respuesta = await fetch(`${GATEWAY}/api/pagos/${idPago}/recibo`, {
+        const respuesta = await fetch(`${GATEWAY}/api/pagos/${idCuentaCobro}/recibo`, {
             headers: { Authorization: `Bearer ${tokenPropietario}` }
         });
 

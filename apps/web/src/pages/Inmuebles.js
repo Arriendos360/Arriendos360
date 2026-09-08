@@ -103,7 +103,7 @@ const Inmuebles = () => {
     const getUltimoPago = (id_contrato) =>
         pagos
             .filter(p => p.id_contrato === id_contrato)
-            .sort((a, b) => new Date(b.mes_correspondiente) - new Date(a.mes_correspondiente))[0];
+            .sort((a, b) => new Date(b.inicio) - new Date(a.inicio))[0];
 
     if (loading) return <div className="loading">Cargando inmuebles...</div>;
 
@@ -280,12 +280,12 @@ const Inmuebles = () => {
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #f1f5f9' }}>
                                                             <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Mes</span>
                                                             <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#0f172a' }}>
-                                                                {new Date(ultimoPago.mes_correspondiente).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}
+                                                                {new Date(ultimoPago.inicio).toLocaleDateString('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
                                                             </span>
                                                         </div>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #f1f5f9' }}>
                                                             <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Monto</span>
-                                                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#0f172a' }}>${parseFloat(ultimoPago.monto_total).toLocaleString()}</span>
+                                                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#0f172a' }}>${parseFloat(ultimoPago.valor).toLocaleString()}</span>
                                                         </div>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0' }}>
                                                             <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Saldo pendiente</span>

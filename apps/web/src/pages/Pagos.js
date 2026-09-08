@@ -1,16 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, AlertTriangle, Download, History, X, Receipt, Search, Calendar, MapPin } from 'lucide-react';
+import { CheckCircle, Clock, AlertTriangle, Ban, Download, History, X, Receipt, Search, Calendar, MapPin } from 'lucide-react';
+
+import { ESTADOS_CUENTA_COBRO, MEDIOS_PAGO_CONOCIDOS } from 'arriendos360-contracts';
 
 import { useSesion } from '../auth/sesion';
 import api from '../services/api';
 import { abrirPdf } from '../services/descargas';
+
+/**
+ * Los cuatro estados de una cuenta de cobro, del catalogo compartido.
+ *
+ * Hasta el paso 6c esta pantalla traducia los enteros 1, 2, 3 y 4 con un
+ * `switch` propio, que era una de las cuatro copias del mapa repartidas por el
+ * proyecto. Ahora la lista viene de `packages/contracts`, que es la misma que
+ * valida el modelo y la que declara el `CHECK` de la migracion.
+ */
+const [PENDIENTE, PAGADA, PARCIAL, EN_MORA] = ESTADOS_CUENTA_COBRO;
 
 const Pagos = () => {
     const { esPropietario } = useSesion();
 
     const [tab, setTab] = useState('cobros');
     const [pagos, setPagos] = useState([]);
-    const [abonos, setAbonos] = useState([]);
+    const [transacciones, setTransacciones] = useState([]);
     const [historial, setHistorial] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filtro, setFiltro] = useState('');
@@ -19,8 +31,11 @@ const Pagos = () => {
     const [selectedPago, setSelectedPago] = useState(null);
     const [showAbonosModal, setShowAbonosModal] = useState(false);
     const [showPayModal, setShowPayModal] = useState(false);
+    // Los nombres son los del cuerpo que fija el Capitulo 2 para
+    // `POST /api/pagos`: `monto` y `medio_pago`, no `monto_pagado` ni
+    // `tipo_transaccion`. `tipo` lo pone el envio, que hoy solo tiene un valor.
     const [payFormData, setPayFormData] = useState({
-        monto_pagado: '', tipo_transaccion: 'Transferencia Bancaria', observaciones: ''
+        monto: '', medio_pago: MEDIOS_PAGO_CONOCIDOS[0], observaciones: ''
     });
 
     useEffect(() => {
@@ -28,7 +43,7 @@ const Pagos = () => {
             try {
                 const [pagosRes, historialRes] = await Promise.all([
                     api.get('/pagos'),
-                    api.get('/pagos/historial-abonos').catch(() => ({ data: [] }))
+                    api.get('/pagos/historial-transacciones').catch(() => ({ data: [] }))
                 ]);
                 setPagos(pagosRes.data);
                 setHistorial(historialRes.data);
@@ -47,37 +62,63 @@ const Pagos = () => {
         return date.toLocaleDateString('es-CO', { ...options, timeZone: 'UTC' });
     };
 
-    const fetchAbonos = async (id_pago) => {
+    const recargar = async () => {
+        const [pagosRes, histRes] = await Promise.all([
+            api.get('/pagos'),
+            api.get('/pagos/historial-transacciones').catch(() => ({ data: [] }))
+        ]);
+        setPagos(pagosRes.data);
+        setHistorial(histRes.data);
+    };
+
+    const fetchTransacciones = async (id_cuenta_cobro) => {
         try {
-            const res = await api.get(`/pagos/${id_pago}/abonos`);
-            setAbonos(res.data);
+            const res = await api.get(`/pagos/${id_cuenta_cobro}/transacciones`);
+            setTransacciones(res.data);
             setShowAbonosModal(true);
-        } catch { alert('Error al cargar abonos'); }
+        } catch { alert('Error al cargar transacciones'); }
     };
 
     const handleRegistrarPago = async (e) => {
         e.preventDefault();
         try {
-            await api.put(`/pagos/${selectedPago.id_pago}/pagar`, payFormData);
+            await api.post('/pagos', {
+                id_cuenta_cobro: selectedPago.id_cuenta_cobro,
+                tipo: 'INGRESO',
+                ...payFormData
+            });
             setShowPayModal(false);
-            setPayFormData({ monto_pagado: '', tipo_transaccion: 'Transferencia Bancaria', observaciones: '' });
-            const [pagosRes, histRes] = await Promise.all([api.get('/pagos'), api.get('/pagos/historial-abonos').catch(() => ({ data: [] }))]);
-            setPagos(pagosRes.data);
-            setHistorial(histRes.data);
+            setPayFormData({ monto: '', medio_pago: MEDIOS_PAGO_CONOCIDOS[0], observaciones: '' });
+            await recargar();
         } catch (err) {
             alert('Error: ' + (err.response?.data?.mensaje || err.message));
         }
     };
 
-    const getStatusInfo = (estado) => {
-        switch (estado) {
-            case 1: return { label: 'Pendiente',    class: 'badge-pending', icon: <Clock size={13} /> };
-            case 2: return { label: 'Pagado',       class: 'badge-success', icon: <CheckCircle size={13} /> };
-            case 3: return { label: 'En Mora',      class: 'badge-error',   icon: <AlertTriangle size={13} /> };
-            case 4: return { label: 'Pago Parcial', class: 'badge-warning', icon: <Clock size={13} /> };
-            default: return { label: '—', class: '', icon: null };
+    /**
+     * Anula una transaccion registrada por error.
+     *
+     * No la borra: el servidor le cambia el estado y el saldo de la cuenta se
+     * corrige solo, porque la suma que lo deriva deja de contarla. Por eso hay
+     * que recargar las listas y el detalle en vez de tocarlos en memoria.
+     */
+    const handleAnular = async (id_transaccion) => {
+        if (!window.confirm('Anular esta transaccion? El saldo de la cuenta de cobro se recalculara.')) return;
+        try {
+            await api.post(`/pagos/transacciones/${id_transaccion}/anular`);
+            await recargar();
+            await fetchTransacciones(selectedPago.id_cuenta_cobro);
+        } catch (err) {
+            alert('Error: ' + (err.response?.data?.mensaje || err.message));
         }
     };
+
+    const getStatusInfo = (estado) => ({
+        [PENDIENTE]: { label: 'Pendiente',    class: 'badge-pending', icon: <Clock size={13} /> },
+        [PAGADA]:    { label: 'Pagado',       class: 'badge-success', icon: <CheckCircle size={13} /> },
+        [EN_MORA]:   { label: 'En Mora',      class: 'badge-error',   icon: <AlertTriangle size={13} /> },
+        [PARCIAL]:   { label: 'Pago Parcial', class: 'badge-warning', icon: <Clock size={13} /> },
+    }[estado] || { label: '—', class: '', icon: null });
 
     const pagosFiltrados = pagos.filter(p => {
         const q = filtro.toLowerCase();
@@ -86,16 +127,16 @@ const Pagos = () => {
             || (p.Contrato?.id_inquilino || '').toLowerCase().includes(q)
             || String(p.id_contrato).includes(q);
         const matchEstado = filtroEstado === 'todos'
-            || (filtroEstado === 'pendiente' && (p.estado === 1 || p.estado === 4))
-            || (filtroEstado === 'pagado'    && p.estado === 2)
-            || (filtroEstado === 'mora'      && p.estado === 3);
+            || (filtroEstado === 'pendiente' && (p.estado === PENDIENTE || p.estado === PARCIAL))
+            || (filtroEstado === 'pagado'    && p.estado === PAGADA)
+            || (filtroEstado === 'mora'      && p.estado === EN_MORA);
         return matchTexto && matchEstado;
     });
 
     const historialFiltrado = historial.filter(a =>
         !filtroHistorial
-        || a.Pago?.Contrato?.Inmueble?.direccion?.toLowerCase().includes(filtroHistorial.toLowerCase())
-        || a.tipo_transaccion?.toLowerCase().includes(filtroHistorial.toLowerCase())
+        || a.CuentaCobro?.Contrato?.Inmueble?.direccion?.toLowerCase().includes(filtroHistorial.toLowerCase())
+        || a.medio_pago?.toLowerCase().includes(filtroHistorial.toLowerCase())
     );
 
     const totalHistorial = historialFiltrado.reduce((s, a) => s + parseFloat(a.monto || 0), 0);
@@ -150,9 +191,9 @@ const Pagos = () => {
                         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                             {[
                                 { key: 'todos',     label: 'Todos',      color: '#475569', bg: '#f1f5f9', count: pagos.length },
-                                { key: 'pendiente', label: 'Pendientes', color: '#854d0e', bg: '#fef9c3', count: pagos.filter(p => p.estado === 1 || p.estado === 4).length },
-                                { key: 'pagado',    label: 'Pagados',    color: '#166534', bg: '#dcfce7', count: pagos.filter(p => p.estado === 2).length },
-                                { key: 'mora',      label: 'En Mora',    color: '#991b1b', bg: '#fee2e2', count: pagos.filter(p => p.estado === 3).length },
+                                { key: 'pendiente', label: 'Pendientes', color: '#854d0e', bg: '#fef9c3', count: pagos.filter(p => p.estado === PENDIENTE || p.estado === PARCIAL).length },
+                                { key: 'pagado',    label: 'Pagados',    color: '#166534', bg: '#dcfce7', count: pagos.filter(p => p.estado === PAGADA).length },
+                                { key: 'mora',      label: 'En Mora',    color: '#991b1b', bg: '#fee2e2', count: pagos.filter(p => p.estado === EN_MORA).length },
                             ].map(t => (
                                 <button key={t.key} onClick={() => setFiltroEstado(t.key)} style={{
                                     padding: '0.4rem 0.8rem', borderRadius: '999px', cursor: 'pointer', fontSize: '0.82rem',
@@ -187,16 +228,16 @@ const Pagos = () => {
                                 {pagosFiltrados.map(pago => {
                                     const st = getStatusInfo(pago.estado);
                                     return (
-                                        <tr key={pago.id_pago}>
+                                        <tr key={pago.id_cuenta_cobro}>
                                             <td style={{ fontWeight: '600' }}>
-                                                {formatDate(pago.mes_correspondiente)}
+                                                {formatDate(pago.inicio)}
                                             </td>
                                             <td>
                                                 <div style={{ fontWeight: '500', fontSize: '0.875rem' }}>{pago.Contrato?.Inmueble?.direccion || `#${pago.id_contrato}`}</div>
                                                 <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{pago.Contrato?.Inmueble?.municipio}</div>
                                             </td>
                                             {esPropietario && <td style={{ color: '#64748b', fontSize: '0.875rem' }}>{pago.Contrato?.id_inquilino || '--'}</td>}
-                                            <td style={{ fontWeight: '600' }}>${parseFloat(pago.monto_total).toLocaleString()}</td>
+                                            <td style={{ fontWeight: '600' }}>${parseFloat(pago.valor).toLocaleString()}</td>
                                             <td style={{ color: parseFloat(pago.saldo_pendiente) > 0 ? '#ef4444' : '#10b981', fontWeight: '700' }}>
                                                 ${parseFloat(pago.saldo_pendiente).toLocaleString()}
                                             </td>
@@ -207,24 +248,24 @@ const Pagos = () => {
                                             </td>
                                             <td>
                                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                    {esPropietario && pago.estado !== 2 && (
+                                                    {esPropietario && pago.estado !== PAGADA && (
                                                         <button className="btn btn-primary"
                                                             onClick={() => { setSelectedPago(pago); setShowPayModal(true); }}
                                                             style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem' }}>
                                                             Registrar Pago
                                                         </button>
                                                     )}
-                                                    {!esPropietario && pago.estado !== 2 && (
+                                                    {!esPropietario && pago.estado !== PAGADA && (
                                                         <span style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: '600', background: '#fef9c3', padding: '0.3rem 0.6rem', borderRadius: '0.375rem', whiteSpace: 'nowrap' }}>
                                                             ⏳ Pendiente
                                                         </span>
                                                     )}
-                                                    {parseFloat(pago.saldo_pendiente) < parseFloat(pago.monto_total) && (
+                                                    {parseFloat(pago.saldo_pendiente) < parseFloat(pago.valor) && (
                                                         <>
-                                                            <button className="btn-icon-subtle" title="Ver abonos" onClick={() => { setSelectedPago(pago); fetchAbonos(pago.id_pago); }}>
+                                                            <button className="btn-icon-subtle" title="Ver transacciones" onClick={() => { setSelectedPago(pago); fetchTransacciones(pago.id_cuenta_cobro); }}>
                                                                 <History size={16} />
                                                             </button>
-                                                            <button className="btn-icon-subtle" title="Recibo" onClick={() => abrirPdf(`/pagos/${pago.id_pago}/recibo`, `Recibo_${pago.id_pago}.pdf`)}>
+                                                            <button className="btn-icon-subtle" title="Recibo" onClick={() => abrirPdf(`/pagos/${pago.id_cuenta_cobro}/recibo`, `Recibo_${pago.id_cuenta_cobro}.pdf`)}>
                                                                 <Download size={16} />
                                                             </button>
                                                         </>
@@ -268,11 +309,15 @@ const Pagos = () => {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                             {historialFiltrado.map((abono, idx) => {
                                 const saldado = parseFloat(abono.saldo_restante_momento) === 0;
+                                // Una transaccion anulada sigue en la lista a
+                                // proposito: esconderla seria esconder que el
+                                // movimiento se registro y se corrigio.
+                                const anulada = abono.estado === 'ANULADA';
                                 return (
-                                    <div key={abono.id_abono} style={{ background: '#fff', borderRadius: '0.875rem', border: '1px solid #e2e8f0', overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'box-shadow 0.15s' }}
+                                    <div key={abono.id_transaccion} style={{ background: '#fff', borderRadius: '0.875rem', border: '1px solid #e2e8f0', overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'box-shadow 0.15s' }}
                                         onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
                                         onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)'}>
-                                        <div style={{ width: '4px', background: saldado ? '#22c55e' : '#f59e0b', flexShrink: 0 }} />
+                                        <div style={{ width: '4px', background: anulada ? '#94a3b8' : (saldado ? '#22c55e' : '#f59e0b'), flexShrink: 0 }} />
                                         <div style={{ padding: '0.875rem 1rem', borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minWidth: '52px', background: '#fafafa' }}>
                                             <span style={{ fontSize: '0.6rem', color: '#94a3b8', textTransform: 'uppercase' }}>#</span>
                                             <span style={{ fontWeight: '700', color: '#475569' }}>{String(idx + 1).padStart(2, '0')}</span>
@@ -281,23 +326,23 @@ const Pagos = () => {
                                             <div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                                                     <span style={{ fontWeight: '700', fontSize: '0.9rem', color: '#0f172a' }}>Abono a Canon</span>
-                                                    <span style={{ fontSize: '0.68rem', fontWeight: '700', padding: '0.1rem 0.45rem', borderRadius: '999px', background: saldado ? '#dcfce7' : '#fef9c3', color: saldado ? '#15803d' : '#a16207' }}>
-                                                        {saldado ? '✓ Saldado' : 'Parcial'}
+                                                    <span style={{ fontSize: '0.68rem', fontWeight: '700', padding: '0.1rem 0.45rem', borderRadius: '999px', background: anulada ? '#f1f5f9' : (saldado ? '#dcfce7' : '#fef9c3'), color: anulada ? '#64748b' : (saldado ? '#15803d' : '#a16207') }}>
+                                                        {anulada ? 'Anulada' : (saldado ? '✓ Saldado' : 'Parcial')}
                                                     </span>
                                                 </div>
                                                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                                                    <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><MapPin size={11} />{abono.Pago?.Contrato?.Inmueble?.direccion}</span>
-                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Calendar size={11} />{formatDate(abono.fecha_abono, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{abono.tipo_transaccion}</span>
+                                                    <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><MapPin size={11} />{abono.CuentaCobro?.Contrato?.Inmueble?.direccion}</span>
+                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Calendar size={11} />{formatDate(abono.fecha_pago, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{abono.medio_pago}</span>
                                                 </div>
                                             </div>
                                             <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                                <div style={{ fontSize: '1.25rem', fontWeight: '800', color: '#15803d', letterSpacing: '-0.02em' }}>${parseFloat(abono.monto).toLocaleString()}</div>
+                                                <div style={{ fontSize: '1.25rem', fontWeight: '800', color: anulada ? '#94a3b8' : '#15803d', letterSpacing: '-0.02em', textDecoration: anulada ? 'line-through' : 'none' }}>${parseFloat(abono.monto).toLocaleString()}</div>
                                                 {!saldado && <div style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '600' }}>Saldo: ${parseFloat(abono.saldo_restante_momento).toLocaleString()}</div>}
                                             </div>
                                         </div>
                                         <div style={{ padding: '0.875rem', display: 'flex', alignItems: 'center', borderLeft: '1px solid #f1f5f9' }}>
-                                            <button onClick={() => abrirPdf(`/pagos/abono/${abono.id_abono}`, `Comprobante_${abono.id_abono}.pdf`)}
+                                            <button onClick={() => abrirPdf(`/pagos/transacciones/${abono.id_transaccion}/comprobante`, `Comprobante_${abono.id_transaccion}.pdf`)}
                                                 style={{ background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', border: 'none', borderRadius: '0.5rem', padding: '0.5rem 0.875rem', cursor: 'pointer', fontWeight: '600', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', boxShadow: '0 2px 6px rgba(37,99,235,0.25)' }}>
                                                 <Download size={13} /> Descargar
                                             </button>
@@ -323,15 +368,15 @@ const Pagos = () => {
                         </div>
                         <form onSubmit={handleRegistrarPago}>
                             <label className="form-label">Monto a pagar</label>
-                            <input type="number" className="form-control" value={payFormData.monto_pagado}
-                                onChange={e => setPayFormData({...payFormData, monto_pagado: e.target.value})}
+                            <input type="number" className="form-control" value={payFormData.monto}
+                                onChange={e => setPayFormData({...payFormData, monto: e.target.value})}
                                 max={selectedPago?.saldo_pendiente} required />
                             <label className="form-label" style={{ marginTop: '1rem' }}>Método de pago</label>
-                            <select className="form-control" value={payFormData.tipo_transaccion}
-                                onChange={e => setPayFormData({...payFormData, tipo_transaccion: e.target.value})}>
-                                <option>Transferencia Bancaria</option>
-                                <option>Efectivo</option>
-                                <option>Consignación</option>
+                            {/* Catálogo ABIERTO: la lista es una sugerencia del
+                                desplegable, no un valor que la API valide. */}
+                            <select className="form-control" value={payFormData.medio_pago}
+                                onChange={e => setPayFormData({...payFormData, medio_pago: e.target.value})}>
+                                {MEDIOS_PAGO_CONOCIDOS.map(m => <option key={m}>{m}</option>)}
                             </select>
                             <label className="form-label" style={{ marginTop: '1rem' }}>Observaciones</label>
                             <textarea className="form-control" value={payFormData.observaciones}
@@ -349,25 +394,36 @@ const Pagos = () => {
                 <div className="modal-overlay">
                     <div className="card modal-content" style={{ maxWidth: '520px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-                            <h4>Abonos — Cobro #{selectedPago?.id_pago}</h4>
+                            <h4>Transacciones — Cobro #{selectedPago?.id_cuenta_cobro}</h4>
                             <button className="btn-icon" onClick={() => setShowAbonosModal(false)}><X size={20} /></button>
                         </div>
                         <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
-                            {abonos.length === 0
-                                ? <p style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>Sin abonos registrados.</p>
-                                : abonos.map(a => (
-                                    <div key={a.id_abono} style={{ padding: '0.875rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            {transacciones.length === 0
+                                ? <p style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>Sin transacciones registradas.</p>
+                                : transacciones.map(a => {
+                                    const anulada = a.estado === 'ANULADA';
+                                    return (
+                                    <div key={a.id_transaccion} style={{ padding: '0.875rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div>
-                                            <p style={{ fontWeight: '700', color: '#15803d' }}>${parseFloat(a.monto).toLocaleString()}</p>
-                                            <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{new Date(a.fecha_abono).toLocaleString('es-CO')}</p>
-                                            <p style={{ fontSize: '0.8rem', color: '#64748b' }}>{a.tipo_transaccion}</p>
+                                            <p style={{ fontWeight: '700', color: anulada ? '#94a3b8' : '#15803d', textDecoration: anulada ? 'line-through' : 'none' }}>${parseFloat(a.monto).toLocaleString()}</p>
+                                            <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{new Date(a.fecha_pago).toLocaleString('es-CO')}</p>
+                                            <p style={{ fontSize: '0.8rem', color: '#64748b' }}>{a.medio_pago}{anulada && ' · Anulada'}</p>
                                         </div>
-                                        <button className="btn-icon-subtle" title="Comprobante"
-                                            onClick={() => abrirPdf(`/pagos/abono/${a.id_abono}`, `Comprobante_${a.id_abono}.pdf`)}>
-                                            <Receipt size={16} />
-                                        </button>
+                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                            <button className="btn-icon-subtle" title="Comprobante"
+                                                onClick={() => abrirPdf(`/pagos/transacciones/${a.id_transaccion}/comprobante`, `Comprobante_${a.id_transaccion}.pdf`)}>
+                                                <Receipt size={16} />
+                                            </button>
+                                            {esPropietario && !anulada && (
+                                                <button className="btn-icon-subtle" title="Anular transacción"
+                                                    onClick={() => handleAnular(a.id_transaccion)}>
+                                                    <Ban size={16} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                ))
+                                    );
+                                })
                             }
                         </div>
                     </div>
