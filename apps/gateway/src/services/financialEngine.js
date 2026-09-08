@@ -2,7 +2,8 @@ const cron = require('node-cron');
 const { Op } = require('sequelize');
 
 const { adjuntarPartes } = require('../clientes/composicion');
-const { Contrato, CuentaCobro } = require('../models');
+const { contratosConEstado, porIds: contratosPorIds } = require('../clientes/contratos');
+const { CuentaCobro } = require('../models');
 const {
     ESTADO_CONTRATO_ACTIVO,
     ESTADO_CUENTA_EN_MORA,
@@ -15,7 +16,7 @@ const {
     mesSiguiente,
     partesDeISO,
     periodoDeCorte
-} = require('../models/fechasContrato');
+} = require('arriendos360-shared');
 const { enviarCorreo } = require('../config/mailer');
 
 /**
@@ -35,6 +36,23 @@ const { enviarCorreo } = require('../config/mailer');
  * servicios no responde, esa parte queda en `null` y el aviso se omite: el motor
  * sigue generando cuentas de cobro y marcando mora, que es su trabajo principal,
  * y lo que se pierde es la notificacion.
+ *
+ * ── EL BARRIDO SIGUE SIENDO UN NUMERO FIJO DE VIAJES ────────────────────────
+ *
+ * Desde el paso 6d los contratos tampoco son locales, asi que hay un salto mas.
+ * Lo que NO cambia es la garantia: **el numero de peticiones no depende de
+ * cuantos contratos haya.**
+ *
+ *   `procesarContratos` — 1 a ms-contratos (todos los activos) + los 2 de
+ *   `adjuntarPartes` (inmuebles e identidad, cada uno en lote) = 3 por barrido,
+ *   haya 5 contratos o 500.
+ *
+ *   `procesarPagos` — 1 a ms-contratos (los contratos de las cuentas vencidas,
+ *   POR IDENTIFICADOR y en lote) + los 2 de `adjuntarPartes` = 3.
+ *
+ * Es la misma disciplina que ya tenia y la que su prueba comprueba. La forma de
+ * romperla seria pedir el contrato dentro del bucle, que es exactamente lo que
+ * `contratosPorIds` existe para evitar.
  *
  * Degradar aqui es lo correcto, al reves que en los controladores: este proceso
  * no autoriza a nadie, solo avisa. Un barrido que no manda un correo es un
@@ -111,7 +129,15 @@ const procesarContratos = async () => {
     try {
         const hoy = hoyEnZonaNegocio();
 
-        const contratos = await Contrato.findAll({ where: { estado: ESTADO_CONTRATO_ACTIVO } });
+        // UNA peticion para todos los contratos activos del sistema. Antes era
+        // una consulta local; ahora la sirve ms-contratos, que es su dueño.
+        //
+        // Si no responde, el `catch` de abajo lo registra y este barrido no
+        // genera nada. Es lo correcto: generar la mitad de las cuentas de cobro
+        // del mes seria peor que no generar ninguna, porque al dia siguiente el
+        // motor no sabria cuales faltan — y con la comprobacion de duplicados
+        // que ya hay, no generar nada hoy se arregla solo mañana.
+        const contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO);
 
         // Un viaje a cada servicio para todos los contratos del barrido, no uno
         // por contrato.
@@ -183,15 +209,19 @@ const procesarPagos = async () => {
         const hoy = hoyEnZonaNegocio();
 
         const cuentasPendientes = await CuentaCobro.findAll({
-            where: { estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_EN_MORA] } },
-            include: [{ model: Contrato }]
+            where: { estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_EN_MORA] } }
         });
+
+        // El `include` que habia aqui cruzaba a otro servicio desde el paso 6d.
+        // Se sustituye por un lote POR IDENTIFICADOR: los contratos de todas las
+        // cuentas del barrido en una peticion, no uno por cuenta.
+        const contratos = await contratosPorIds(
+            cuentasPendientes.map((cuenta) => cuenta.id_contrato)
+        );
 
         // Igual que arriba: se componen las partes de todos los contratos
         // implicados de una vez, no uno por uno dentro del bucle.
-        const contratosConPartes = await adjuntarPartes(
-            cuentasPendientes.map((cuenta) => cuenta.Contrato).filter(Boolean)
-        );
+        const contratosConPartes = await adjuntarPartes([...contratos.values()]);
         const porContrato = new Map(contratosConPartes.map((c) => [c.id_contrato, c]));
 
         for (const cuenta of cuentasPendientes) {

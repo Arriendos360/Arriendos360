@@ -3,13 +3,19 @@ const PDFDocument = require('pdfkit');
 const { TIPOS_TRANSACCION } = require('arriendos360-contracts');
 
 const {
+    adjuntarContratoACuentas,
+    adjuntarContratoATransacciones,
     adjuntarInmueble,
-    adjuntarInmuebleACuentas,
-    adjuntarInmuebleATransacciones,
     adjuntarInquilino
 } = require('../clientes/composicion');
-const { idsDePropietario, porId: inmueblePorId, propioDe } = require('../clientes/inmuebles');
-const { Contrato, CuentaCobro, Transaccion } = require('../models');
+const {
+    contratosDePropietario,
+    idsDondeEsParte,
+    parteDe,
+    porId: contratoPorId,
+    propioDe: contratoPropioDe
+} = require('../clientes/contratos');
+const { CuentaCobro, Transaccion } = require('../models');
 const {
     ESTADO_CUENTA_EN_MORA,
     ESTADO_CUENTA_PAGADA,
@@ -24,7 +30,7 @@ const {
     hoyEnZonaNegocio,
     periodoQueEmpiezaEn,
     soloFecha
-} = require('../models/fechasContrato');
+} = require('arriendos360-shared');
 const { esUuid } = require('../models/uuid');
 const { periodoAFacturar } = require('../services/financialEngine');
 const {
@@ -59,77 +65,82 @@ const { generarPDFComprobante } = require('../services/pdfService');
  * 3. Hay anulación. Anular no borra: cambia el `estado` de la transacción, y el
  *    saldo se corrige solo porque la suma deja de contarla. Ver `docs/adr/0016`.
  *
- * ── LO QUE NO CAMBIÓ ─────────────────────────────────────────────────────────
+ * ── QUÉ CAMBIÓ EN EL PASO 6d ─────────────────────────────────────────────────
  *
- * La visibilidad se decide por la pertenencia real y no por el rol declarado: se
- * ve una cuenta si eres el dueño del inmueble O el inquilino del contrato. Para
- * usuarios de un solo rol el resultado no cambia; para quien es las dos cosas a
- * la vez, no se pierde la mitad de sus datos.
+ * CLAUDE.md tenía anotado como decisión abierta el salto Financiero -> Contratos:
+ * la visibilidad se decidía con un `Op.or` sobre columnas alcanzadas por un
+ * `include`, es decir, un JOIN que cruzaba dos bounded contexts. Se resolvió al
+ * irse `contratos`, porque dejó de ser posible.
  *
- * Y esa disyunción sigue resolviéndose como la dejó el paso 4: se pregunta
- * primero a ms-inmuebles qué inmuebles son de quien pregunta, y esa lista entra
- * como filtro sobre `Contrato.id_inmueble`, que sigue siendo local.
+ * LA DISYUNCIÓN NO CAMBIA: se ve una cuenta si eres el dueño del inmueble O el
+ * inquilino del contrato. Lo que cambia es quién la evalúa. El paso 4 la resolvía
+ * en dos pasos desde aquí —pedir los inmuebles del propietario y filtrar por esa
+ * lista—; ahora la resuelve ms-contratos entera y de una vez, porque es quien
+ * tiene la mitad barata (`id_inquilino` es columna suya) y quien puede pedir la
+ * cara (`id_propietario` está en ms-inmuebles).
  *
- * El salto Financiero -> Contratos SIGUE siendo un `include`: las dos tablas
- * viven todavía en el gateway. Se va en el paso 6d, y entonces esto será un
- * salto más de composición.
+ * Aquí llega ya resuelta, como una lista de identificadores de contrato que
+ * entra en un `IN` contra la base local. **Un salto de red donde antes había
+ * dos**, y la regla escrita una vez en vez de tres.
+ *
+ * ── EL ORDEN DE LAS DOS COMPROBACIONES IMPORTA ───────────────────────────────
+ *
+ * En los endpoints que escriben, la pertenencia se comprueba ANTES de tocar
+ * nada, y el fallo de red se propaga: nunca se degrada a 403. Decirle a alguien
+ * «no tienes permisos» cuando en realidad no se ha podido comprobar es la peor
+ * de las respuestas posibles, y es la política que `clientes/contratos.js`
+ * documenta para todo lo que autoriza.
  */
-
-/** 502 con el formato de error del proyecto. */
-const responderServicioCaido = (res, error, accion) => {
-    console.error(`Error al ${accion}:`, error.message);
-    return res.status(502).json({ mensaje: 'No se pudo contactar el servicio de inmuebles' });
-};
-
-/** Una cuenta es visible para el dueño del inmueble O para el inquilino del contrato. */
-const esParteDeLaCuenta = (sub, idsInmuebles) => ({
-    [Op.or]: [
-        { '$Contrato.id_inmueble$': { [Op.in]: idsInmuebles } },
-        { '$Contrato.id_inquilino$': sub }
-    ]
-});
-
-const esParteDeLaTransaccion = (sub, idsInmuebles) => ({
-    [Op.or]: [
-        { '$CuentaCobro.Contrato.id_inmueble$': { [Op.in]: idsInmuebles } },
-        { '$CuentaCobro.Contrato.id_inquilino$': sub }
-    ]
-});
 
 /**
- * Contrato como INNER JOIN: sin él no hay a quién autorizar.
+ * 502 con el formato de error del proyecto.
  *
- * No arrastra el inmueble. Lo que hace falta de él —`id_propietario`— se
- * resuelve con la lista de identificadores, y lo que necesitan los PDF se
- * compone aparte.
+ * El mensaje nombra a Contratos y no a Inmuebles desde el paso 6d: es el
+ * servicio con el que este controlador habla para autorizar, y el que responde
+ * cuando la pertenencia no se puede comprobar.
  */
-const contratoRequerido = { model: Contrato, required: true };
-
-/** ¿Es este usuario parte del contrato al que pertenece la cuenta de cobro? */
-const puedeVerCuenta = (cuenta, sub, idsInmuebles) => {
-    const contrato = cuenta.Contrato;
-    if (!contrato) {
-        return false;
-    }
-
-    return idsInmuebles.includes(contrato.id_inmueble) || contrato.id_inquilino === sub;
+const responderServicioCaido = (res, error, accion) => {
+    console.error(`Error al ${accion}:`, error.message);
+    return res.status(502).json({ mensaje: 'No se pudo contactar el servicio de contratos' });
 };
+
+/**
+ * ¿Este error viene de no poder hablar con ms-contratos?
+ *
+ * Existe porque `crearCuentaCobro` tiene un solo `try` que cubre la
+ * comprobación de pertenencia y la escritura, y las dos fallan distinto: una es
+ * la red y la otra la base. Distinguirlas es lo que separa un 502 honesto de un
+ * 500 con el mensaje interno dentro.
+ */
+const esFalloDeContratos = (error) =>
+    typeof error.message === 'string' && error.message.includes('ms-contratos');
+
+/**
+ * Lo que sustituye al `Op.or` sobre columnas del `include`.
+ *
+ * `misContratos` es la lista que devuelve ms-contratos para el usuario, ya con
+ * las dos ramas de la disyunción aplicadas. Aquí sólo se filtra por ella.
+ */
+const deMisContratos = (misContratos) => ({
+    id_contrato: { [Op.in]: misContratos }
+});
+
+/** ¿Es esta cuenta de cobro de uno de mis contratos? */
+const puedeVerCuenta = (cuenta, misContratos) => misContratos.includes(cuenta.id_contrato);
 
 // Obtener todas las cuentas de cobro en las que el usuario es parte
 const obtenerTodos = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        const mios = await idsDePropietario(sub);
+        // UNA petición: la disyunción de pertenencia ya viene resuelta.
+        const misContratos = await idsDondeEsParte(sub);
 
-        const cuentas = await CuentaCobro.findAll({
-            where: esParteDeLaCuenta(sub, mios),
-            include: [contratoRequerido]
-        });
+        const cuentas = await CuentaCobro.findAll({ where: deMisContratos(misContratos) });
 
-        // Dos composiciones, cada una con un viaje: el inmueble sale de
-        // ms-inmuebles y el saldo de una consulta agrupada local.
-        res.json(await conSaldos(await adjuntarInmuebleACuentas(cuentas)));
+        // Tres composiciones, cada una con un lote: el contrato y su inmueble
+        // salen de dos servicios, y el saldo de una consulta agrupada local.
+        res.json(await conSaldos(await adjuntarContratoACuentas(cuentas)));
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener cuentas de cobro');
     }
@@ -141,27 +152,23 @@ const obtenerPorContrato = async (req, res) => {
         const { id_contrato } = req.params;
         const { sub } = req.usuario;
 
-        const contrato = esUuid(id_contrato)
-            ? await Contrato.findOne({ where: { id_contrato } })
-            : null;
+        // La disyunción entera en una llamada: ms-contratos ya sabe si este
+        // usuario es el dueño del inmueble o el inquilino.
+        const contrato = esUuid(id_contrato) ? await parteDe(id_contrato, sub) : null;
 
-        if (!contrato) return res.status(404).json({ mensaje: 'Contrato no encontrado' });
-
-        const inmueble = await inmueblePorId(contrato.id_inmueble);
-        const esDuenio = Boolean(inmueble) && inmueble.id_propietario === sub;
-        const esInquilino = contrato.id_inquilino === sub;
-
-        if (!esDuenio && !esInquilino) {
-            return res.status(403).json({ mensaje: 'No tienes permisos para ver los pagos de este contrato' });
+        if (!contrato) {
+            return res
+                .status(403)
+                .json({ mensaje: 'No tienes permisos para ver los pagos de este contrato' });
         }
 
         const cuentas = await CuentaCobro.findAll({
             where: { id_contrato },
             order: [['inicio', 'ASC']]
         });
-        res.json(await conSaldos(await adjuntarInmuebleACuentas(cuentas)));
+        res.json(await conSaldos(await adjuntarContratoACuentas(cuentas)));
     } catch (error) {
-        res.status(500).json({ mensaje: 'Error al obtener pagos', error: error.message });
+        return responderServicioCaido(res, error, 'obtener pagos del contrato');
     }
 };
 
@@ -181,15 +188,13 @@ const crearCuentaCobro = async (req, res) => {
         const { sub } = req.usuario;
         const { id_contrato, valor, detalle } = req.body;
 
-        const contrato = esUuid(id_contrato)
-            ? await Contrato.findOne({ where: { id_contrato } })
-            : null;
-
         // Cobrar es exclusivo del dueño del inmueble, así que aquí no basta con
-        // ser parte: hay que ser el propietario.
-        const inmueble = contrato ? await propioDe(contrato.id_inmueble, sub) : null;
+        // ser parte: hay que ser el propietario. Se le pregunta a ms-contratos,
+        // que resuelve las dos mitades —el contrato y de quién es su inmueble—
+        // en un solo salto.
+        const contrato = esUuid(id_contrato) ? await contratoPropioDe(id_contrato, sub) : null;
 
-        if (!contrato || !inmueble) {
+        if (!contrato) {
             return res.status(403).json({ mensaje: 'No tienes permisos sobre este contrato' });
         }
 
@@ -222,6 +227,11 @@ const crearCuentaCobro = async (req, res) => {
             cuenta_cobro: await conSaldo(cuenta)
         });
     } catch (error) {
+        // Un fallo de ms-contratos no es un 500 nuestro: no se pudo comprobar la
+        // pertenencia, y eso es 502.
+        if (esFalloDeContratos(error)) {
+            return responderServicioCaido(res, error, 'verificar el contrato');
+        }
         res.status(500).json({ mensaje: 'Error al crear la cuenta de cobro', error: error.message });
     }
 };
@@ -250,13 +260,20 @@ const registrarPago = async (req, res) => {
         });
     }
 
+    // La pertenencia se resuelve ANTES de abrir la transacción: es una llamada
+    // de red, y tenerla dentro alargaría el bloqueo de la fila por el tiempo que
+    // tarde otro servicio en contestar.
+    let misContratos;
+    try {
+        misContratos = await idsDondeEsParte(sub);
+    } catch (error) {
+        return responderServicioCaido(res, error, 'verificar el contrato');
+    }
+
     const t = await CuentaCobro.sequelize.transaction();
     try {
         const cuenta = esUuid(id_cuenta_cobro)
-            ? await CuentaCobro.findByPk(id_cuenta_cobro, {
-                include: [contratoRequerido],
-                transaction: t
-            })
+            ? await CuentaCobro.findByPk(id_cuenta_cobro, { transaction: t })
             : null;
 
         if (!cuenta) {
@@ -280,8 +297,7 @@ const registrarPago = async (req, res) => {
             return res.status(400).json({ mensaje: 'Monto inválido o superior al saldo' });
         }
 
-        const mios = await idsDePropietario(sub);
-        if (!puedeVerCuenta(cuenta, sub, mios)) {
+        if (!puedeVerCuenta(cuenta, misContratos)) {
             await t.rollback();
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
@@ -349,7 +365,7 @@ const anularTransaccion = async (req, res) => {
     try {
         const transaccion = esUuid(id_transaccion)
             ? await Transaccion.findByPk(id_transaccion, {
-                include: [{ model: CuentaCobro, include: [contratoRequerido] }],
+                include: [{ model: CuentaCobro }],
                 transaction: t
             })
             : null;
@@ -368,9 +384,18 @@ const anularTransaccion = async (req, res) => {
             lock: t.LOCK.UPDATE
         });
 
-        const inmueble = await propioDe(cuenta.Contrato.id_inmueble, sub);
+        // Ser DUEÑO, no sólo parte. Un salto a ms-contratos, que comprueba de
+        // paso de quién es el inmueble: el gateway ya no necesita saber que un
+        // contrato tiene uno.
+        let propio;
+        try {
+            propio = await contratoPropioDe(cuenta.id_contrato, sub);
+        } catch (error) {
+            await t.rollback();
+            return responderServicioCaido(res, error, 'verificar el contrato');
+        }
 
-        if (!inmueble) {
+        if (!propio) {
             await t.rollback();
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
@@ -416,17 +441,20 @@ const obtenerHistorialGlobal = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        const mios = await idsDePropietario(sub);
+        const misContratos = await idsDondeEsParte(sub);
 
         const transacciones = await Transaccion.findAll({
-            where: esParteDeLaTransaccion(sub, mios),
-            include: [{ model: CuentaCobro, required: true, include: [contratoRequerido] }],
+            where: { '$CuentaCobro.id_contrato$': { [Op.in]: misContratos } },
+            include: [{ model: CuentaCobro, required: true }],
             order: [['fecha_pago', 'DESC']]
         });
 
-        // Un nivel más abajo: `transaccion.CuentaCobro.Contrato.Inmueble`.
-        const conInmueble = await adjuntarInmuebleATransacciones(transacciones);
-        res.json(await conSaldoAnidado(conInmueble, (fila) => fila.CuentaCobro));
+        // El `include` que queda NO cruza frontera: `cuentas_cobro` y
+        // `transacciones` son las dos tablas de Financiero y siguen aquí hasta
+        // el paso 6e. Lo que sí se compone es el contrato y su inmueble, un
+        // nivel más abajo: `transaccion.CuentaCobro.Contrato.Inmueble`.
+        const conContrato = await adjuntarContratoATransacciones(transacciones);
+        res.json(await conSaldoAnidado(conContrato, (fila) => fila.CuentaCobro));
     } catch (error) { return responderServicioCaido(res, error, 'obtener historial global'); }
 };
 
@@ -517,21 +545,24 @@ const generarComprobante = async (req, res) => {
 
         const transaccion = esUuid(id_transaccion)
             ? await Transaccion.findByPk(id_transaccion, {
-                include: [{ model: CuentaCobro, include: [{ model: Contrato }] }]
+                include: [{ model: CuentaCobro }]
             })
             : null;
 
         if (!transaccion) return res.status(404).json({ mensaje: 'No encontrado' });
 
-        const mios = await idsDePropietario(sub);
+        const misContratos = await idsDondeEsParte(sub);
 
-        if (!transaccion.CuentaCobro || !puedeVerCuenta(transaccion.CuentaCobro, sub, mios)) {
+        if (!transaccion.CuentaCobro || !puedeVerCuenta(transaccion.CuentaCobro, misContratos)) {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
         const cuenta = transaccion.CuentaCobro;
-        const contrato = await adjuntarInquilino(await adjuntarInmueble(cuenta.Contrato));
-        const arrendatario = contrato.Inquilino;
+        // El contrato ya no viene del `include`: se pide, y sobre él se componen
+        // el inmueble y el arrendatario que imprime el PDF.
+        const delContrato = await contratoPorId(cuenta.id_contrato);
+        const contrato = await adjuntarInquilino(await adjuntarInmueble(delContrato));
+        const arrendatario = contrato ? contrato.Inquilino : null;
         const esTotal = parseFloat(transaccion.saldo_restante_momento) === 0;
         const periodo = fmtPeriodo(cuenta.inicio);
 
@@ -542,7 +573,7 @@ const generarComprobante = async (req, res) => {
         responderPdf(res, `Comprobante_${id_transaccion}.pdf`, {
             ...datosEmpresa,
             ...datosArrendatario(arrendatario),
-            ...datosInmueble(contrato.Inmueble),
+            ...datosInmueble(contrato && contrato.Inmueble),
             numero_comprobante: `TRX-${transaccion.id_transaccion}`,
             fecha_expedicion: new Date(transaccion.fecha_pago).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }),
             estado_pago: estadoImpreso,
@@ -583,15 +614,13 @@ const generarRecibo = async (req, res) => {
         const { id } = req.params;
         const { sub } = req.usuario;
 
-        const cuenta = esUuid(id)
-            ? await CuentaCobro.findByPk(id, { include: [{ model: Contrato }] })
-            : null;
+        const cuenta = esUuid(id) ? await CuentaCobro.findByPk(id) : null;
 
         if (!cuenta) return res.status(404).json({ mensaje: 'No encontrado' });
 
-        const mios = await idsDePropietario(sub);
+        const misContratos = await idsDondeEsParte(sub);
 
-        if (!puedeVerCuenta(cuenta, sub, mios)) {
+        if (!puedeVerCuenta(cuenta, misContratos)) {
             return res.status(403).json({ mensaje: 'No autorizado' });
         }
 
@@ -605,15 +634,16 @@ const generarRecibo = async (req, res) => {
             order: [['fecha_pago', 'DESC']]
         });
 
-        const contrato = await adjuntarInquilino(await adjuntarInmueble(cuenta.Contrato));
-        const arrendatario = contrato.Inquilino;
+        const delContrato = await contratoPorId(cuenta.id_contrato);
+        const contrato = await adjuntarInquilino(await adjuntarInmueble(delContrato));
+        const arrendatario = contrato ? contrato.Inquilino : null;
         const esTotal = saldo === 0;
         const periodo = fmtPeriodo(cuenta.inicio);
 
         responderPdf(res, `Recibo_Mensual_${id}.pdf`, {
             ...datosEmpresa,
             ...datosArrendatario(arrendatario),
-            ...datosInmueble(contrato.Inmueble),
+            ...datosInmueble(contrato && contrato.Inmueble),
             numero_comprobante: `REC-${cuenta.id_cuenta_cobro}`,
             fecha_expedicion: new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }),
             estado_pago: ETIQUETA_ESTADO[cuenta.estado],
@@ -636,19 +666,16 @@ const obtenerPendientes = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        const mios = await idsDePropietario(sub);
+        const misContratos = await idsDondeEsParte(sub);
 
         const cuentas = await CuentaCobro.findAll({
             where: {
-                [Op.and]: [
-                    { estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_PARCIAL] } },
-                    esParteDeLaCuenta(sub, mios)
-                ]
+                estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_PARCIAL] },
+                ...deMisContratos(misContratos)
             },
-            include: [contratoRequerido],
             order: [['inicio', 'ASC']]
         });
-        res.json(await conSaldos(await adjuntarInmuebleACuentas(cuentas)));
+        res.json(await conSaldos(await adjuntarContratoACuentas(cuentas)));
     } catch (error) { return responderServicioCaido(res, error, 'obtener pendientes'); }
 };
 
@@ -656,18 +683,17 @@ const verificarMora = async (req, res) => {
     try {
         const { sub } = req.usuario;
         const hoy = hoyEnZonaNegocio();
-        // Solo sobre los propios: verificar la mora escribe, y escribir sobre la
-        // cuenta de otro sería peor que verla.
-        const mios = await idsDePropietario(sub);
+        // Solo sobre los PROPIOS, y aquí propio significa dueño del inmueble, no
+        // parte: verificar la mora escribe, y escribir sobre la cuenta de otro
+        // sería peor que verla. Un inquilino no puede marcarse a sí mismo.
+        const mios = (await contratosDePropietario(sub)).map((c) => c.id_contrato);
 
         const vencidas = await CuentaCobro.findAll({
             where: {
                 estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_PARCIAL] },
-                inicio: { [Op.lt]: hoy }
-            },
-            include: [
-                { model: Contrato, required: true, where: { id_inmueble: { [Op.in]: mios } } }
-            ]
+                inicio: { [Op.lt]: hoy },
+                id_contrato: { [Op.in]: mios }
+            }
         });
         for (const cuenta of vencidas) {
             await cuenta.update({ estado: ESTADO_CUENTA_EN_MORA }, { usuarioAuditor: sub });
@@ -681,13 +707,13 @@ const obtenerTransacciones = async (req, res) => {
     try {
         const { id } = req.params;
         const { sub } = req.usuario;
-        const cuenta = esUuid(id)
-            ? await CuentaCobro.findByPk(id, { include: [contratoRequerido] })
-            : null;
+        const cuenta = esUuid(id) ? await CuentaCobro.findByPk(id) : null;
         if (!cuenta) return res.status(404).json({ mensaje: 'No encontrado' });
 
-        const mios = await idsDePropietario(sub);
-        if (!puedeVerCuenta(cuenta, sub, mios)) return res.status(403).json({ mensaje: 'No autorizado' });
+        const misContratos = await idsDondeEsParte(sub);
+        if (!puedeVerCuenta(cuenta, misContratos)) {
+            return res.status(403).json({ mensaje: 'No autorizado' });
+        }
 
         // Las anuladas SE DEVUELVEN. Dejarlas fuera sería esconder que un
         // movimiento se registró y se corrigió, que es justo lo que el estado

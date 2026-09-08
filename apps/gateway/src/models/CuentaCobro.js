@@ -5,7 +5,6 @@ const { sequelize } = require('../config/database');
 const { columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } = require('./auditoria');
 const { ESTADO_CUENTA_PENDIENTE } = require('./constantes');
 const { claveUuid, referenciaUuid } = require('./uuid');
-const Contrato = require('./Contrato');
 
 /**
  * Cuentas de cobro. Antes `Pago`.
@@ -31,9 +30,11 @@ const Contrato = require('./Contrato');
  * Consecuencia visible, y es la buena: anular una transacción no tiene que
  * «devolver» nada. El saldo se corrige solo porque la suma deja de contarla.
  *
- * `id_contrato` es una referencia lógica: cruza a ms-contratos y por eso no
- * lleva clave foránea (regla dura 1). La asociación de Sequelize sí existe
- * todavía, porque las dos tablas siguen en el gateway; se va en el paso 6d.
+ * `id_contrato` es una referencia lógica pura: cruza a ms-contratos y por eso no
+ * lleva clave foránea (regla dura 1). Desde el paso 6d TAMPOCO lleva asociación
+ * de Sequelize — el contrato dejó de estar en esta base, así que no hay
+ * `include` que valga y la regla dura 2 lo prohibiría igualmente. Lo que hacía
+ * falta de él se compone por HTTP (`clientes/contratos.js`).
  */
 const CuentaCobro = sequelize.define('CuentaCobro', {
     id_cuenta_cobro: claveUuid(),
@@ -55,11 +56,13 @@ const CuentaCobro = sequelize.define('CuentaCobro', {
      *
      * Sustituye a `mes_correspondiente`, que era un solo instante y obligaba a
      * adivinar dónde acababa el ciclo. `DATEONLY` por lo mismo que
-     * `Contrato.fecha_inicio_corte`: son fechas de calendario y un `TIMESTAMPTZ`
+     * `contratos.fecha_inicio_corte`: son fechas de calendario y un `TIMESTAMPTZ`
      * leído con `.getDate()` las movería un día en Bogotá.
      *
-     * La regla que las relaciona está en `models/fechasContrato.js`, en
-     * `periodoDeCorte()`, y no se calcula en ningún otro sitio.
+     * La regla que las relaciona está en `packages/shared`, en `periodoDeCorte()`,
+     * y no se calcula en ningún otro sitio. Subió al paquete compartido en el
+     * paso 6d, cuando Contratos y Financiero dejaron de vivir en el mismo
+     * proceso: duplicar la regla del día 31 habría sido tener dos calendarios.
      */
     inicio: {
         type: DataTypes.DATEONLY,
@@ -102,8 +105,10 @@ const CuentaCobro = sequelize.define('CuentaCobro', {
 
 registrarHooksAuditoria(CuentaCobro);
 
-// Referencia lógica: `id_contrato` cruzará de ms-financiero a ms-contratos.
-CuentaCobro.belongsTo(Contrato, { foreignKey: 'id_contrato', constraints: false });
-Contrato.hasMany(CuentaCobro, { foreignKey: 'id_contrato', constraints: false });
+// AQUI HABIA UN `belongsTo(Contrato)`. Se fue con el paso 6d: `contratos` vive
+// ahora en otro esquema y en otro servicio, asi que el `include` que esa
+// asociacion permitia ya no es posible — ni deberia serlo, porque cruzaba la
+// frontera de un bounded context (regla dura 2). Todo lo que dependia de el se
+// resuelve componiendo en el controlador.
 
 module.exports = CuentaCobro;
