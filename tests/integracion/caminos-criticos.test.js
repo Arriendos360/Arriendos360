@@ -22,6 +22,10 @@
  * se puede hacer por HTTP: qué lleva dentro el evento que emite el gateway. El
  * sobre no aparece en ninguna respuesta —viaja del gateway a ms-inmuebles por
  * la red interna— así que la única forma de verlo es leer `eventos_salida`.
+ *
+ * DESDE EL PASO 6d ESA TABLA ES DE ms-contratos, y eso es parte de lo que esta
+ * consulta comprueba: si el evento apareciera en `public`, el productor seguiría
+ * siendo el gateway y la extracción no estaría hecha.
  * Se usa `pg`, que ya es dependencia del gateway: no entra nada nuevo.
  */
 
@@ -106,7 +110,7 @@ const eventoDe = async (idContrato, tipo) => {
     try {
         const { rows } = await cliente.query(
             `SELECT tipo, version, payload, estado
-               FROM public.eventos_salida
+               FROM contratos.eventos_salida
               WHERE payload->>'id_contrato' = $1 AND tipo = $2`,
             [idContrato, tipo]
         );
@@ -238,10 +242,11 @@ describe('Caminos críticos', () => {
     it('firmar el contrato dejó el inmueble arrendado, sin llamada síncrona', async () => {
         // Es LA prueba que ningún doble puede dar, y desde el paso 5 prueba algo
         // distinto de lo que probaba antes. Ya no hay una llamada HTTP del
-        // gateway a ms-inmuebles: el gateway guardó el contrato y su evento en
-        // una sola transacción, un publicador aparte lo entregó y ms-inmuebles
-        // dedujo por su cuenta qué significaba. Lo que se verifica es que esa
-        // cadena entera funciona contra los servicios reales.
+        // gateway a ms-inmuebles: ms-contratos guardó el contrato y su evento en
+        // una sola transacción, su publicador lo entregó y ms-inmuebles dedujo
+        // por su cuenta qué significaba. Lo que se verifica es que esa cadena
+        // entera funciona contra los servicios reales, y desde el paso 6d
+        // atraviesa TRES procesos en vez de dos.
         //
         // Se ESPERA a que converja porque el sistema pasó a ser consistente en
         // el tiempo para este dato. La ventana esperada es el intervalo del
@@ -266,6 +271,50 @@ describe('Caminos críticos', () => {
         // describe un hecho del dominio del emisor y no la petición de alguien a
         // este servicio. Quién firmó está en el contrato.
         assert.equal(detalle.datos.actualizado_por, USUARIO_SISTEMA);
+    });
+
+    it('el evento salio de ms-contratos, no del gateway', async () => {
+        // La comprobacion de que la extraccion del paso 6d esta hecha de verdad
+        // y no a medias. El sobre tiene que estar en la bandeja de ms-contratos
+        // —`contratos.eventos_salida`— y la del gateway ya no debe ni existir.
+        //
+        // Es lo que un doble no puede dar: en las suites del gateway el
+        // productor es un doble en memoria, asi que ahi «el evento salio del
+        // sitio correcto» no significa nada.
+        const evento = await eventoDe(idContrato, 'ContratoFormalizado');
+
+        assert.ok(evento, 'el evento deberia estar en contratos.eventos_salida');
+        assert.equal(evento.estado, 'entregado');
+
+        // Y la bandeja del gateway se retiro con `database/dominio/007`.
+        const cliente = new Client({
+            host: process.env.DB_HOST_TEST_INTEGRACION || 'localhost',
+            port: Number(process.env.DB_PORT || 5432),
+            database: process.env.DB_NAME || 'arriendos360_db',
+            user: process.env.DB_USER || 'postgres',
+            password: process.env.DB_PASSWORD
+        });
+
+        await cliente.connect();
+        try {
+            const { rows } = await cliente.query(
+                "SELECT to_regclass('public.eventos_salida') AS tabla"
+            );
+            assert.equal(
+                rows[0].tabla,
+                null,
+                'public.eventos_salida deberia haberse retirado: el gateway ya no produce'
+            );
+
+            // Y tampoco le quedan contratos ni anexos.
+            const { rows: restos } = await cliente.query(
+                "SELECT to_regclass('public.contratos') AS c, to_regclass('public.anexos') AS a"
+            );
+            assert.equal(restos[0].c, null, 'public.contratos deberia haberse retirado');
+            assert.equal(restos[0].a, null, 'public.anexos deberia haberse retirado');
+        } finally {
+            await cliente.end();
+        }
     });
 
     it('el evento lleva la fecha_inicio_corte de la COLUMNA, no derivada', async () => {

@@ -27,7 +27,7 @@ const crypto = require('crypto');
 
 const { sequelize } = require('../src/config/database');
 const { recrearEsquema } = require('../src/database/migraciones');
-const { Contrato, CuentaCobro, Transaccion } = require('../src/models');
+const { CuentaCobro, Transaccion } = require('../src/models');
 const { USUARIO_SISTEMA } = require('../src/models/constantes');
 
 /** Dos personas distintas. La distinción ES la prueba. */
@@ -48,25 +48,17 @@ const desdeLaBase = (modelo, id) => modelo.findByPk(id);
 /**
  * Un caso por modelo con auditoría.
  *
- * `contratos` y `cuentas_cobro` son las dos tablas con peso probatorio —un
- * contrato y su cobro son lo que se enseña si alguien discute— y `transacciones`
- * va con ellas porque comparte el mismo hook: dejarla fuera sería volver a tener
- * una tabla sin comprobar, que es como empezó todo esto.
+ * `cuentas_cobro` y `transacciones` son las dos tablas que le quedan al gateway,
+ * y las dos tienen peso probatorio: un cobro y el dinero que entró contra él son
+ * lo que se enseña si alguien discute.
+ *
+ * `contratos` YA NO ESTÁ AQUÍ. Se fue con ms-contratos en el paso 6d, y con ella
+ * su caso: vive en `services/ms-contratos/tests/auditoria.test.ts`, contra el
+ * mismo hook y con las mismas seis afirmaciones. Lo que no se podía era dejar de
+ * comprobarla — el defecto que originó esta suite afectaba a las tres tablas a
+ * la vez, y una de ellas ahora está en otro proceso.
  */
 const casos = [
-    {
-        nombre: 'Contrato',
-        modelo: Contrato,
-        clave: 'id_contrato',
-        datos: async () => ({
-            id_inmueble: crypto.randomUUID(),
-            id_inquilino: crypto.randomUUID(),
-            inicio: '2026-01-01',
-            fin: '2026-12-31',
-            canon: 1500000
-        }),
-        cambio: { canon: 1600000 }
-    },
     {
         nombre: 'CuentaCobro',
         modelo: CuentaCobro,
@@ -191,22 +183,26 @@ describe('Un `creado_por` explícito gana en el alta', () => {
         // Lo necesita el autorregistro: ahí el autor es el propio usuario que se
         // está creando, y no hay `usuarioAuditor` que valga. La regla vivía en un
         // comentario y ahora está comprobada.
+        //
+        // Se comprueba sobre `CuentaCobro` porque el caso que había —un
+        // contrato— se fue con ms-contratos en el paso 6d. Lo que se ejercita es
+        // el hook, que es el mismo para las dos tablas.
         const propio = crypto.randomUUID();
 
-        const contrato = await Contrato.create(
+        const cuenta = await CuentaCobro.create(
             {
-                id_inmueble: crypto.randomUUID(),
-                id_inquilino: crypto.randomUUID(),
+                id_contrato: crypto.randomUUID(),
+                detalle: 'Canon de arrendamiento del 2026-01-01 al 2026-01-31',
+                valor: 1000,
                 inicio: '2026-01-01',
-                fin: '2026-12-31',
-                canon: 1000,
+                fin: '2026-01-31',
                 creado_por: propio
             },
             { usuarioAuditor: CREADOR }
         );
 
-        const guardado = await desdeLaBase(Contrato, contrato.id_contrato);
-        expect(guardado.creado_por).toBe(propio);
-        expect(guardado.actualizado_por).toBe(propio);
+        const guardada = await desdeLaBase(CuentaCobro, cuenta.id_cuenta_cobro);
+        expect(guardada.creado_por).toBe(propio);
+        expect(guardada.actualizado_por).toBe(propio);
     });
 });

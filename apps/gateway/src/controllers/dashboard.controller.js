@@ -5,32 +5,30 @@
  * Todas sus rutas exigen PROPIETARIO en `dashboard.routes.js`, así que aquí el
  * `sub` del token es siempre el del dueño.
  *
- * ESTE ES EL CONTROLADOR QUE MÁS CAMBIA al extraer Inmuebles, porque era el que
- * más JOIN anidados tenía: cada métrica bajaba de Pago a Contrato y de ahí a
- * Inmueble solo para llegar a `id_propietario`.
+ * ── ES EL CONTROLADOR QUE MÁS CAMBIA EN CADA EXTRACCIÓN ─────────────────────
  *
- * Ahora ese dato se pide UNA VEZ por petición —la lista de inmuebles del
- * propietario— y de ella salen las dos cosas que hacían falta: los
- * identificadores con los que filtrar contratos y pagos, y el recuento por
- * estado, que antes eran dos `COUNT` contra la tabla de inmuebles.
+ * Y no por casualidad: es el único que toca los tres contextos a la vez, así que
+ * cada servicio que sale le quita un `include`. El paso 4 le quitó el de
+ * Inmuebles; el 6d le quita el de Contratos, que era el que quedaba.
  *
- * Pedirla una vez y no una por métrica no es microoptimización: `obtenerResumen`
+ * Lo que sostiene el diseño después de los dos es la misma regla: **cada dato
+ * externo se pide UNA VEZ por petición, no una por métrica.** `obtenerResumen`
  * calcula seis cosas, y una llamada de red por cada una convertiría el dashboard
- * en la pantalla más lenta de la aplicación.
+ * en la pantalla más lenta de la aplicación. Ahora son dos llamadas —los
+ * inmuebles del propietario y sus contratos— y de ellas salen las seis.
  *
- * EN EL PASO 6c cambia de dónde salen las cifras de dinero. `Pago` es ahora
- * `CuentaCobro`, `monto_total` es `valor`, los estados son un catálogo y no
- * enteros, y —lo que más se nota aquí— `saldo_pendiente` ya no es una columna
- * que se pueda sumar en SQL: se deriva de las transacciones confirmadas. La
- * mora, que es la única métrica que lo necesita, lo pide a `conSaldos()`, que
- * resuelve la lista entera con una consulta agrupada.
+ * ── UN FALLO NO SE DEGRADA A CEROS ──────────────────────────────────────────
+ *
+ * Vale para los dos servicios. Un dashboard que dice «0 contratos activos, $0 de
+ * ingresos» cuando en realidad no pudo preguntar es peor que un error: parece
+ * una respuesta. Por eso las dos llamadas propagan y aquí se traducen en 502.
  */
 const { Sequelize } = require('sequelize');
 
+const { contratosDePropietario } = require('../clientes/contratos');
 const { dePropietario, ESTADO_ARRENDADO, ESTADO_DISPONIBLE } = require('../clientes/inmuebles');
 const { adjuntarInmuebles } = require('../clientes/composicion');
 const CuentaCobro = require('../models/CuentaCobro');
-const Contrato = require('../models/Contrato');
 const {
     ESTADO_CONTRATO_ACTIVO,
     ESTADO_CONTRATO_FINALIZADO,
@@ -38,42 +36,40 @@ const {
     ESTADO_CUENTA_PAGADA,
     ESTADO_CUENTA_PENDIENTE
 } = require('../models/constantes');
-const { hoyEnZonaNegocio } = require('../models/fechasContrato');
+const { hoyEnZonaNegocio } = require('arriendos360-shared');
 const { conSaldos } = require('../services/saldos');
 
 /**
  * 502 con el formato de error del proyecto.
  *
- * Un fallo de ms-inmuebles NO se degrada a cifras en cero. Un dashboard que
- * dice «0 contratos activos, $0 de ingresos» cuando en realidad no pudo
- * preguntar es peor que un error: parece una respuesta.
+ * El mensaje nombra el servicio que falló, porque ya son dos y saber cuál
+ * ahorra el rato de mirar los dos logs.
  */
 const responderServicioCaido = (res, error, accion) => {
     console.error(`Error al ${accion}:`, error.message);
-    return res.status(502).json({ mensaje: 'No se pudo contactar el servicio de inmuebles' });
+    const servicio = String(error.message).includes('ms-contratos') ? 'contratos' : 'inmuebles';
+    return res.status(502).json({ mensaje: `No se pudo contactar el servicio de ${servicio}` });
 };
 
-/** Contrato del propietario, como INNER JOIN sobre la lista de sus inmuebles. */
-const contratoDe = (idsInmuebles, extra = {}) => ({
-    model: Contrato,
-    required: true,
-    where: { id_inmueble: idsInmuebles },
-    ...extra
-});
+/** Los identificadores de los contratos del propietario. Una petición. */
+const idsDeContratos = async (sub) =>
+    (await contratosDePropietario(sub)).map((contrato) => contrato.id_contrato);
 
-// Obtener ingresos totales (suma de pagos realizados)
+/** Filtro sobre las cuentas de cobro de esos contratos. */
+const deSusContratos = (idsContratos) => ({ id_contrato: idsContratos });
+
+// Obtener ingresos totales (suma de cuentas de cobro pagadas)
 const obtenerIngresos = async (req, res) => {
     try {
         const { sub } = req.usuario;
-        const mios = (await dePropietario(sub)).map((i) => i.id_inmueble);
+        const mios = await idsDeContratos(sub);
 
         const resultado = await CuentaCobro.findAll({
-            where: { estado: ESTADO_CUENTA_PAGADA },
+            where: { estado: ESTADO_CUENTA_PAGADA, ...deSusContratos(mios) },
             attributes: [
                 [Sequelize.fn('SUM', Sequelize.col('valor')), 'total_ingresos'],
                 [Sequelize.fn('COUNT', Sequelize.col('id_cuenta_cobro')), 'cantidad_pagos']
             ],
-            include: [contratoDe(mios, { attributes: [] })],
             raw: true
         });
 
@@ -91,10 +87,11 @@ const obtenerMora = async (req, res) => {
     try {
         const { sub } = req.usuario;
         const hoy = hoyEnZonaNegocio();
-        const mios = (await dePropietario(sub)).map((i) => i.id_inmueble);
+        const mios = await idsDeContratos(sub);
 
         const enMora = await CuentaCobro.findAll({
             where: {
+                ...deSusContratos(mios),
                 [Sequelize.Op.or]: [
                     {
                         estado: ESTADO_CUENTA_PENDIENTE,
@@ -102,8 +99,7 @@ const obtenerMora = async (req, res) => {
                     },
                     { estado: ESTADO_CUENTA_EN_MORA }
                 ]
-            },
-            include: [contratoDe(mios)]
+            }
         });
 
         // El saldo se deriva para toda la lista de una vez, y el detalle sale de
@@ -129,17 +125,17 @@ const obtenerMora = async (req, res) => {
 const obtenerContratosActivos = async (req, res) => {
     try {
         const { sub } = req.usuario;
-        const mios = (await dePropietario(sub)).map((i) => i.id_inmueble);
 
-        const contratosActivos = await Contrato.findAll({
-            where: { estado: ESTADO_CONTRATO_ACTIVO, id_inmueble: mios }
-        });
+        // Ya no hay `Contrato.findAll`: la lista viene de ms-contratos, que
+        // aplica el filtro de pertenencia y devuelve sólo los de sus inmuebles.
+        const contratos = await contratosDePropietario(sub);
+        const activos = contratos.filter((c) => c.estado === ESTADO_CONTRATO_ACTIVO);
 
         res.json({
-            cantidad_activos: contratosActivos.length,
-            // El detalle sí lleva el inmueble: la tarjeta lo muestra. Se compone
-            // con los datos que ya se pidieron, sin un segundo viaje.
-            contratos: await adjuntarInmuebles(contratosActivos)
+            cantidad_activos: activos.length,
+            // El detalle sí lleva el inmueble: la tarjeta lo muestra. Un lote
+            // para toda la lista, no uno por contrato.
+            contratos: await adjuntarInmuebles(activos)
         });
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener contratos activos');
@@ -151,40 +147,42 @@ const obtenerResumen = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        // UNA sola petición para las seis métricas.
-        const inmuebles = await dePropietario(sub);
-        const mios = inmuebles.map((i) => i.id_inmueble);
+        // DOS peticiones para las seis métricas, y en paralelo porque no
+        // dependen entre sí: los inmuebles del propietario y sus contratos.
+        const [inmuebles, contratos] = await Promise.all([
+            dePropietario(sub),
+            contratosDePropietario(sub)
+        ]);
 
-        const [ingresos, contratosActivos, contratosFinalizados, pagosPendientes] =
-            await Promise.all([
-                CuentaCobro.findAll({
-                    where: { estado: ESTADO_CUENTA_PAGADA },
-                    attributes: [[Sequelize.fn('SUM', Sequelize.col('valor')), 'total']],
-                    include: [contratoDe(mios, { attributes: [] })],
-                    raw: true
-                }),
-                Contrato.count({ where: { estado: ESTADO_CONTRATO_ACTIVO, id_inmueble: mios } }),
-                Contrato.count({ where: { estado: ESTADO_CONTRATO_FINALIZADO, id_inmueble: mios } }),
-                CuentaCobro.count({
-                    where: { estado: ESTADO_CUENTA_PENDIENTE },
-                    include: [contratoDe(mios)]
-                })
-            ]);
+        const idsContratos = contratos.map((c) => c.id_contrato);
 
-        // Los dos `COUNT` contra la tabla de inmuebles se convierten en contar
-        // sobre lo que ya se trajo. Es una lista de decenas de filas, no de
-        // millones: contarla en memoria cuesta menos que un viaje de red.
-        const porEstado = (estado) => inmuebles.filter((i) => i.estado === estado).length;
+        const [ingresos, pagosPendientes] = await Promise.all([
+            CuentaCobro.findAll({
+                where: { estado: ESTADO_CUENTA_PAGADA, ...deSusContratos(idsContratos) },
+                attributes: [[Sequelize.fn('SUM', Sequelize.col('valor')), 'total']],
+                raw: true
+            }),
+            CuentaCobro.count({
+                where: { estado: ESTADO_CUENTA_PENDIENTE, ...deSusContratos(idsContratos) }
+            })
+        ]);
+
+        // Los dos `COUNT` contra la tabla de contratos y los dos contra la de
+        // inmuebles se convierten en contar sobre lo que ya se trajo. Son listas
+        // de decenas de filas, no de millones: contarlas en memoria cuesta menos
+        // que cuatro viajes de red.
+        const inmueblesPorEstado = (estado) => inmuebles.filter((i) => i.estado === estado).length;
+        const contratosPorEstado = (estado) => contratos.filter((c) => c.estado === estado).length;
 
         res.json({
             ingresos_totales: ingresos[0].total || 0,
             contratos: {
-                activos: contratosActivos,
-                finalizados: contratosFinalizados
+                activos: contratosPorEstado(ESTADO_CONTRATO_ACTIVO),
+                finalizados: contratosPorEstado(ESTADO_CONTRATO_FINALIZADO)
             },
             inmuebles: {
-                disponibles: porEstado(ESTADO_DISPONIBLE),
-                arrendados: porEstado(ESTADO_ARRENDADO)
+                disponibles: inmueblesPorEstado(ESTADO_DISPONIBLE),
+                arrendados: inmueblesPorEstado(ESTADO_ARRENDADO)
             },
             pagos_pendientes: pagosPendientes
         });

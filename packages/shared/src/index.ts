@@ -22,7 +22,11 @@
  * - `entrada`: el lado del CONSUMIDOR. Bitacora de procesados e idempotencia.
  * - `entrega`: el TRANSPORTE. Como sale el evento hacia quien escucha.
  *
- * Lo consumen el gateway, ms-identidad y ms-inmuebles.
+ * Y `fechas`, que agrega el paso 6d: la regla del dia 31 y la regla del periodo,
+ * que ms-contratos y Financiero comparten desde que dejaron de vivir en el mismo
+ * proceso.
+ *
+ * Lo consumen el gateway, ms-identidad, ms-inmuebles y ms-contratos.
  */
 
 export {
@@ -162,3 +166,31 @@ export type {
 
 export { RUTA_EVENTOS, TIMEOUT_ENTREGA_MS, crearEntregaHttp } from './entrega';
 export type { OpcionesEntregaHttp, Suscriptor } from './entrega';
+
+// ── Calendario del arrendamiento ─────────────────────────────────────────────
+//
+// Subio aqui en el paso 6d. Lo comparten ms-contratos, que deriva las dos
+// fechas del ciclo de facturacion, y Financiero, que construye el periodo de
+// cada cuenta de cobro y cuenta los dias de mora. Al separarse en servicios
+// distintos, la alternativa era duplicar la regla del dia 31 — y una regla de
+// calendario mal copiada no se ve en pantalla, se ve en un recibo que sale
+// tarde en febrero. Ver la cabecera de `fechas.ts`.
+export {
+  ZONA_NEGOCIO,
+  comoISO,
+  diaDeCorte,
+  diaEnMes,
+  diaLimiteDesde,
+  diasEntre,
+  esBisiesto,
+  fechaEnMes,
+  fechaInicioCorteDesde,
+  hoyEnZonaNegocio,
+  mesSiguiente,
+  partesDeISO,
+  periodoDeCorte,
+  periodoQueEmpiezaEn,
+  soloFecha,
+  ultimoDiaDelMes,
+} from './fechas';
+export type { FechaISO as FechaCalendario, Periodo } from './fechas';

@@ -18,6 +18,7 @@ COPY apps/gateway/package.json          apps/gateway/
 COPY apps/web/package.json              apps/web/
 COPY services/ms-identidad/package.json services/ms-identidad/
 COPY services/ms-inmuebles/package.json services/ms-inmuebles/
+COPY services/ms-contratos/package.json services/ms-contratos/
 
 # `packages/` entra entero y ANTES del `npm ci`: la SPA ya consume
 # `arriendos360-contracts` —el catalogo cerrado de tipos de inmueble— y su

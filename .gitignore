@@ -32,6 +32,8 @@ salida-*.txt
 # publica: los anexos solo salen por la API autenticada.
 apps/gateway/uploads/
 apps/gateway/almacenamiento/
+# Desde el paso 6d los anexos son de ms-contratos, y su disco tampoco se versiona.
+services/ms-contratos/almacenamiento/
 
 # IDE
 .vscode/

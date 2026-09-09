@@ -115,6 +115,66 @@ services:
       retries: 20
       start_period: 10s
 
+  # MS-Contratos — contratos, sus anexos y los eventos de su ciclo de vida.
+  #
+  # Es el PRODUCTOR del bus desde el paso 6d: su tabla de salida vive en el
+  # esquema `contratos` y su publicador corre en este proceso. El gateway dejo de
+  # tener las dos cosas.
+  ms-contratos:
+    build:
+      context: ..
+      dockerfile: services/ms-contratos/Dockerfile
+    container_name: arriendos360_contratos
+    command: npm run dev
+    ports:
+      - "3013:3013"
+    environment:
+      - PORT=3013
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=arriendos360_db
+      - DB_NAME_TEST=arriendos360_test
+      # Identico al del gateway: todos verifican la misma firma.
+      - JWT_SECRET=${JWT_SECRET}
+      - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
+      - SERVICIO_NOMBRE=ms-contratos
+      # A quien pregunta. Identidad, para la revocacion y para comprobar el
+      # inquilino; Inmuebles, para resolver la pertenencia de cada contrato.
+      # Core dependiendo de Soporte, que es la direccion correcta.
+      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
+      # Y ADEMAS es la lista de suscriptores del bus: el publicador entrega
+      # `ContratoFormalizado` y `ContratoFinalizado` a esta URL.
+      - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
+      # Cada cuanto barre el publicador su tabla de salida. Ese numero es la
+      # ventana de consistencia del estado del inmueble.
+      - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
+      # Almacenamiento de anexos. Vacia = disco del contenedor, que es lo que se
+      # quiere en desarrollo. Con cadena de conexion se usa Azure Blob.
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
+      - AZURE_STORAGE_CONTENEDOR=${AZURE_STORAGE_CONTENEDOR:-anexos}
+    depends_on:
+      db:
+        condition: service_healthy
+      ms-identidad:
+        condition: service_started
+      ms-inmuebles:
+        condition: service_started
+    volumes:
+      - ../services/ms-contratos:/repo/services/ms-contratos
+      - /repo/services/ms-contratos/node_modules
+    # El servicio solo escucha DESPUES de aplicar sus migraciones, asi que
+    # responder aqui significa «ya adopte los contratos, los anexos y los eventos
+    # pendientes que estaban en el esquema del gateway». Es lo que permite que la
+    # migracion del gateway que retira `public.contratos` no pueda adelantarse a
+    # la copia.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3013/ || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
   # Servidor Backend
   backend:
     # Contexto en la raiz del monorepo: el gateway depende de packages/shared
@@ -137,21 +197,17 @@ services:
       - SERVICIO_NOMBRE=gateway
       # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
       # aqui hace que el gateway reenvie ese prefijo al microservicio.
-      # Cableados: identidad (dos prefijos) e inmuebles.
+      # Cableados: identidad (dos prefijos), inmuebles y —desde el paso 6d—
+      # contratos. Solo queda local /api/pagos, que se va en el 6e.
       #
-      # Sirven ADEMAS para el bus: son la lista de suscriptores. El publicador
-      # entrega `ContratoFormalizado` y `ContratoFinalizado` a MS_INMUEBLES_URL.
+      # Estas URL sirven ADEMAS para componer: el gateway le pide a ms-contratos
+      # la pertenencia de cada contrato y los datos que antes traia un `include`.
+      # Lo que YA NO hacen es alimentar el bus: el publicador se fue con
+      # ms-contratos, que es quien escribe el contrato y quien lo anuncia.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
       - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
-      - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-}
+      - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-http://ms-contratos:3013}
       - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-}
-      # Bus de eventos: cada cuanto barre el publicador su tabla de salida. Ese
-      # numero es la ventana de consistencia del estado del inmueble.
-      - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
-      # Almacenamiento de anexos. Vacia = disco del contenedor, que es lo que
-      # se quiere en desarrollo. Con cadena de conexion se usa Azure Blob.
-      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
-      - AZURE_STORAGE_CONTENEDOR=${AZURE_STORAGE_CONTENEDOR:-anexos}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     depends_on:
@@ -166,15 +222,19 @@ services:
       # ms-inmuebles haya copiado las filas a su esquema. Sano = ya migro.
       ms-inmuebles:
         condition: service_healthy
+      # Lo mismo con `dominio/007`, que retira `public.contratos`,
+      # `public.anexos` y `public.eventos_salida`. Sano = ya adopto las tres,
+      # incluidos los eventos que quedaban sin entregar.
+      ms-contratos:
+        condition: service_healthy
     volumes:
       # Recarga en caliente del codigo del gateway. `packages/` y `database/`
       # NO se montan: viven dentro de la imagen, asi que tocarlos exige
       # reconstruir. Es el precio de que la imagen sea autosuficiente.
       #
-      # Este montaje hace ademas que `almacenamiento/` —donde la
-      # implementacion de disco deja los anexos— caiga en el arbol del host y
-      # sobreviva a un `docker compose down`. En desarrollo es comodo; en
-      # Container Apps no existe, y por eso el despliegue usa Azure Blob.
+      # El montaje de `almacenamiento/` se fue con los anexos en el paso 6d:
+      # ahora es el volumen de ms-contratos el que hace que los archivos
+      # sobrevivan a un `docker compose down`.
       - ../apps/gateway:/repo/apps/gateway
       # Evita que el node_modules del host (binarios de Windows) tape al de la
       # imagen. Hoy npm iza todo a /repo/node_modules y este queda vacio, pero

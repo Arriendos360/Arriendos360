@@ -20,6 +20,9 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/gateway/package.json  apps/gateway/
 COPY apps/web/package.json      apps/web/
+COPY services/ms-identidad/package.json services/ms-identidad/
+COPY services/ms-inmuebles/package.json services/ms-inmuebles/
+COPY services/ms-contratos/package.json services/ms-contratos/
 
 # `packages/` entra ENTERO, con fuentes y tsconfig, y tiene que entrar ANTES del
 # `npm ci`. La razon: los dos paquetes tienen un script `prepare` que compila

@@ -6,7 +6,6 @@ const { sequelize } = require('./config/database');
 require('./models'); // Importar modelos para registrar sus asociaciones
 
 // Importar rutas
-const contratoRoutes = require('./routes/contrato.routes');
 const pagoRoutes = require('./routes/pago.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const { iniciarMotorFinanciero } = require('./services/financialEngine');
@@ -19,7 +18,6 @@ const {
 } = require('./routing');
 const { crearCacheRevocados } = require('./routing/cacheRevocados');
 const { aplicarMigraciones } = require('./database/migraciones');
-const { publicador } = require('./eventos');
 
 // Crear aplicación Express
 const app = express();
@@ -49,9 +47,10 @@ app.use(crearControlDeAcceso({ tokenInvalidado: cacheRevocados.tokenInvalidado }
 app.use(crearGuardiaDeBorrado());
 
 // Costura de enrutamiento: reenvía a ms-identidad los prefijos /api/auth y
-// /api/usuarios, a ms-inmuebles /api/inmuebles, y deja pasar el resto al código
-// local de abajo. Va antes de express.json() a propósito, para que el cuerpo
-// llegue sin parsear al reenvío y multipart/form-data (anexos) funcione.
+// /api/usuarios, a ms-inmuebles /api/inmuebles y a ms-contratos /api/contratos,
+// y deja pasar el resto al código local de abajo. Va antes de express.json() a
+// propósito, para que el cuerpo llegue sin parsear al reenvío y
+// multipart/form-data (los anexos, que ahora sirve ms-contratos) funcione.
 app.use(crearEnrutadorGateway());
 
 app.use(express.json());
@@ -65,7 +64,9 @@ app.use(express.json());
 //
 // Desde el paso 6b los archivos son `Anexos` y salen unicamente por
 // `GET /api/contratos/:id/anexos/:idAnexo`, que pasa por la matriz y por el
-// ABAC del controlador. Era la trampa que CLAUDE.md tenia anotada.
+// ABAC del controlador. Era la trampa que CLAUDE.md tenia anotada. Desde el
+// paso 6d ese endpoint lo sirve ms-contratos, y la matriz lo sigue mirando
+// antes de que la peticion salga a la red.
 
 // Ruta de prueba
 app.get('/', (req, res) => {
@@ -82,10 +83,14 @@ app.get('/', (req, res) => {
     });
 });
 
-// Rutas locales. `/api/auth`, `/api/usuarios` e `/api/inmuebles` ya no
-// aparecen: los sirven ms-identidad y ms-inmuebles, y la costura los reenvía
-// antes de llegar hasta aquí.
-app.use('/api/contratos', contratoRoutes);
+// Rutas locales. `/api/auth`, `/api/usuarios`, `/api/inmuebles` y —desde el
+// paso 6d— `/api/contratos` ya no aparecen: los sirven ms-identidad,
+// ms-inmuebles y ms-contratos, y la costura los reenvía antes de llegar hasta
+// aquí.
+//
+// Quedan dos: `/api/pagos`, que se va con ms-financiero en el paso 6e, y
+// `/api/dashboard`, que se queda para siempre porque agrega respuestas de los
+// demás y no tiene tablas propias (regla dura 5).
 app.use('/api/pagos', pagoRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
@@ -116,16 +121,12 @@ if (process.env.NODE_ENV !== 'test') {
             // Iniciar Motor Financiero (Background Tasks)
             iniciarMotorFinanciero();
 
-            // Publicador del bus de eventos. Arranca DESPUÉS de las migraciones
-            // —necesita su tabla de salida— y con un primer barrido inmediato,
-            // para que lo que quedó sin entregar en la caída anterior salga ya y
-            // no dentro de un intervalo.
-            await publicador.iniciar();
-            const salida = publicador.estado();
-            console.log(
-                `📤 Publicador de eventos: barrido cada ${salida.intervaloMs / 1000}s, ` +
-                    `hasta ${salida.maxIntentos} intentos por evento antes de apartarlo`
-            );
+            // AQUI ARRANCABA EL PUBLICADOR DEL BUS. Se fue en el paso 6d con la
+            // tabla de salida y con lo que la llenaba: el gateway ya no escribe
+            // ningun cambio de dominio, asi que no tiene nada que anunciar. El
+            // productor es ms-contratos, que es quien escribe el contrato — que
+            // es la regla que este proyecto ha respetado desde el paso 5, sea
+            // quien sea el que escribe.
 
             await cacheRevocados.iniciar();
             const estado = cacheRevocados.estado();

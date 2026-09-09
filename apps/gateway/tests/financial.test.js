@@ -1,15 +1,21 @@
 const crypto = require('crypto');
 
-const { Contrato, CuentaCobro } = require('../src/models');
+const { CuentaCobro } = require('../src/models');
 const {
     ESTADO_CONTRATO_ACTIVO,
     ESTADO_CUENTA_EN_MORA,
     ESTADO_CUENTA_PENDIENTE,
     USUARIO_SISTEMA
 } = require('../src/models/constantes');
-const { hoyEnZonaNegocio } = require('../src/models/fechasContrato');
+const { hoyEnZonaNegocio } = require('arriendos360-shared');
 const { procesarContratos, procesarPagos } = require('../src/services/financialEngine');
-const { cerrarEntorno, identidadFalsa, inmueblesFalso, prepararEntorno } = require('./utiles/entorno');
+const {
+    cerrarEntorno,
+    contratosFalso,
+    identidadFalsa,
+    inmueblesFalso,
+    prepararEntorno
+} = require('./utiles/entorno');
 
 /**
  * Motor financiero.
@@ -19,6 +25,17 @@ const { cerrarEntorno, identidadFalsa, inmueblesFalso, prepararEntorno } = requi
  * aqui: viven en ms-identidad y ms-inmuebles, y para estas pruebas los ponen sus
  * dobles. Al gateway le llegan sus UUID en `id_inquilino` e `id_inmueble`, que
  * es todo lo que guarda de ellos.
+ *
+ * ── EN EL PASO 6d LOS CONTRATOS TAMPOCO SON LOCALES ──────────────────────────
+ *
+ * Se ponen en el doble de ms-contratos, igual que los usuarios y los inmuebles
+ * se ponen en los suyos. El motor los pide por HTTP, que es lo que hace ahora.
+ *
+ * Y la prueba del viaje unico gana un caso: antes comprobaba que ms-identidad se
+ * consulta una vez por barrido; ahora comprueba tambien que ms-contratos se
+ * consulta una vez, y que ese numero NO crece con el numero de contratos. Es la
+ * garantia que el paso 4 introdujo con `adjuntarPartes` y que la extraccion de
+ * Contratos podia haber roto sin que nada lo dijera.
  *
  * ── QUE CAMBIA EN EL PASO 6c, Y QUE NO ───────────────────────────────────────
  *
@@ -47,6 +64,18 @@ const sumarDias = (fechaISO, dias) =>
     new Date(Date.parse(`${fechaISO}T00:00:00Z`) + dias * 24 * 60 * 60 * 1000)
         .toISOString()
         .slice(0, 10);
+
+/** Pone un contrato en el doble de ms-contratos, sin pasar por la API. */
+const contratoEnElDoble = (datos) => {
+    const contrato = {
+        id_contrato: crypto.randomUUID(),
+        estado: ESTADO_CONTRATO_ACTIVO,
+        ...datos
+    };
+
+    contratosFalso().contratos.set(contrato.id_contrato, contrato);
+    return contrato;
+};
 
 /** Pone un inmueble en el doble, sin pasar por la API. */
 const inmuebleEnElDoble = (idPropietario, direccion) => {
@@ -107,24 +136,18 @@ describe('Motor Financiero (Automatizacion)', () => {
         const hoy = hoyEnZonaNegocio();
         const pasadoManana = sumarDias(hoy, 2);
 
-        const contrato = await Contrato.create(
-            {
-                id_inmueble: inm.id_inmueble,
-                id_inquilino: idInquilino,
-                inicio: pasadoManana,
-                fin: '2027-01-01',
-                canon: 1000,
-                // La fecha de corte se pone EXPLICITA en vez de dejar que la
-                // derive el hook, igual que antes: escribirla aqui es lo que
-                // hace que el motor reciba exactamente el dia de corte que la
-                // prueba quiere ejercitar, sin depender de como interprete el
-                // hook un `inicio` con hora.
-                fecha_inicio_corte: pasadoManana,
-                fecha_limite_pago: Number(pasadoManana.slice(8, 10)),
-                estado: ESTADO_CONTRATO_ACTIVO
-            },
-            { usuarioAuditor: idPropietario }
-        );
+        const contrato = contratoEnElDoble({
+            id_inmueble: inm.id_inmueble,
+            id_inquilino: idInquilino,
+            inicio: pasadoManana,
+            fin: '2027-01-01',
+            canon: 1000,
+            // La fecha de corte se pone EXPLICITA, igual que antes: escribirla
+            // aqui es lo que hace que el motor reciba exactamente el dia de
+            // corte que la prueba quiere ejercitar.
+            fecha_inicio_corte: pasadoManana,
+            fecha_limite_pago: Number(pasadoManana.slice(8, 10))
+        });
         idContrato = contrato.id_contrato;
 
         await procesarContratos();
@@ -183,15 +206,69 @@ describe('Motor Financiero (Automatizacion)', () => {
     });
 
     test('compone las partes en un solo viaje, no una vez por contrato', async () => {
-        // Es la garantia contra el N+1 por red: el motor recorre todos los
-        // contratos activos, pero pregunta a ms-identidad una vez por barrido.
+        // LA GARANTIA CONTRA EL N+1 POR RED, y desde el paso 6d cubre los tres
+        // servicios. El motor recorre todos los contratos activos, pero pregunta
+        // a cada uno UNA vez por barrido.
         const identidad = identidadFalsa();
+        const contratos = contratosFalso();
         identidad.limpiarLlamadas();
+        contratos.limpiarLlamadas();
 
         await procesarContratos();
 
-        const consultas = identidad.llamadas.filter((l) => l.ruta.startsWith('/interno/usuarios'));
-        expect(consultas).toHaveLength(1);
+        expect(
+            identidad.llamadas.filter((l) => l.ruta.startsWith('/interno/usuarios'))
+        ).toHaveLength(1);
+        expect(
+            contratos.llamadas.filter((l) => l.ruta.startsWith('/interno/contratos'))
+        ).toHaveLength(1);
+    });
+
+    test('y el numero de viajes NO crece con el numero de contratos', async () => {
+        // Lo anterior pasaria igual con un solo contrato en la base, que es como
+        // se cuela un N+1: la prueba no lo veria. Con varios, un `await` dentro
+        // del bucle se delata.
+        const contratos = contratosFalso();
+
+        for (let i = 0; i < 4; i += 1) {
+            const inm = inmuebleEnElDoble(idPropietario, `Multiple ${i}`);
+            contratoEnElDoble({
+                id_inmueble: inm.id_inmueble,
+                id_inquilino: idInquilino,
+                inicio: '2026-01-01',
+                fin: '2027-01-01',
+                canon: 1000,
+                fecha_inicio_corte: '2026-01-01',
+                fecha_limite_pago: 1
+            });
+        }
+
+        const identidad = identidadFalsa();
+        identidad.limpiarLlamadas();
+        contratos.limpiarLlamadas();
+
+        await procesarContratos();
+
+        expect(
+            identidad.llamadas.filter((l) => l.ruta.startsWith('/interno/usuarios'))
+        ).toHaveLength(1);
+        expect(
+            contratos.llamadas.filter((l) => l.ruta.startsWith('/interno/contratos'))
+        ).toHaveLength(1);
+    });
+
+    test('procesarPagos tambien pide los contratos en lote', async () => {
+        // El otro barrido. Antes resolvia el contrato con un `include`; ahora
+        // los pide POR IDENTIFICADOR, todos de una vez.
+        const contratos = contratosFalso();
+        contratos.limpiarLlamadas();
+
+        await procesarPagos();
+
+        const consultas = contratos.llamadas.filter((l) =>
+            l.ruta.startsWith('/interno/contratos')
+        );
+        expect(consultas.length).toBeLessThanOrEqual(1);
     });
 
     test('no duplica la cuenta de cobro de un periodo ya generado', async () => {
@@ -202,6 +279,19 @@ describe('Motor Financiero (Automatizacion)', () => {
         await procesarContratos();
 
         expect(await CuentaCobro.count({ where: { id_contrato: idContrato } })).toBe(antes);
+    });
+
+    test('si ms-contratos no responde, el barrido no genera nada y no revienta', async () => {
+        // Un fallo de ms-contratos SI para la generacion: sin la lista, no hay
+        // nada que facturar. Lo que no puede es tirar el proceso — el motor corre
+        // en un `cron`, y una excepcion sin capturar se lleva por delante el
+        // barrido de mora que viene detras.
+        const contratos = contratosFalso();
+        contratos.caer(503);
+
+        await expect(procesarContratos()).resolves.not.toThrow();
+
+        contratos.levantar();
     });
 
     test('si ms-identidad no responde, el motor sigue haciendo su trabajo', async () => {

@@ -268,6 +268,14 @@ const crearInmueblesFalso = async (opciones = {}) => {
             fallarCon = null;
             fallarSolo = null;
         },
+        /**
+         * ¿Está caído ahora mismo?
+         *
+         * Lo pregunta el doble de contratos, que resuelve la pertenencia
+         * consultando a éste: si no puede, tiene que responder 502 como el
+         * servicio real, no una lista vacía.
+         */
+        estaCaido: () => fallarCon !== null,
         cerrar: () =>
             new Promise((resolver, rechazar) => {
                 servidor.close((error) => (error ? rechazar(error) : resolver()));

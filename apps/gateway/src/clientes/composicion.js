@@ -1,8 +1,8 @@
 /**
  * Composición de datos de otros servicios sobre entidades del gateway.
  *
- * Sustituye a los `include` que cruzaban la frontera de ms-identidad y, desde el
- * paso 4, también los de ms-inmuebles. La forma del resultado es exactamente la
+ * Sustituye a los `include` que cruzaban la frontera de ms-identidad, desde el
+ * paso 4 los de ms-inmuebles y desde el 6d los de ms-contratos. La forma del resultado es exactamente la
  * que producía Sequelize —`Inquilino` y `Propietario` como objetos con
  * `id_usuario`, `nombres`, `apellidos`, `documento`, `telefono` y `email`;
  * `Inmueble` anidado en el contrato— para que ni el frontend ni los PDF noten la
@@ -17,6 +17,7 @@
  * `include` no encontraba fila, así que los consumidores ya la manejan.
  */
 
+const { porIds: contratosPorIds } = require('./contratos');
 const { usuariosPorIds } = require('./identidad');
 const { porIds: inmueblesPorIds } = require('./inmuebles');
 
@@ -161,54 +162,78 @@ const adjuntarInquilinosEInmuebles = async (contratos) => {
 };
 
 /**
- * Adjunta `Inmueble` al contrato ANIDADO de una lista.
+ * Adjunta el `Contrato` —y dentro de él su `Inmueble`— a una lista de cuentas
+ * de cobro o de transacciones.
  *
- * Existe porque las cuentas de cobro y las transacciones no llevan
- * `id_inmueble` propio: cuelgan de un contrato, y es ese contrato el que sabe de
- * qué inmueble se trata. Antes lo resolvía un `include` anidado
- * —`CuentaCobro -> Contrato -> Inmueble`, y para las transacciones un nivel
- * más— y la pantalla de Pagos lee esa ruta tal cual
- * (`cuenta.Contrato.Inmueble.direccion`).
+ * ── ESTO ERA UN `include` HASTA EL PASO 6d ──────────────────────────────────
  *
- * `camino` dice dónde está el contrato dentro de cada elemento. Un solo lote
- * para toda la lista, como el resto.
+ * Las cuentas de cobro y las transacciones no llevan `id_inmueble` propio:
+ * cuelgan de un contrato, y es ese contrato el que sabe de qué inmueble se
+ * trata. Mientras `contratos` vivió en la base del gateway, la primera mitad la
+ * resolvía Sequelize con un `include` y sólo había que componer el inmueble.
+ * Ahora hay que componer los dos, y la pantalla de Pagos sigue leyendo la misma
+ * ruta (`cuenta.Contrato.Inmueble.direccion`), así que la forma del resultado no
+ * cambia.
+ *
+ * ── DOS VIAJES PARA LA LISTA ENTERA, NO DOS POR FILA ────────────────────────
+ *
+ * Es la misma disciplina que el resto de este archivo, y aquí importa el doble
+ * porque son dos saltos encadenados: hasta que ms-contratos no dice de qué
+ * inmueble es cada contrato, no se sabe qué inmuebles pedir. Lo que sí se hace
+ * es pedirlos TODOS de una vez en cada salto. Una petición por cuenta de cobro
+ * sería el N+1 de siempre, multiplicado por dos.
+ *
+ * ── Y SI ALGUNO NO RESPONDE, LA PROPIEDAD QUEDA EN `null` ───────────────────
+ *
+ * Esto es DECORAR, no autorizar: la lista ya se filtró antes con los contratos
+ * de quien pregunta. Un listado sin la dirección del inmueble sigue siendo
+ * útil; un 502 en la pantalla entera porque ms-inmuebles tosió, no. Es la misma
+ * situación que ya podía darse cuando el `include` no encontraba fila, así que
+ * los consumidores ya la manejan.
  *
  * @param {Array} elementos cuentas de cobro o transacciones
- * @param {(elemento: object) => object|null|undefined} camino cómo llegar al contrato
+ * @param {(elemento: object) => object|null|undefined} contenedor dónde colgar
+ *   el `Contrato`: el propio elemento, o su `CuentaCobro` si va un nivel abajo
  */
-const adjuntarInmuebleAlContratoAnidado = async (elementos, camino) => {
+const adjuntarContratoConInmueble = async (elementos, contenedor) => {
     const lista = (elementos || []).map(aPlano);
+    const destinos = lista.map((elemento) => contenedor(elemento)).filter(Boolean);
 
+    const contratos = await contratosPorIds(destinos.map((d) => d.id_contrato));
+
+    // Segundo salto: sólo ahora se sabe qué inmuebles hacen falta.
     const inmuebles = await inmueblesPorIds(
-        lista.map((elemento) => camino(elemento)).filter(Boolean).map((c) => c.id_inmueble)
+        [...contratos.values()].map((contrato) => contrato.id_inmueble)
     );
 
-    return lista.map((elemento) => {
-        const contrato = camino(elemento);
-        if (!contrato) {
-            return elemento;
+    for (const elemento of lista) {
+        const destino = contenedor(elemento);
+        if (!destino) {
+            continue;
         }
 
-        contrato.Inmueble = inmuebles.get(contrato.id_inmueble) || null;
-        return elemento;
-    });
+        const contrato = contratos.get(destino.id_contrato);
+        destino.Contrato = contrato
+            ? { ...contrato, Inmueble: inmuebles.get(contrato.id_inmueble) || null }
+            : null;
+    }
+
+    return lista;
 };
 
 /** `cuenta.Contrato.Inmueble`. */
-const adjuntarInmuebleACuentas = (cuentas) =>
-    adjuntarInmuebleAlContratoAnidado(cuentas, (cuenta) => cuenta.Contrato);
+const adjuntarContratoACuentas = (cuentas) =>
+    adjuntarContratoConInmueble(cuentas, (cuenta) => cuenta);
 
 /** `transaccion.CuentaCobro.Contrato.Inmueble`. */
-const adjuntarInmuebleATransacciones = (transacciones) =>
-    adjuntarInmuebleAlContratoAnidado(
-        transacciones,
-        (transaccion) => transaccion.CuentaCobro && transaccion.CuentaCobro.Contrato
-    );
+const adjuntarContratoATransacciones = (transacciones) =>
+    adjuntarContratoConInmueble(transacciones, (transaccion) => transaccion.CuentaCobro);
 
 module.exports = {
+    adjuntarContratoACuentas,
+    adjuntarContratoATransacciones,
+    adjuntarContratoConInmueble,
     adjuntarInmueble,
-    adjuntarInmuebleACuentas,
-    adjuntarInmuebleATransacciones,
     adjuntarInmuebles,
     adjuntarInquilino,
     adjuntarInquilinos,

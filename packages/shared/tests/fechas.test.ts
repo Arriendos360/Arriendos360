@@ -6,19 +6,29 @@
  * la API — un contrato que empieza el 31 de enero sólo enseña el problema
  * catorce meses después.
  *
- * Ver `src/models/fechasContrato.js` para la regla y por qué se recorta en vez
- * de desbordar.
+ * ── ESTA SUITE SE MUDO EN EL PASO 6d ─────────────────────────────────────────
+ *
+ * Vivia en `apps/gateway/tests/fechasContrato.test.js`. La regla subio a
+ * `packages/shared` cuando Contratos y Financiero dejaron de vivir en el mismo
+ * proceso: los dos la necesitan, y duplicarla habria sido tener dos
+ * calendarios. Las pruebas suben con ella, con las mismas afirmaciones y dos
+ * secciones nuevas —el periodo y el conteo de dias— que antes estaban repartidas
+ * entre las suites del motor financiero.
+ *
+ * Ver `src/fechas.ts` para la regla y por que se recorta en vez de desbordar.
  */
 
-const {
-    diaDeCorte,
-    diaEnMes,
-    diaLimiteDesde,
-    esBisiesto,
-    fechaEnMes,
-    fechaInicioCorteDesde,
-    ultimoDiaDelMes
-} = require('../src/models/fechasContrato');
+import {
+  diaDeCorte,
+  diaEnMes,
+  diaLimiteDesde,
+  diasEntre,
+  esBisiesto,
+  fechaEnMes,
+  fechaInicioCorteDesde,
+  periodoDeCorte,
+  ultimoDiaDelMes,
+} from '../src/fechas';
 
 // Los meses van 0-11, como en `Date`. Se nombran para que las pruebas se lean.
 const ENERO = 0;
@@ -124,5 +134,61 @@ describe('Lectura del día de corte ya almacenado', () => {
 
     test('sin fecha, null', () => {
         expect(diaDeCorte(null)).toBeNull();
+    });
+});
+
+describe('El periodo de una cuenta de cobro TESELA el calendario', () => {
+    // La propiedad que hace correcta la definicion —«fin es la vispera del
+    // siguiente corte»— y no la obvia. Cada dia pertenece a un periodo y solo a
+    // uno, sin huecos ni solapes, sea cual sea el dia pactado.
+    test('con corte el 31, los tres primeros meses encajan sin dejar un dia fuera', () => {
+        const enero = periodoDeCorte(31, 2026, ENERO);
+        const febrero = periodoDeCorte(31, 2026, FEBRERO);
+        const marzo = periodoDeCorte(31, 2026, MARZO);
+
+        expect(enero).toEqual({ inicio: '2026-01-31', fin: '2026-02-27' });
+        expect(febrero).toEqual({ inicio: '2026-02-28', fin: '2026-03-30' });
+        expect(marzo).toEqual({ inicio: '2026-03-31', fin: '2026-04-29' });
+
+        // Sin huecos: el fin de uno es la vispera del inicio del siguiente.
+        expect(diasEntre(enero.fin, febrero.inicio)).toBe(1);
+        expect(diasEntre(febrero.fin, marzo.inicio)).toBe(1);
+    });
+
+    test('la definicion obvia dejaria tres dias de marzo sin dueño', () => {
+        // «inicio mas un mes menos un dia» daria 2026-03-27 para febrero, y los
+        // dias 28, 29 y 30 de marzo no serian de nadie. Se comprueba la
+        // diferencia para que la decision quede escrita y no se pueda deshacer
+        // por descuido.
+        const febrero = periodoDeCorte(31, 2026, FEBRERO);
+        expect(febrero.fin).toBe('2026-03-30');
+        expect(febrero.fin).not.toBe('2026-03-27');
+    });
+
+    test('con un dia que existe en todos los meses, los periodos son regulares', () => {
+        expect(periodoDeCorte(10, 2026, ENERO)).toEqual({
+            inicio: '2026-01-10',
+            fin: '2026-02-09'
+        });
+    });
+
+    test('el cambio de año se resuelve', () => {
+        expect(periodoDeCorte(5, 2026, 11)).toEqual({ inicio: '2026-12-05', fin: '2027-01-04' });
+    });
+});
+
+describe('Conteo de dias de calendario', () => {
+    test('cuenta dias, no intervalos de 24 horas', () => {
+        // Es lo que permite que «el sexto dia» sea una afirmacion comprobable y
+        // no dependa de la hora a la que se pregunte.
+        expect(diasEntre('2026-01-01', '2026-01-07')).toBe(6);
+        expect(diasEntre('2026-01-07', '2026-01-01')).toBe(-6);
+        expect(diasEntre('2026-01-01', '2026-01-01')).toBe(0);
+    });
+
+    test('atraviesa meses y años sin sorpresas', () => {
+        expect(diasEntre('2026-02-27', '2026-03-01')).toBe(2);
+        expect(diasEntre('2024-02-27', '2024-03-01')).toBe(3); // bisiesto
+        expect(diasEntre('2026-12-31', '2027-01-01')).toBe(1);
     });
 });
