@@ -31,17 +31,21 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1 a 5 completados, y los 6a, 6b, 6c y 6d. **El gateway ya casi no es un
-monolito**: le quedan dos tablas —`Cuentas_cobro` y `Transacciones`— y se va con ellas en
-el paso 6e. Las ocho tablas de dominio del Capítulo 2 están completas y **tres de los
-cinco microservicios están extraídos**, con el bus de eventos en pie y emitido por quien
-escribe el contrato.
+Pasos 1 a 5 completados, y el paso 6 **entero**: 6a, 6b, 6c, 6d y 6e. **El gateway
+dejó de ser un monolito**: no le queda ninguna tabla, ni modelos, ni conexión a
+PostgreSQL. Las ocho tablas de dominio del Capítulo 2 están completas y repartidas
+entre **los cuatro microservicios de dominio**, con el bus de eventos en pie y con
+`ContratoFormalizado` alimentando por fin la creación en cadena que el Capítulo 2
+especifica.
 
-- `apps/gateway/` — el antiguo `backend/`. Express + Sequelize + PostgreSQL en
-  JavaScript (CommonJS). Incluye la costura de enrutamiento (cada prefijo se resuelve
-  local o remoto según haya o no valor en su variable `MS_*_URL`; hoy todos locales) y
-  la **matriz RBAC**, que se evalúa antes de la costura para que una petición denegada
-  no llegue a la red interna.
+- `apps/gateway/` — el antiguo `backend/`. Express en JavaScript (CommonJS), y desde
+  el paso 6e **sin Sequelize, sin modelos y sin base de datos**. Le quedan cuatro
+  cosas, que son exactamente las que el Capítulo 2 le asigna: la validación del JWT
+  y la **matriz RBAC**, los **guardias** (reglas que dependen de dos contextos), la
+  **costura de enrutamiento** —cada prefijo se resuelve local o remoto según haya o
+  no valor en su variable `MS_*_URL`; hoy los cinco de la API son remotos— y el
+  **dashboard**. Arranca sin base: si PostgreSQL está caído, el gateway sigue en pie
+  devolviendo 502 de quien no responde.
 - `apps/web/` — el antiguo `frontend/`. React 18 con CRA. **Sin Tailwind**, aunque el
   PMP lo declara.
 - `packages/contracts/` — DTOs en TypeScript de los endpoints documentados. Casi
@@ -58,9 +62,9 @@ escribe el contrato.
   Financiero, que construye el periodo de cada cuenta de cobro; duplicarla habría
   sido tener dos calendarios que nada sincroniza.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
-  (`identidad/`, `inmuebles/`, `contratos/`, `dominio/`). Reemplazan a
-  `sequelize.sync()`; ver `docs/adr/0003`. `dominio/` ya solo guarda las dos
-  tablas de Financiero: se vacía del todo en el paso 6e.
+  (`identidad/`, `inmuebles/`, `contratos/`, `financiero/`). Reemplazan a
+  `sequelize.sync()`; ver `docs/adr/0003`. **`dominio/` ya no existe**: se vació con
+  el paso 6e y se fue con el aplicador de migraciones del gateway.
 - `services/ms-identidad/` — primer microservicio real y **ya en producción de la
   demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
   Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
@@ -78,17 +82,24 @@ escribe el contrato.
   de la contraseña temporal— y **es el productor del bus**: emite
   `ContratoFormalizado` y `ContratoFinalizado` en la misma transacción que
   escribe el contrato.
+- `services/ms-financiero/` — cuarto servicio, y el segundo **Core**. TypeScript
+  `strict`, puerto 3014, esquema propio (`financiero`) con `Cuentas_cobro`,
+  `Transacciones` y su bitácora de eventos procesados. Sirve `/api/pagos` —incluidos
+  los dos comprobantes en PDF y la anulación— y se lleva el **motor** completo
+  (`procesarContratos`, `procesarPagos`, `npm run motor`). Es el **segundo consumidor
+  del bus**: crea la primera cuenta de cobro al recibir `ContratoFormalizado`. Con él,
+  el gateway se queda sin tablas.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
 
-El gateway ya no tiene tablas ni modelos de identidad ni de inmuebles. Lo que
-necesita de ellos lo pide por HTTP y lo compone (`apps/gateway/src/clientes/`). La
-revocación la resuelve una copia en memoria que refresca cada 15 s; ver
-`docs/adr/0008`.
+**El gateway no tiene NINGUNA tabla.** Todo lo que necesita lo pide por HTTP y lo
+compone (`apps/gateway/src/clientes/`, cuatro clientes: identidad, inmuebles,
+contratos y financiero). La revocación la resuelve una copia en memoria que refresca
+cada 15 s; ver `docs/adr/0008`.
 
 **El gateway ya NO es el productor del bus.** Lo fue mientras `contratos` era suya; en
 el paso 6d la tabla de salida y el publicador se mudaron a `ms-contratos`, que es quien
-escribe el contrato. `public.eventos_salida` se retiró con `database/dominio/007`, y con
-ella el último cambio de dominio que el gateway anunciaba.
+escribe el contrato. `public.eventos_salida` se retiró con la migración que retiraba los
+contratos, y con ella el último cambio de dominio que el gateway anunciaba.
 
 **La política de fallo no es la misma en los dos casos, y la distinción importa.**
 Componer datos para *decorar* una respuesta degrada: si el servicio no contesta, la
@@ -96,15 +107,28 @@ propiedad queda en `null` y el listado sale sin el nombre del inquilino o sin la
 dirección. Pedir datos para *autorizar* propaga el fallo y responde `502`: una lista
 vacía de «inmuebles de este propietario» haría que su dueño viera «no tienes
 contratos» —una respuesta creíble y falsa— y reduciría la disyunción de visibilidad a
-«eres el inquilino». Ver la cabecera de `clientes/inmuebles.js`.
+«eres el inquilino». Ver la cabecera de `apps/gateway/src/clientes/inmuebles.js`.
+
+**`clientes/financiero.js` es la excepción: no degrada nunca.** Y no porque autorice
+—no lo hace— sino porque su único consumidor es el dashboard, y ahí degradar es MENTIR:
+un «$0 de ingresos, 0 en mora» no es un hueco visible como una dirección que falta en un
+listado, es una cifra que parece una respuesta. Un 502 le dice al propietario que vuelva
+luego; un cero le dice que nadie le debe nada.
 
 **La pertenencia de un contrato se resuelve en ms-contratos desde el paso 6d**, y esto
 hay que saberlo antes de tocar cualquier autorización. «¿Este contrato es de este
 propietario?» necesita dos contextos —el contrato está aquí, el dueño del inmueble en
 ms-inmuebles— y hasta ahora se contestaba CUATRO veces en el gateway, con cuatro formas
 distintas. Ahora se contesta una, en `services/pertenencia.ts` de ms-contratos, y se
-expone por `GET /interno/contratos` para que el gateway pueda filtrar cuentas de cobro y
-vetar borrados sin saber nada de inmuebles.
+expone por `GET /interno/contratos`. Desde el paso 6e sus dos clientes son
+**ms-financiero**, que filtra con ella sus cuentas de cobro y sus transacciones, y el
+gateway, que veta borrados y compone el dashboard — ninguno de los dos necesita saber
+nada de inmuebles.
+
+Ese endpoint acepta además `?incluir=inmueble`, que adjunta el `Inmueble` de cada
+contrato en un solo lote. Lo usa ms-financiero para los comprobantes y para el motor, y
+existe para no encadenar dos saltos de red desde allí: hasta que Contratos no dice de
+qué inmueble es cada contrato, nadie sabe qué inmuebles pedir.
 
 **No se denormalizó `id_propietario` en `Contratos`**, aunque la cabecera del viejo
 `anexo.controller.js` lo recomendara: un inmueble puede cambiar de dueño, y de ese dato
@@ -119,8 +143,8 @@ memoria en la SPA y descargas por blob. Después llegaron el build en contexto r
 matriz RBAC, la extracción de los dos servicios y el bus. Falta el paso 6: separar
 `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones` y extraer Contratos y Financiero.
 
-**Contratos ya habla el idioma del Capítulo 2** desde el paso 6a, aunque siga
-viviendo en el gateway: `inicio`, `fin`, `canon`, y `estado` como catálogo cerrado
+**Contratos habla el idioma del Capítulo 2** desde el paso 6a, y vive en su servicio
+desde el 6d: `inicio`, `fin`, `canon`, y `estado` como catálogo cerrado
 —`activo`, `finalizado`, `cancelado`— en vez del entero sin significado que había.
 Tiene además `fecha_inicio_corte`, `fecha_limite_pago`, `info_contrato` y los dos
 campos del deudor solidario, que son opcionales. Se fueron `deposito` e
@@ -131,8 +155,8 @@ el disco del contenedor sino detrás de una interfaz de almacenamiento —disco 
 desarrollo, Azure Blob en despliegue— y **sólo salen por la API autenticada**. Con eso
 el modelo canónico de Contratos queda completo. Ver `docs/adr/0014`.
 
-**Y Financiero habla el idioma del Capítulo 2 desde el paso 6c**, aunque también siga
-viviendo en el gateway. `Pago` y `Abono` no se renombraron: se **partieron** en los dos
+**Y Financiero habla el idioma del Capítulo 2 desde el paso 6c**, y desde el 6e vive en
+su propio servicio. `Pago` y `Abono` no se renombraron: se **partieron** en los dos
 conceptos que mezclaban. `Cuentas_cobro` es la factura —`valor`, el periodo explícito
 `inicio`/`fin`, `detalle`, y `estado` como catálogo cerrado (`PENDIENTE`, `PAGADA`,
 `PARCIAL`, `EN_MORA`) en vez de los enteros 1, 2, 4 y 3—; `Transacciones` es el
@@ -140,8 +164,8 @@ movimiento de dinero contra ella, con `tipo`, `medio_pago` y un `estado` que per
 anular sin borrar. Tres cosas de ahí conviene tenerlas presentes antes de tocar nada:
 
 - **`saldo_pendiente` ya no es una columna.** Se deriva de `valor` menos la suma de las
-  transacciones CONFIRMADAS (`apps/gateway/src/services/saldos.js`) y se adjunta a la
-  respuesta con ese mismo nombre, así que el frontend recibe lo de siempre. La
+  transacciones CONFIRMADAS (`services/ms-financiero/src/services/saldos.ts`) y se
+  adjunta a la respuesta con ese mismo nombre, así que el frontend recibe lo de siempre. La
   consecuencia buena es que anular una transacción no tiene que «devolver» nada: la suma
   deja de contarla y el saldo se corrige solo.
 - **`saldo_restante_momento` de las transacciones NO se deriva y no se toca.** Es la foto
@@ -175,6 +199,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0015` | `Transacciones` conserva `observaciones`, que el modelo canónico no lista. **Es desviación por adición**: la imprime el comprobante en «Referencia trans.». |
 | `0016` | Anulación de transacciones: endpoint, estado `ANULADA` y 409 al repetir. **Es desviación**: el documento no contempla ni el endpoint ni el estado. |
 | `0017` | La pertenencia de un contrato se resuelve preguntando a ms-inmuebles, sin denormalizar. Resuelve una decisión abierta y **no se aparta del documento**; corrige además el emplazamiento que el `0010` daba a la reemisión de la contraseña temporal, que se muda a ms-contratos. |
+| `0018` | Extracción de ms-financiero: la primera cuenta de cobro nace del evento, la mudanza copia y retira en una sola migración, `pdfService.js` se muda intacto con `allowJs`, y `verificar-mora` se unifica con el motor. **No se aparta del documento**: implementa la creación en cadena que el Capítulo 2 especifica y deja al gateway sin tablas, como ahí se describe. Lo que sí deja abierto —y **bloqueante para producción**— es el cron dentro del contenedor. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -206,7 +231,7 @@ sobrevive porque es la foto que imprime un comprobante ya emitido.
 
 **El saldo de una cuenta de cobro NO es una columna.** No está aquí porque no debe estar:
 es `valor` menos la suma de sus transacciones confirmadas. Se calcula en
-`apps/gateway/src/services/saldos.js` y se expone como `saldo_pendiente`.
+`services/ms-financiero/src/services/saldos.ts` y se expone como `saldo_pendiente`.
 
 **Toda tabla de dominio lleva columnas de auditoría:** `creado_por`, `fecha_creacion`,
 `ultima_actualizacion`, `actualizado_por`.
@@ -230,9 +255,11 @@ No es un cambio de nombres, es un cambio de modelo:
 
 `Cuentas_cobro` y `Transacciones` **no son sinónimos** de `Pago` y `Abono`. Una cuenta de
 cobro es la factura mensual que el sistema genera solo; una transacción es el movimiento
-de dinero contra esa factura. **Hecho en el paso 6c**, con una migración que transforma
-los datos existentes (`database/dominio/006`) y que antes de borrar `saldo_pendiente`
-comprueba fila a fila que lo guardado cuadre con lo derivado.
+de dinero contra esa factura. **Hecho en el paso 6c**, con una migración que transformó
+los datos existentes y que antes de borrar `saldo_pendiente` comprobaba fila a fila que
+lo guardado cuadrara con lo derivado. Esa migración vivía en `database/dominio/006`; con
+el paso 6e la carpeta desapareció, así que en una base nueva las tablas nacen ya en su
+forma final desde `database/financiero/001`.
 
 Las tablas `propietarios` e `inquilinos` **desaparecen**. La distinción pasa a ser un rol
 en `RolesUsuario`. Un mismo usuario puede ser ambas cosas.
@@ -322,7 +349,7 @@ de los `jti` vigentes y la refresca periódicamente.
 | `ms-contratos` | Core | Contratos, Anexos | 3013 |
 | `ms-financiero` | Core | Cuentas_cobro, Transacciones | 3014 |
 | `ms-notificaciones` | Genérico | ninguna | 3015 |
-| `gateway` | — | ninguna | 3001 |
+| `gateway` | — | **ninguna, y ya es literal** | 3001 |
 | `web` | — | — | 3000 |
 
 El gateway conserva el puerto 3001 a propósito: el frontend y la colección de Postman
@@ -336,8 +363,8 @@ siguen funcionando durante toda la migración.
 Arriendos360/
 ├─ apps/
 │  ├─ web/                     React SPA
-│  └─ gateway/                 PEP: SSL, validación JWT, matriz RBAC, enrutamiento,
-│  │                           agregación del dashboard
+│  └─ gateway/                 PEP: SSL, validación JWT, matriz RBAC, guardias,
+│  │                           enrutamiento y dashboard. SIN base de datos.
 ├─ services/
 │  ├─ ms-identidad/  ms-inmuebles/  ms-contratos/
 │  ├─ ms-financiero/  ms-notificaciones/
@@ -346,7 +373,8 @@ Arriendos360/
 │  └─ shared/                  JWT, errores, cliente HTTP, el bus de eventos
 │                              (tipos, tabla de salida, publicador, consumidor)
 │                              y el calendario: regla del dia 31 y del periodo
-├─ database/                   Migraciones y seeds, una carpeta por esquema
+├─ database/                   Migraciones y seeds, una carpeta por esquema:
+│                              identidad, inmuebles, contratos, financiero
 ├─ infra/                      Dockerfiles, docker-compose, Bicep de Azure
 ├─ docs/                       ADRs, ERD, colección Postman
 └─ .github/workflows/
@@ -397,6 +425,14 @@ ruta?) y ABAC en el controlador (¿este recurso es suyo?). Ninguno reemplaza al 
 
 Coreografía, no orquestación: Contratos no llama a Financiero ni sabe que existe.
 
+**Esto está implementado desde el paso 6e**, y con ello el bus deja de tener un solo
+consumidor y un solo efecto. La consecuencia que hay que tener presente antes de tocar
+el motor: **`procesarContratos()` ya NO genera la primera cuenta de cobro**. La primera
+es del evento; el barrido se queda con los meses siguientes y **salta el primer periodo
+siempre, exista la cuenta o no**. Saltarlo sólo cuando ya existe dejaría que el barrido
+de medianoche se colara en la ventana de entrega del evento y facturara dos veces. Ver
+`docs/adr/0018`.
+
 ### El bus, en concreto
 
 **PostgreSQL con patrón outbox. Sin broker.** Ver `docs/adr/0012`. El mecanismo entero
@@ -429,8 +465,19 @@ agregado del emisor, que es donde corresponde. **El rastro no se pierde, cambia 
 
 | Evento | Emisor | Carga | Consumidores |
 |---|---|---|---|
-| `ContratoFormalizado` | `ms-contratos` | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte` | `ms-inmuebles` → `arrendado`. En el paso 6e también `ms-financiero`. |
+| `ContratoFormalizado` | `ms-contratos` | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte` | **DOS:** `ms-inmuebles` → `arrendado`, y `ms-financiero` → primera cuenta de cobro. |
 | `ContratoFinalizado` | ídem | `id_contrato`, `id_inmueble` | `ms-inmuebles` → `disponible`. Ver `docs/adr/0013`. |
+
+**`ContratoFormalizado` tiene dos consumidores desde el paso 6e**, y eso cambia algo para
+el que ya estaba: la fila de la tabla de salida se marca entregada cuando aceptan **los
+dos**. Si ms-financiero está caído, el evento se reintenta y ms-inmuebles lo recibe otra
+vez. La idempotencia del consumidor deja de ser una precaución teórica y pasa a
+ejercitarse de verdad.
+
+**`ContratoFinalizado` NO tiene consumidor en Financiero, y es deliberado.** Finalizar un
+contrato no cancela lo que se debe: las cuentas emitidas siguen emitidas y las que están
+en mora siguen en mora. Lo único que cambia es que dejan de generarse cuentas nuevas, y
+eso ya ocurre solo porque el motor barre los contratos `activo`.
 
 ### El sistema es consistente en el tiempo para el estado del inmueble
 
@@ -458,8 +505,10 @@ llegado**. Consecuencias prácticas:
   reflejar el contrato recién firmado. Es el comportamiento correcto, no un fallo.
 
 **Generación recurrente:** las cuentas de cobro de meses siguientes las genera
-`MS-Financiero` con un proceso programado que barre fechas de corte. Ese código existe
-parcialmente en `financialEngine.js`.
+`MS-Financiero` con un proceso programado que barre fechas de corte
+(`services/ms-financiero/src/services/motor.ts`). **Ese cron vive dentro del contenedor y
+no dispara con scale-to-zero**: ver la decisión abierta marcada como bloqueante, más
+abajo.
 
 Los tipos de evento viven en `packages/shared/src/eventos.ts`. **Dapr pub/sub sigue
 siendo el camino natural** el día que haya más de un consumidor por evento y el volumen
@@ -515,8 +564,11 @@ nube**, y guarda la URL devuelta en `archivo_anexo`.
 
 ## Migración: en qué orden
 
-El monolito y los microservicios conviven. El gateway resuelve local lo no extraído y
-remoto lo ya extraído.
+El monolito y los microservicios convivieron mientras duró la migración: el gateway
+resolvía local lo no extraído y remoto lo ya extraído. **Desde el paso 6e no queda nada
+local**: los cinco prefijos de la API son remotos y la costura no tiene a dónde caer. La
+tabla de enrutamiento se conserva igual, porque es la que documenta a qué servicio va
+cada prefijo y la que imprime el listado de arranque.
 
 1. ~~**Estructura.** Monorepo con npm workspaces.~~ **Hecho.**
 2. ~~**Gateway.** Costura de enrutamiento y paquetes compartidos.~~ **Hecho.**
@@ -569,13 +621,20 @@ remoto lo ya extraído.
      anexos se resolvió SIN denormalizar `id_propietario` (`docs/adr/0017`), el
      salto Financiero → Contratos dejó de ser un `include` y pasó a componerse por
      HTTP, y el calendario subió a `packages/shared`.
-   - **6e.** Extraer `ms-financiero` con `Cuentas_cobro` + `Transacciones`, y con él
-     el motor de mora. `ContratoFormalizado` gana entonces su segundo consumidor:
-     ms-financiero, que inserta la primera cuenta de cobro. Con eso el gateway se
-     queda sin tablas propias, que es lo que el Capítulo 2 dice que tiene que ser.
-   - Y en algún punto de los tres: obtener datos del contrato por API en vez de por
-     `include`.
-7. **`ms-notificaciones`.** Mailer y recordatorios.
+   - ~~**6e.** Extraer `ms-financiero` con `Cuentas_cobro` + `Transacciones`, y con él
+     el motor de mora.~~ **Hecho.** `ContratoFormalizado` ganó su segundo consumidor
+     y la primera cuenta de cobro nace del evento, que es el caso que el Capítulo 2
+     especifica. El gateway se quedó sin tablas, sin modelos y sin conexión a
+     PostgreSQL; `database/dominio/` desapareció; `verificar-mora` y el motor pasaron
+     a aplicar la misma regla de mora. Ver `docs/adr/0018`.
+   - ~~Y en algún punto de los tres: obtener datos del contrato por API en vez de por
+     `include`.~~ **Hecho.** No queda ningún `include` que cruce frontera.
+7. **`ms-notificaciones`.** Mailer y recordatorios. **Se lleva dos deudas que ya tienen
+   dueño:** el correo de recuperación de ms-identidad (`docs/adr/0010`) y los avisos del
+   motor de ms-financiero (`docs/adr/0018`). El segundo no es mover un archivo: el motor
+   pasa a **publicar eventos** —«cuenta próxima a vencer», «cuenta en mora»— y
+   Notificaciones decide a quién avisar. Eso convierte a ms-financiero en productor del
+   bus, con su propia tabla de salida.
 8. **Azure Container Apps.** Bicep, pipeline y terminación SSL. Al final.
 
 ---
@@ -620,7 +679,8 @@ remoto lo ya extraído.
 - **Dinero:** pesos colombianos. `NUMERIC` en PostgreSQL, nunca `float`.
 - **Fechas:** guardar en UTC, presentar en `America/Bogota`. **Cerrado en el paso 6c.**
   El 6a arregló la mitad: `fecha_inicio_corte` y `fecha_limite_pago` se derivan en UTC
-  (`models/fechasContrato.js`) y la migración las rellenó con `AT TIME ZONE 'UTC'`. El
+  (`packages/shared/src/fechas.ts`) y la migración las rellenó con `AT TIME ZONE 'UTC'`.
+  El
   6c cerró la otra: el motor de mora ya no compara contra `new Date()` local sino
   contra `hoyEnZonaNegocio()`, que devuelve el día de calendario en `America/Bogota`,
   y `diasEntre()` cuenta días de calendario en vez de intervalos de 24 horas. La zona
@@ -633,11 +693,14 @@ remoto lo ya extraído.
   **teselan** el calendario: cada día pertenece a uno y sólo a uno, sin huecos ni
   solapes, sea cual sea el día pactado. «Un mes menos un día» lo rompería en cuanto un
   mes tuviera 28 días y el siguiente 31. La regla está en `periodoDeCorte()`, en
-  `models/fechasContrato.js`, y no se calcula en ningún otro sitio.
+  `packages/shared/src/fechas.ts`, y no se calcula en ningún otro sitio. Subió allí en
+  el paso 6d, cuando Contratos y Financiero dejaron de compartir proceso: la usan los
+  dos, y desde el 6e también el consumidor del evento que crea la primera cuenta de
+  cobro. Duplicarla habría sido tener dos calendarios que nada sincroniza.
 - **Días del mes que no existen:** un contrato que vence el 31 no tiene ese día en
   febrero. La regla es **recortar al último día del mes**, y el día pactado se guarda
   sin tocar: el recorte se aplica al resolverlo contra cada mes, no al guardarlo. Ver
-  la cabecera de `models/fechasContrato.js`.
+  la cabecera de `packages/shared/src/fechas.ts`.
 
 ---
 
@@ -745,7 +808,9 @@ docker compose -f infra/docker-compose.yml down -v        # reinicio limpio
 npm test --workspace=services/ms-identidad                # pruebas de un servicio
 npm test --workspace=services/ms-inmuebles                # idem
 npm test --workspace=services/ms-contratos                # idem
+npm test --workspace=services/ms-financiero               # idem
 npm test --workspaces --if-present                        # todas, contra dobles
+npm run motor --workspace=services/ms-financiero          # barrido manual del motor
 npm run test:integracion                                  # caminos criticos, stack arriba
 npm run seed --workspace=services/ms-identidad            # usuarios de prueba
 ```
@@ -769,48 +834,79 @@ Pruebas con `NODE_ENV=test`, apuntando a `arriendos360_test`.
 
 Resuélvelas con un ADR en `docs/adr/` cuando llegue el momento, no antes:
 
-**Un publicador con varias réplicas del gateway.** Hoy hay una, y dos publicadores sobre
-la misma tabla de salida podrían entregar el mismo evento a la vez. Eso ya está cubierto
-—la entrega es al-menos-una-vez y el consumidor descarta repetidos— pero el **orden por
+**El cron del motor no dispara con scale-to-zero. 🔴 BLOQUEANTE PARA PRODUCCIÓN.**
+`node-cron` programa el barrido diario DENTRO del proceso de ms-financiero. Funciona
+mientras el proceso viva, y hoy vive porque Compose mantiene el contenedor en pie; deja
+de funcionar en Azure Container Apps, que escala a cero sin tráfico. Un contenedor
+dormido a las 00:01 no genera las cuentas de cobro del día ni marca las moras, **y no
+hay error, ni log, ni excepción**: simplemente no pasa nada, y nadie se entera hasta que
+un inquilino pregunta por su recibo.
+
+La salida es un **trabajo programado de Container Apps** (`Job` con `triggerType:
+Schedule`) que levante un contenedor, ejecute `npm run motor` y se apague. El código ya
+está listo —`src/scripts/motor.ts` no depende de que la API escuche y sale con código
+distinto de cero si falla, que es como un `Job` decide si fue bien—; lo que falta es el
+Bicep, y eso es del paso 8.
+
+**Esta no es una decisión abierta más.** Las otras del paso 8 —claves por servicio,
+limitación de tasa— degradan la seguridad si no se hacen; ésta rompe una función del
+producto. El arranque del servicio lo grita en el log. Ver `docs/adr/0018`.
+
+**Un publicador con varias réplicas de ms-contratos.** Hoy hay una, y dos publicadores
+sobre la misma tabla de salida podrían entregar el mismo evento a la vez. Eso ya está
+cubierto —la entrega es al-menos-una-vez y los consumidores descartan repetidos, cosa
+que desde el paso 6e importa el doble porque uno de ellos INSERTA— pero el **orden por
 clave** sí se vería afectado por un bloqueo por fila (`FOR UPDATE SKIP LOCKED`).
-Reconsiderar en el paso 8, cuando Container Apps pueda escalar el gateway. Ver
+Reconsiderar en el paso 8, cuando Container Apps pueda escalar los servicios. Ver
 `docs/adr/0012`.
 
-**Frecuencia de refresco de la caché de revocados en el gateway.** Ventana entre el
-logout y su efecto real en las demás réplicas.
+**Frecuencia de refresco de la caché de revocados.** Ventana entre el logout y su efecto
+real. Son ya CUATRO cachés —el gateway y los tres servicios que verifican tokens— y las
+cuatro con el mismo intervalo de 15 s, así que la ventana observable es la misma en
+todas. Cuidado con dejar `REVOCADOS_INTERVALO_MS=` vacía en un `.env`: `Number('')` es
+`0` y eso convierte el refresco en un bucle. Los servicios caen al defecto con `||`, no
+con `??`, justamente por eso.
 
-**Listados de un usuario con doble rol.** `contrato.controller.js` y
-`pago.controller.js` deciden la visibilidad con una disyunción: eres el dueño del
-inmueble **o** el inquilino del contrato. El criterio es correcto —la pertenencia manda
-sobre el rol declarado, y es lo que permite que quien es las dos cosas no pierda la
-mitad de sus datos—, pero hoy se resuelve con un `Op.or` sobre columnas alcanzadas por
-`include`, es decir, **JOINs que cruzan bounded contexts**:
+**Listados de un usuario con doble rol.** La visibilidad se decide con una disyunción:
+eres el dueño del inmueble **o** el inquilino del contrato. El criterio es correcto —la
+pertenencia manda sobre el rol declarado, y es lo que permite que quien es las dos cosas
+no pierda la mitad de sus datos—, pero hasta el paso 6d se resolvía con un `Op.or` sobre
+columnas alcanzadas por `include`, es decir, **JOINs que cruzaban bounded contexts**, en
+tres sitios del gateway:
 
-| Controlador | Ruta de la condición | Contextos que cruza |
+| Dónde estaba | Ruta de la condición | Contextos que cruzaba |
 |---|---|---|
 | `contrato.controller.js` | `$Inmueble.id_propietario$` | Contratos → Inmuebles |
 | `pago.controller.js` (cuentas) | `$Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
 | `pago.controller.js` (transacciones) | `$CuentaCobro.Contrato.Inmueble.id_propietario$` | Financiero → Contratos → Inmuebles |
 
+(Los tres archivos ya no existen: se fueron con ms-contratos y ms-financiero.)
+
 **RESUELTA EN EL PASO 6d.** El paso 4 hizo la mitad y el 6d la otra, con una vuelta de
-tuerca: en vez de encadenar dos saltos desde el gateway —pedir los inmuebles del
-propietario y después los contratos de esos inmuebles— la disyunción entera la resuelve
-**ms-contratos**, que tiene la mitad barata (`id_inquilino` es columna suya) y sabe pedir
-la cara. El gateway hace UNA llamada, `GET /interno/contratos?parte=<sub>`, y recibe la
-lista de identificadores que entra en un `IN` contra su base local.
+tuerca: en vez de encadenar dos saltos —pedir los inmuebles del propietario y después
+los contratos de esos inmuebles— la disyunción entera la resuelve **ms-contratos**, que
+tiene la mitad barata (`id_inquilino` es columna suya) y sabe pedir la cara. Quien
+pregunta hace UNA llamada, `GET /interno/contratos?parte=<sub>`, y recibe la lista de
+identificadores que entra en un `IN` contra su base local.
 
 Un salto de red donde habría habido dos, y la regla escrita una vez en vez de tres. Lo
-que quedaba por decidir —si el gateway pagina o si Contratos acepta una lista de IDs— se
-resolvió solo: la lista viaja en el cuerpo de la respuesta y se usa en un `IN` de SQL
-local, así que el problema del tamaño no llegó a plantearse. El día que un propietario
-tenga tantos contratos que la lista pese, la salida es paginar en `/interno`; hoy no.
+que quedaba por decidir —si quien pregunta pagina o si Contratos acepta una lista de
+IDs— se resolvió solo: la lista viaja en el cuerpo de la respuesta y se usa en un `IN`
+de SQL local, así que el problema del tamaño no llegó a plantearse. El día que un
+propietario tenga tantos contratos que la lista pese, la salida es paginar en
+`/interno`; hoy no.
 
-**`database/dominio/` es provisional.** Agrupaba inmuebles, contratos, pagos y abonos
-en una sola carpeta porque todavía no había servicios que las separaran.
-`database/inmuebles/` y `database/contratos/` ya salieron de ahí —cada una con una
-migración que copia y otra que retira, en ese orden— y sólo queda
-`database/financiero/`, que se va en el paso 6e por el mismo camino. Cuando se vaya,
-esta carpeta desaparece. Ver `docs/adr/0003`.
+Desde el paso 6e quien pregunta es **ms-financiero**, no el gateway: la base local
+contra la que se hace el `IN` es la suya. El gateway sólo conserva la mitad de
+propietario, para el dashboard.
+
+~~**`database/dominio/` es provisional.**~~ **RESUELTA EN EL PASO 6e: la carpeta ya no
+existe.** `inmuebles/`, `contratos/` y `financiero/` salieron de ahí, cada una con su
+servicio. La última rompió el patrón de «una migración copia, otra retira» y hace las dos
+cosas en `database/financiero/002`, porque al irse esas tablas el gateway pierde su
+aplicador de migraciones y no queda nadie que pueda aplicar la retirada por separado.
+Resulta además más seguro: copia y retirada caen en la misma transacción. Ver
+`docs/adr/0003` y `docs/adr/0018`.
 
 **Clave por servicio para las llamadas internas.** Hoy todos comparten
 `SERVICIO_JWT_SECRET`, así que comprometer un servicio permite suplantar a los demás. El
@@ -826,9 +922,11 @@ Apps puede resolverse en el ingreso en vez de en código.
 **Autoservicio de pago del inquilino.** `docs/adr/0006` deja el registro de pagos en
 manos del propietario porque el sistema no puede verificar un pago. Si el producto
 quiere autoservicio, hace falta otro diseño: reporte del inquilino + confirmación del
-propietario, o pasarela que dispare el asiento. Sigue abierta después del 6c: la
+propietario, o pasarela que dispare el asiento. Sigue abierta después del 6e: la
 anulación del `docs/adr/0016` da la mitad que faltaba —poder corregir un registro
-equivocado sin borrarlo— pero no resuelve quién puede registrarlo.
+equivocado sin borrarlo— pero no resuelve quién puede registrarlo. Lo que sí cambia con
+la extracción es dónde se decidiría: la regla es del ABAC de ms-financiero, no del
+gateway.
 
 **Devoluciones.** `TIPOS_TRANSACCION` está cerrado con un solo valor, `INGRESO`, porque
 es lo único que el sistema produce. El día que haya que devolver dinero —un depósito que
@@ -848,6 +946,10 @@ buzón de pruebas (Ethereal). El enlace de recuperación se genera y se envía, 
 verlo en desarrollo hay que leerlo del log o de `identidad.tokens_recuperacion`. Es la
 misma razón por la que la contraseña temporal del ADR 0007 se entrega en mano.
 
+Son **dos** mailers desde el paso 6e, y los dos provisionales: el de ms-identidad, para
+la recuperación, y el de ms-financiero, para los avisos del motor. Los dos se van en el
+paso 7 y el segundo no se muda sin más — se convierte en publicación de eventos.
+
 ~~**`/uploads/` se sirve sin autenticación.**~~ **Resuelto en el paso 6b.** No queda
 ninguna ruta que sirva archivos sin pasar por la matriz: los anexos salen sólo por
 `GET /api/contratos/:id/anexos/:idAnexo`, con RBAC y ABAC delante. Y **no** se hizo
@@ -859,20 +961,21 @@ agujero con mejor presentación. Ver `docs/adr/0014`.
 siendo la implementación de desarrollo, pero detrás de una interfaz: en despliegue se
 usa Azure Blob, y la elección la decide una sola variable de entorno.
 
-**Los anexos ya subidos viven en el volumen del gateway, no en el de ms-contratos.**
-La migración `database/contratos/002` mueve las FILAS, no los archivos: con la
-implementación de disco están en `apps/gateway/almacenamiento/` y hay que copiarlos a
-`services/ms-contratos/almacenamiento/` a mano. Con Azure Blob no hace falta —el
+**Los anexos subidos ANTES del paso 6d viven en el volumen del gateway, no en el de
+ms-contratos.** La migración `database/contratos/002` movió las FILAS, no los archivos:
+con la implementación de disco quedaron en `apps/gateway/almacenamiento/` y hay que
+copiarlos a `services/ms-contratos/almacenamiento/` a mano. Con Azure Blob no hace falta —el
 contenedor es el mismo y la referencia guardada sigue valiendo—, y en la base de
 desarrollo no había ninguno cuando se hizo la mudanza. Está anotado en la cabecera de
 esa migración.
 
-**Un contrato de 16 líneas de mora no existe: `verificar-mora` y el motor no aplican la
-misma regla.** `POST /api/pagos/verificar-mora` marca EN_MORA toda cuenta PENDIENTE o
-PARCIAL cuyo corte ya pasó —un solo día basta— mientras que `procesarPagos()` espera al
-sexto. Venía de antes del paso 6c y sigue igual: es un endpoint manual que el frontend no
-llama, pero si alguien lo dispara desde Postman deja cuentas en mora que el motor no
-habría marcado. Unificarlo es trabajo del 6d, cuando el motor se mude a Financiero.
+~~**Un contrato de 16 líneas de mora no existe: `verificar-mora` y el motor no aplican la
+misma regla.**~~ **Resuelto en el paso 6e**, que es cuando el motor se mudó a Financiero
+y las dos reglas quedaron en el mismo servicio. Ahora las dos usan `DIAS_PARA_MORA`, una
+constante exportada de `services/motor.ts`, y `PARCIAL` queda fuera en los dos caminos.
+Lo que NO se unificó es el alcance —el motor barre el sistema entero y el endpoint sólo
+los contratos de quien llama—, y esa diferencia sí tiene que seguir: es la que hay entre
+un proceso y una petición.
 
 **Create React App** ya no recibe mantenimiento. Migrar a Vite es barato y acelera el
 build en CI, pero no es urgente.
@@ -892,6 +995,9 @@ si no, registra el cambio en control de configuración.
 - No guardes el token en `localStorage`, `sessionStorage` ni cookies.
 - No aceptes el token por query string.
 - No crees tablas fuera de las canónicas sin actualizar el documento primero.
+- **No le devuelvas una tabla al gateway.** Se quedó sin base en el paso 6e y eso es lo
+  que el Capítulo 2 dice que tiene que ser. Si algo parece necesitar estado ahí, es que
+  pertenece a un servicio o que es una agregación que se compone por HTTP.
 - No cambies el SRS ni el PMP por tu cuenta. Son línea base; los cambios pasan por el
   proceso formal de la sección 13.3.2 del PMP.
 - No borres pruebas para que el build pase.

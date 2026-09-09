@@ -8,7 +8,8 @@ una unica instancia de PostgreSQL). Reemplazan a `sequelize.sync()`; ver
 |---|---|---|
 | `identidad/` | `identidad` | `services/ms-identidad`, al arrancar |
 | `inmuebles/` | `inmuebles` | `services/ms-inmuebles`, al arrancar |
-| `dominio/` | `public` | `apps/gateway`, al arrancar |
+| `contratos/` | `contratos` | `services/ms-contratos`, al arrancar |
+| `financiero/` | `financiero` | `services/ms-financiero`, al arrancar |
 
 Cada servicio aplica **solo las suyas**, y la tabla de control
 (`<esquema>.migraciones_aplicadas`) vive en su propio esquema: nadie comparte ni
@@ -17,16 +18,34 @@ siquiera el registro de que migraciones corrio.
 Las carpetas entran en la imagen del servicio por `COPY`, no se montan como volumen.
 Tocar un `.sql` exige reconstruir.
 
-## `dominio/` es provisional
+## `dominio/` ya no existe
 
-Agrupa lo que todavia no tiene servicio propio: contratos, anexos, pagos y abonos. Se
-parte en `contratos/` y `financiero/` en el paso 6, y cada carpeta se va con su
-servicio.
+Agrupaba lo que todavia no tenia servicio propio —inmuebles, contratos, anexos, pagos y
+abonos— y la aplicaba el gateway contra `public`. Se fue vaciando carpeta a carpeta y
+**desaparecio en el paso 6e**, con las dos ultimas tablas.
 
-**Hoy `inmuebles` esta declarada dos veces**: en `dominio/` para el gateway y en
-`inmuebles/` para el servicio. Es deliberado y temporal — el servicio ya existe pero el
-gateway todavia lee su propia copia. La duplicacion termina cuando el gateway se
-desconecte (paso 4b); hasta entonces, la tabla de `inmuebles.inmuebles` esta vacia.
+Con ella se fue tambien el aplicador de migraciones del gateway: **el gateway no tiene
+tablas ni conexion a PostgreSQL**. La unica tabla que queda en `public` es su vieja
+`migraciones_aplicadas`, inerte, que ningun proceso vuelve a mirar.
+
+## Las mudanzas: copiar y retirar
+
+Cada extraccion tuvo que mover filas de `public` al esquema del servicio nuevo. El
+patron fue **una migracion que copia y otra que retira**, en ese orden, con Compose
+garantizandolo: el gateway esperaba al healthcheck del servicio, que solo responde
+despues de migrar.
+
+| Paso | Copia | Retira |
+|---|---|---|
+| 4b | `inmuebles/002` | `dominio/002` |
+| 6d | `contratos/002` | `dominio/007` |
+| 6e | `financiero/002` — **las dos cosas** | — |
+
+La ultima rompe el patron a proposito, y no por comodidad: al irse estas tablas el
+gateway pierde su aplicador de migraciones, asi que no queda ningun proceso capaz de
+aplicar la retirada por separado. Juntarlas resulta ademas mas seguro —el runner
+envuelve cada migracion en una transaccion, asi que copia y retirada son atomicas— sin
+renunciar a la comprobacion fila a fila antes de borrar. Ver `docs/adr/0018`.
 
 ## Escribir una migracion
 
@@ -36,4 +55,9 @@ desconecte (paso 4b); hasta entonces, la tabla de `inmuebles.inmuebles` esta vac
   hechas por nombre y no vuelve a mirarlas.
 - Cada una corre en su propia transaccion junto con su registro de control: o se aplica
   entera y queda anotada, o no pasa nada.
-- Sin claves foraneas que crucen esquemas (regla dura 1).
+- Sin claves foraneas que crucen esquemas (regla dura 1). Las dos unicas FK fisicas del
+  proyecto —`anexos` -> `contratos` y `transacciones` -> `cuentas_cobro`— son internas a
+  su servicio.
+- Los catalogos cerrados llevan `CHECK`, y **si agregas un valor hay que tocarlo tambien
+  en `packages/contracts`**: el modelo valida contra esa lista y rechazaria antes de
+  llegar al `CHECK`. Nada los sincroniza solo.

@@ -18,28 +18,45 @@
  * Usa el runner de Node (`node --test`), no jest: cero dependencias nuevas para
  * algo que casi sólo hace peticiones HTTP y comprueba respuestas.
  *
- * EL «CASI» ES LA TABLA DE SALIDA. Desde el paso 6a hay una comprobación que no
- * se puede hacer por HTTP: qué lleva dentro el evento que emite el gateway. El
- * sobre no aparece en ninguna respuesta —viaja del gateway a ms-inmuebles por
- * la red interna— así que la única forma de verlo es leer `eventos_salida`.
+ * EL «CASI» SON LAS CONSULTAS A LA BASE. Hay dos cosas que no se pueden
+ * comprobar por HTTP y que son justamente las que dicen si una extracción está
+ * hecha de verdad o sólo a medias:
  *
- * DESDE EL PASO 6d ESA TABLA ES DE ms-contratos, y eso es parte de lo que esta
- * consulta comprueba: si el evento apareciera en `public`, el productor seguiría
- * siendo el gateway y la extracción no estaría hecha.
- * Se usa `pg`, que ya es dependencia del gateway: no entra nada nuevo.
+ *   1. **Qué lleva dentro el evento.** El sobre no aparece en ninguna respuesta
+ *      —viaja de ms-contratos a sus suscriptores por la red interna— así que la
+ *      única forma de verlo es leer `contratos.eventos_salida`. Que esté ahí y
+ *      no en `public` es parte de lo que se comprueba: si apareciera en `public`
+ *      el productor seguiría siendo el gateway.
+ *
+ *   2. **En qué esquema vive cada tabla.** Desde el paso 6e se comprueba que las
+ *      cuentas de cobro estén en `financiero` y que `public.cuentas_cobro` y
+ *      `public.transacciones` se hayan retirado. El gateway ya no tiene ninguna
+ *      tabla, y esa afirmación no se puede hacer desde su API.
+ *
+ * Se usa `pg`, que es dependencia de la raíz del monorepo desde que el gateway
+ * dejó de tener base: no entra nada nuevo.
+ *
+ * Y `zlib`, que trae Node, para leer los PDF de los comprobantes. Ver
+ * `textoDelPdf`.
  */
 
 const path = require('node:path');
+const zlib = require('node:zlib');
 const assert = require('node:assert/strict');
 const { after, before, describe, it } = require('node:test');
 const { Client } = require('pg');
 
-// Las credenciales son las del gateway: es su base y su tabla de salida.
-require('dotenv').config({ path: path.resolve(__dirname, '../../apps/gateway/.env') });
+// Las credenciales de la base salen del .env de ms-financiero. ANTES salian del
+// gateway, «porque era su base y su tabla de salida»; desde el paso 6e el
+// gateway no tiene base, asi que no tiene DB_*. Se toma la de un servicio
+// cualquiera: la instancia es la misma para todos, lo que cambia es el esquema.
+require('dotenv').config({ path: path.resolve(__dirname, '../../services/ms-financiero/.env') });
 
 const GATEWAY = process.env.URL_GATEWAY || 'http://localhost:3001';
 const IDENTIDAD = process.env.URL_IDENTIDAD || 'http://localhost:3011';
 const INMUEBLES = process.env.URL_INMUEBLES || 'http://localhost:3012';
+const CONTRATOS = process.env.URL_CONTRATOS || 'http://localhost:3013';
+const FINANCIERO = process.env.URL_FINANCIERO || 'http://localhost:3014';
 
 /** Sufijo único por ejecución: la suite corre contra una base que no se resetea. */
 const SELLO = Date.now().toString().slice(-9);
@@ -120,6 +137,58 @@ const eventoDe = async (idContrato, tipo) => {
     }
 };
 
+/**
+ * El texto imprimible de un PDF de PDFKit.
+ *
+ * Dos capas: los flujos vienen comprimidos con Flate y el texto va en cadenas
+ * hexadecimales dentro de arreglos de kerning. Las dos las resuelve `zlib`, que
+ * trae Node — ninguna dependencia nueva. Es el mismo lector que usa
+ * `services/ms-financiero/tests/comprobantes.test.ts`, y esta duplicado a
+ * proposito: son dos suites que no comparten runner ni lenguaje, y un modulo
+ * comun solo para esto ataria la suite de integracion al build de un servicio.
+ */
+const textoDelPdf = (cuerpo) => {
+    const flujos = [];
+    let desde = 0;
+
+    for (;;) {
+        const inicio = cuerpo.indexOf('stream', desde);
+        if (inicio === -1) break;
+
+        const fin = cuerpo.indexOf('endstream', inicio);
+        if (fin === -1) break;
+
+        let datos = inicio + 'stream'.length;
+        if (cuerpo[datos] === 0x0d) datos += 1;
+        if (cuerpo[datos] === 0x0a) datos += 1;
+
+        try {
+            flujos.push(zlib.inflateSync(cuerpo.subarray(datos, fin)).toString('latin1'));
+        } catch {
+            /* no es un flujo Flate: no interesa */
+        }
+
+        desde = fin + 'endstream'.length;
+    }
+
+    const contenido = flujos.join('\n');
+    const bloques = contenido.match(/\[[^\]]*\]\s*TJ|\((?:\\.|[^\\()])*\)\s*Tj/g) || [];
+
+    return bloques
+        .map((bloque) => {
+            const piezas = bloque.match(/<[0-9A-Fa-f]*>|\((?:\\.|[^\\()])*\)/g) || [];
+
+            return piezas
+                .map((pieza) =>
+                    pieza.startsWith('<')
+                        ? Buffer.from(pieza.slice(1, -1), 'hex').toString('latin1')
+                        : pieza.slice(1, -1).replace(/\\([()\\])/g, '$1')
+                )
+                .join('');
+        })
+        .join(' ');
+};
+
 let tokenPropietario;
 let idInquilino;
 let idInmueble;
@@ -133,7 +202,9 @@ describe('Caminos críticos', () => {
         for (const [nombre, url] of [
             ['gateway', `${GATEWAY}/`],
             ['ms-identidad', `${IDENTIDAD}/`],
-            ['ms-inmuebles', `${INMUEBLES}/`]
+            ['ms-inmuebles', `${INMUEBLES}/`],
+            ['ms-contratos', `${CONTRATOS}/`],
+            ['ms-financiero', `${FINANCIERO}/`]
         ]) {
             try {
                 await fetch(url, { signal: AbortSignal.timeout(2000) });
@@ -439,21 +510,97 @@ describe('Caminos críticos', () => {
         assert.equal(sigue.estado, 200);
     });
 
-    it('registrar un pago funciona de punta a punta', async () => {
-        // Desde el paso 6c son dos recursos distintos: la cuenta de cobro se
-        // emite en `/cuentas-cobro` y el dinero entra por `POST /api/pagos`,
-        // con el cuerpo del Capítulo 2.
-        const cuenta = await pedir('POST', '/api/pagos/cuentas-cobro', {
-            token: tokenPropietario,
-            cuerpo: {
-                id_contrato: idContrato,
-                valor: 1500000,
-                inicio: '2026-01-01'
-            }
-        });
-        assert.equal(cuenta.estado, 201);
-        idCuentaCobro = cuenta.datos.cuenta_cobro.id_cuenta_cobro;
+    it('el evento creó la PRIMERA cuenta de cobro en ms-financiero', async () => {
+        // ── LA PRUEBA DEL PASO 6e, Y LA QUE NINGÚN DOBLE PUEDE DAR ──────────
+        //
+        // Es el caso que el Capítulo 2 especifica textualmente: MS-Contratos
+        // emite `ContratoFormalizado` y MS-Financiero inserta la primera
+        // `Cuenta_cobro`. Aquí atraviesa TRES procesos y una tabla de salida —
+        // el contrato se guardó en ms-contratos, su publicador entregó el sobre
+        // y ms-financiero decidió por su cuenta qué significaba.
+        //
+        // Nadie la crea a mano. Antes de este paso esta suite emitía la cuenta
+        // con `POST /api/pagos/cuentas-cobro`; ahora eso sobra, y de hecho
+        // chocaría contra el índice único `(id_contrato, inicio)`.
+        //
+        // Se ESPERA a que converja, como con el estado del inmueble: el sistema
+        // es consistente en el tiempo para todo lo que nace de un evento.
+        const intervalo = Number(process.env.EVENTOS_INTERVALO_MS || 5000);
 
+        const cuentas = await esperarA(
+            () => pedir('GET', `/api/pagos/contrato/${idContrato}`, { token: tokenPropietario }),
+            (r) => Array.isArray(r.datos) && r.datos.length > 0,
+            intervalo * 3
+        );
+
+        assert.equal(cuentas.estado, 200);
+        assert.equal(
+            cuentas.datos.length,
+            1,
+            'debería haber UNA cuenta de cobro, creada por el evento'
+        );
+
+        const primera = cuentas.datos[0];
+        idCuentaCobro = primera.id_cuenta_cobro;
+
+        // Los tres campos que el evento transporta, tal cual.
+        assert.equal(Number(primera.valor), 1500000, 'el canon viaja en el evento');
+        assert.equal(primera.inicio, '2026-01-01', 'la fecha de corte también');
+        assert.equal(primera.estado, 'PENDIENTE');
+
+        // El periodo tesela: `fin` es la víspera del siguiente corte.
+        assert.equal(primera.fin, '2026-01-31');
+
+        // El saldo se deriva y llega con el nombre de siempre.
+        assert.equal(primera.saldo_pendiente, 1500000);
+
+        // Y la auditoría registra al SISTEMA, no al propietario que firmó: el
+        // sobre no lleva actor. Quién firmó está en el contrato.
+        assert.equal(primera.creado_por, USUARIO_SISTEMA);
+    });
+
+    it('las cuentas de cobro viven en el esquema de ms-financiero', async () => {
+        // La comprobación de que la extracción está hecha de verdad y no a
+        // medias: las dos tablas tienen que estar en `financiero` y las de
+        // `public` haberse retirado con `database/financiero/002`.
+        const cliente = new Client({
+            host: process.env.DB_HOST_TEST_INTEGRACION || 'localhost',
+            port: Number(process.env.DB_PORT || 5432),
+            database: process.env.DB_NAME || 'arriendos360_db',
+            user: process.env.DB_USER || 'postgres',
+            password: process.env.DB_PASSWORD
+        });
+
+        await cliente.connect();
+        try {
+            const { rows } = await cliente.query(
+                `SELECT count(*)::int AS total
+                   FROM financiero.cuentas_cobro
+                  WHERE id_cuenta_cobro = $1`,
+                [idCuentaCobro]
+            );
+            assert.equal(rows[0].total, 1, 'la cuenta debería estar en financiero.cuentas_cobro');
+
+            const { rows: restos } = await cliente.query(
+                "SELECT to_regclass('public.cuentas_cobro') AS c, to_regclass('public.transacciones') AS t"
+            );
+            assert.equal(restos[0].c, null, 'public.cuentas_cobro debería haberse retirado');
+            assert.equal(restos[0].t, null, 'public.transacciones debería haberse retirado');
+
+            // Y su bitácora de eventos procesados, que es lo que hace que una
+            // reentrega no cobre dos veces.
+            const { rows: bitacora } = await cliente.query(
+                "SELECT to_regclass('financiero.eventos_procesados') AS tabla"
+            );
+            assert.notEqual(bitacora[0].tabla, null);
+        } finally {
+            await cliente.end();
+        }
+    });
+
+    it('registrar un pago funciona de punta a punta', async () => {
+        // El dinero entra por `POST /api/pagos`, con el cuerpo del Capítulo 2, y
+        // desde el paso 6e la petición atraviesa la costura hasta ms-financiero.
         const transaccion = await pedir('POST', '/api/pagos', {
             token: tokenPropietario,
             cuerpo: {
@@ -494,14 +641,73 @@ describe('Caminos críticos', () => {
         assert.equal(anulacion.datos.cuenta_cobro.estado, 'PENDIENTE');
     });
 
-    it('el recibo en PDF compone al arrendatario', async () => {
+    it('el comprobante de la transaccion sale con los datos de los tres servicios', async () => {
+        // RF-18 contra el stack real, y es donde de verdad se ve si la
+        // composicion funciona: el arrendatario sale de ms-identidad y el
+        // inmueble de ms-inmuebles a traves de ms-contratos. Con dobles, «el PDF
+        // trae la direccion» no significa nada.
+        const transacciones = await pedir('GET', `/api/pagos/${idCuentaCobro}/transacciones`, {
+            token: tokenPropietario
+        });
+        assert.equal(transacciones.estado, 200);
+        assert.equal(transacciones.datos.length, 1);
+
+        const idTransaccion = transacciones.datos[0].id_transaccion;
+
+        const respuesta = await fetch(
+            `${GATEWAY}/api/pagos/transacciones/${idTransaccion}/comprobante`,
+            { headers: { Authorization: `Bearer ${tokenPropietario}` } }
+        );
+
+        assert.equal(respuesta.status, 200);
+        assert.equal(respuesta.headers.get('content-type'), 'application/pdf');
+
+        const texto = textoDelPdf(Buffer.from(await respuesta.arrayBuffer()));
+
+        // De ms-identidad, por HTTP.
+        assert.match(texto, /Inqui Lino/, 'el arrendatario lo compone ms-identidad');
+        assert.match(texto, new RegExp(`Q${SELLO}`), 'con su documento');
+
+        // De ms-inmuebles, a traves de ms-contratos con `incluir=inmueble`.
+        assert.match(texto, /Calle Integraci/, 'el inmueble viaja dentro del contrato');
+
+        // Y del propio servicio, la parte mas interesante: esta transaccion se
+        // ANULO en la prueba anterior, asi que el comprobante lo dice...
+        assert.match(texto, /ANULADA/);
+
+        // ...pero SU SALDO NO SE HA MOVIDO. Cuando se emitio quedaban 1.000.000
+        // por pagar; la anulacion devolvio el saldo VIGENTE de la cuenta a
+        // 1.500.000, y aun asi el documento sigue diciendo 1.000.000.
+        //
+        // Es `saldo_restante_momento`, la unica cifra de saldo que se guarda, y
+        // esta es la demostracion de por que se guarda: un comprobante ya
+        // emitido no puede cambiar porque despues pase algo. Si se derivara,
+        // aqui pondria 1.500.000. Ver docs/adr/0015 y docs/adr/0016.
+        assert.match(texto, /1\.000\.000/, 'la foto del saldo, no el saldo de hoy');
+    });
+
+    it('el recibo mensual en PDF tambien', async () => {
         const respuesta = await fetch(`${GATEWAY}/api/pagos/${idCuentaCobro}/recibo`, {
             headers: { Authorization: `Bearer ${tokenPropietario}` }
         });
 
         assert.equal(respuesta.status, 200);
         assert.equal(respuesta.headers.get('content-type'), 'application/pdf');
-        assert.ok((await respuesta.arrayBuffer()).byteLength > 1000);
+
+        const texto = textoDelPdf(Buffer.from(await respuesta.arrayBuffer()));
+
+        assert.match(texto, /ARRIENDOS 360 S\.A\.S/);
+        assert.match(texto, /Inqui Lino/);
+        assert.match(texto, /Enero de 2026/, 'el periodo, formateado en UTC');
+
+        // El recibo mensual SI refleja el estado de HOY, al reves que el
+        // comprobante: con la unica transaccion anulada, la cuenta volvio a
+        // PENDIENTE y el saldo al importe entero. Los dos documentos dicen cosas
+        // distintas sobre la misma cuenta y los dos tienen razon — uno es una
+        // foto y el otro un resumen.
+        assert.match(texto, /PENDIENTE/);
+        assert.match(texto, /Saldo pendiente \$ 1\.500\.000/);
+        assert.match(texto, /Forma de pago M/, 'sin transacciones confirmadas: «Múltiple»');
     });
 
     it('finalizar el contrato libera el inmueble por el mismo camino', async () => {

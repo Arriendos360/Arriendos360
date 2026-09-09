@@ -5,8 +5,7 @@
 # El contexto es la raiz porque el gateway depende de `packages/shared` como
 # workspace. Con el contexto acotado a `apps/gateway`, `packages/` quedaba fuera
 # del build y la dependencia no se podia declarar sin romper la imagen; de ahi
-# venia la implementacion duplicada de la verificacion del JWT. Tambien es lo que
-# permite que `database/` entre por COPY en vez de por volumen.
+# venia la implementacion duplicada de la verificacion del JWT.
 
 FROM node:18-alpine
 
@@ -23,6 +22,7 @@ COPY apps/web/package.json      apps/web/
 COPY services/ms-identidad/package.json services/ms-identidad/
 COPY services/ms-inmuebles/package.json services/ms-inmuebles/
 COPY services/ms-contratos/package.json services/ms-contratos/
+COPY services/ms-financiero/package.json services/ms-financiero/
 
 # `packages/` entra ENTERO, con fuentes y tsconfig, y tiene que entrar ANTES del
 # `npm ci`. La razon: los dos paquetes tienen un script `prepare` que compila
@@ -46,11 +46,13 @@ RUN npm ci --include-workspace-root \
     --workspace=packages/shared
 
 # -------------------------------------------------------------------- codigo
-# `database/` va DENTRO de la imagen. Antes llegaba por volumen con la variable
-# RUTA_MIGRACIONES apuntando a /database, que era un parche: la imagen por si
-# sola no podia migrar. Ahora el runner la encuentra en la ruta relativa de
-# siempre (../../../../database desde src/database/) y la variable sobra.
-COPY database/ database/
+# AQUI SE COPIABA `database/`. Ya no: desde el paso 6e el gateway NO TIENE
+# TABLAS ni conexion a PostgreSQL, asi que no tiene migraciones que aplicar.
+# `database/dominio/` —la carpeta que este COPY servia— desaparecio con las dos
+# ultimas, que se fueron a `database/financiero/` con ms-financiero.
+#
+# La imagen del gateway ya no necesita ni el cliente de base de datos: es un
+# proxy con politicas.
 COPY apps/gateway/ apps/gateway/
 
 WORKDIR /repo/apps/gateway

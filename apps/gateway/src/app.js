@@ -2,13 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const { sequelize } = require('./config/database');
-require('./models'); // Importar modelos para registrar sus asociaciones
-
-// Importar rutas
-const pagoRoutes = require('./routes/pago.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
-const { iniciarMotorFinanciero } = require('./services/financialEngine');
 const {
     crearControlDeAcceso,
     crearEnrutadorGateway,
@@ -17,9 +11,31 @@ const {
     describirMatriz
 } = require('./routing');
 const { crearCacheRevocados } = require('./routing/cacheRevocados');
-const { aplicarMigraciones } = require('./database/migraciones');
 
-// Crear aplicación Express
+/**
+ * El gateway, y desde el paso 6e NADA MÁS que el gateway.
+ *
+ * ── LO QUE DESAPARECIÓ DE ESTE ARCHIVO, Y POR QUÉ IMPORTA ───────────────────
+ *
+ * Se fueron `sequelize`, los modelos, las migraciones y el motor financiero. No
+ * es limpieza: es que **el gateway se quedó sin tablas propias**, que es lo que
+ * el Capítulo 2 dice que tiene que ser. `cuentas_cobro` y `transacciones` eran
+ * las dos últimas y se fueron con ms-financiero.
+ *
+ * La consecuencia práctica es que este proceso YA NO ABRE UNA CONEXIÓN A
+ * POSTGRESQL. Ninguna. Arranca sin base, y si la base está caída el gateway
+ * sigue en pie devolviendo 502 de los servicios que no responden, en vez de no
+ * levantarse. Es lo que se espera de un *Policy Enforcement Point*.
+ *
+ * Lo que le queda es exactamente lo que el Capítulo 2 le asigna:
+ *
+ *   1. Validar el JWT y la revocación, y aplicar la MATRIZ RBAC (capa 2).
+ *   2. Los GUARDIAS: reglas que dependen de dos contextos y ningún servicio
+ *      puede aplicar solo.
+ *   3. La COSTURA de enrutamiento, que reenvía cada prefijo a su servicio.
+ *   4. El DASHBOARD, que agrega respuestas de los otros tres y no tiene tablas
+ *      (regla dura 5).
+ */
 const app = express();
 
 /**
@@ -31,7 +47,6 @@ const app = express();
  */
 const cacheRevocados = crearCacheRevocados();
 
-// Middlewares
 app.use(cors());
 
 // Control de acceso (Capa 2 del módulo de seguridad): la matriz RBAC decide si
@@ -46,31 +61,29 @@ app.use(crearControlDeAcceso({ tokenInvalidado: cacheRevocados.tokenInvalidado }
 // costura, porque deciden si la petición llega a salir a la red.
 app.use(crearGuardiaDeBorrado());
 
-// Costura de enrutamiento: reenvía a ms-identidad los prefijos /api/auth y
-// /api/usuarios, a ms-inmuebles /api/inmuebles y a ms-contratos /api/contratos,
-// y deja pasar el resto al código local de abajo. Va antes de express.json() a
-// propósito, para que el cuerpo llegue sin parsear al reenvío y
-// multipart/form-data (los anexos, que ahora sirve ms-contratos) funcione.
+// Costura de enrutamiento. Desde el paso 6e reenvía CINCO de los seis prefijos:
+// /api/auth y /api/usuarios a ms-identidad, /api/inmuebles a ms-inmuebles,
+// /api/contratos a ms-contratos y /api/pagos a ms-financiero. El único que se
+// resuelve aquí es /api/dashboard, y lo hace para siempre.
+//
+// Va antes de express.json() a propósito, para que el cuerpo llegue sin parsear
+// al reenvío y multipart/form-data (los anexos, que sirve ms-contratos)
+// funcione.
 app.use(crearEnrutadorGateway());
 
 app.use(express.json());
 
 // AQUI ESTABA `app.use('/uploads', express.static('uploads'))`.
 //
-// Servia los contratos escaneados a cualquiera que conociera la URL: iba
-// antes de todo middleware de token, asi que ni la matriz RBAC ni
-// `verificarToken` lo veian pasar. El `?token=` que el frontend le pegaba
-// nunca protegio nada, porque `express.static` no mira cabeceras ni query.
-//
-// Desde el paso 6b los archivos son `Anexos` y salen unicamente por
-// `GET /api/contratos/:id/anexos/:idAnexo`, que pasa por la matriz y por el
-// ABAC del controlador. Era la trampa que CLAUDE.md tenia anotada. Desde el
-// paso 6d ese endpoint lo sirve ms-contratos, y la matriz lo sigue mirando
-// antes de que la peticion salga a la red.
+// Servia los contratos escaneados a cualquiera que conociera la URL: iba antes
+// de todo middleware de token, asi que ni la matriz RBAC ni `verificarToken` lo
+// veian pasar. Desde el paso 6b los archivos son `Anexos` y salen unicamente por
+// `GET /api/contratos/:id/anexos/:idAnexo`, que pasa por la matriz y por el ABAC
+// del controlador; desde el 6d ese endpoint lo sirve ms-contratos, y la matriz
+// lo sigue mirando antes de que la peticion salga a la red.
 
-// Ruta de prueba
 app.get('/', (req, res) => {
-    res.json({ 
+    res.json({
         mensaje: '🏠 API Arriendos360 funcionando',
         version: '1.0.0',
         endpoints: {
@@ -83,18 +96,10 @@ app.get('/', (req, res) => {
     });
 });
 
-// Rutas locales. `/api/auth`, `/api/usuarios`, `/api/inmuebles` y —desde el
-// paso 6d— `/api/contratos` ya no aparecen: los sirven ms-identidad,
-// ms-inmuebles y ms-contratos, y la costura los reenvía antes de llegar hasta
-// aquí.
-//
-// Quedan dos: `/api/pagos`, que se va con ms-financiero en el paso 6e, y
-// `/api/dashboard`, que se queda para siempre porque agrega respuestas de los
-// demás y no tiene tablas propias (regla dura 5).
-app.use('/api/pagos', pagoRoutes);
+// La ÚNICA ruta local que queda. Se queda para siempre: agrega respuestas de los
+// demás servicios y no tiene tablas propias (regla dura 5).
 app.use('/api/dashboard', dashboardRoutes);
 
-// Puerto
 const PORT = process.env.PORT || 3001;
 
 // Exportar app para pruebas
@@ -105,28 +110,13 @@ module.exports.cacheRevocados = cacheRevocados;
 if (process.env.NODE_ENV !== 'test') {
     const iniciarServidor = async () => {
         try {
-            await sequelize.authenticate();
-            console.log('✅ Conexión a PostgreSQL exitosa');
-            
-            // Migraciones versionadas en lugar de sequelize.sync(). Con el paso
-            // a UUID, sync() dejó de poder reproducir el esquema: no sabe generar
-            // identificadores en la aplicación. Ver docs/adr/0003.
-            const aplicadas = await aplicarMigraciones(sequelize);
-            console.log(
-                aplicadas.length > 0
-                    ? `✅ Migraciones aplicadas: ${aplicadas.join(', ')}`
-                    : '✅ Esquema al día, sin migraciones pendientes'
-            );
-
-            // Iniciar Motor Financiero (Background Tasks)
-            iniciarMotorFinanciero();
-
-            // AQUI ARRANCABA EL PUBLICADOR DEL BUS. Se fue en el paso 6d con la
-            // tabla de salida y con lo que la llenaba: el gateway ya no escribe
-            // ningun cambio de dominio, asi que no tiene nada que anunciar. El
-            // productor es ms-contratos, que es quien escribe el contrato — que
-            // es la regla que este proyecto ha respetado desde el paso 5, sea
-            // quien sea el que escribe.
+            // NO hay `sequelize.authenticate()` ni `aplicarMigraciones()`. El
+            // gateway no tiene base desde el paso 6e; las migraciones que le
+            // quedaban se fueron con `database/dominio/`, que ya no existe.
+            //
+            // Tampoco arranca el publicador del bus —se fue en el 6d con la
+            // tabla de salida— ni el motor financiero, que ahora corre en
+            // ms-financiero.
 
             await cacheRevocados.iniciar();
             const estado = cacheRevocados.estado();
@@ -144,7 +134,7 @@ if (process.env.NODE_ENV !== 'test') {
                 console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
             });
         } catch (error) {
-            console.error('❌ Error de conexión:', error);
+            console.error('❌ Error de arranque:', error);
         }
     };
 

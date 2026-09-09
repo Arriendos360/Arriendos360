@@ -1,13 +1,21 @@
 /**
  * Utilidades comunes de las pruebas del gateway.
  *
- * Desde que se extrajeron ms-identidad, ms-inmuebles y —en el paso 6d—
- * ms-contratos, el gateway no sirve `/api/auth`, `/api/usuarios`,
- * `/api/inmuebles` ni `/api/contratos`, así que las suites no pueden crear
- * ninguna de esas cosas contra el `app` en proceso. Se levanta un DOBLE de cada
- * servicio (`tests/dobles/`) y se apuntan las `MS_*_URL` a ellos; la costura
- * reenvía igual que en producción, sólo que al otro extremo hay un servidor de
- * mentira con estado en memoria.
+ * Desde el paso 6e el gateway NO SIRVE NINGÚN RECURSO: `/api/auth`,
+ * `/api/usuarios`, `/api/inmuebles`, `/api/contratos` y `/api/pagos` los sirven
+ * los cuatro servicios, y lo único local que queda es `/api/dashboard`. Así que
+ * las suites no pueden crear nada contra el `app` en proceso: se levanta un
+ * DOBLE de cada servicio (`tests/dobles/`) y se apuntan las `MS_*_URL` a ellos;
+ * la costura reenvía igual que en producción, sólo que al otro extremo hay un
+ * servidor de mentira con estado en memoria.
+ *
+ * ── Y TAMPOCO HAY BASE DE DATOS ─────────────────────────────────────────────
+ *
+ * Esto es lo que más cambia en el paso 6e. Aquí se hacía `recrearEsquema()`
+ * contra `public` antes de cada suite, porque el gateway tenía tablas; ya no las
+ * tiene, así que no hay esquema que recrear ni conexión que cerrar. Las suites
+ * del gateway pasan a correr **sin PostgreSQL**, que es la consecuencia bonita
+ * de que el gateway se haya quedado sin estado.
  *
  * EL ORDEN DE CREACIÓN IMPORTA: el doble de contratos recibe el de inmuebles,
  * porque resuelve la pertenencia preguntándole de quién es cada inmueble —igual
@@ -21,9 +29,8 @@ const request = require('supertest');
 const { cabeceraDeServicio } = require('arriendos360-shared');
 
 const app = require('../../src/app');
-const { sequelize } = require('../../src/config/database');
-const { recrearEsquema } = require('../../src/database/migraciones');
 const { crearContratosFalso } = require('../dobles/contratos');
+const { crearFinancieroFalso } = require('../dobles/financiero');
 const { crearIdentidadFalsa } = require('../dobles/identidad');
 const { crearInmueblesFalso } = require('../dobles/inmuebles');
 
@@ -33,6 +40,7 @@ const CONTRASENA_POR_DEFECTO = 'pass123';
 let identidad = null;
 let inmuebles = null;
 let contratos = null;
+let financiero = null;
 
 /**
  * Entrega los eventos que el doble de contratos tenga en su bandeja.
@@ -96,10 +104,11 @@ const entregarEventos = async () => {
 const contarEventos = async () => (contratos ? contratos.salida.length : 0);
 
 /**
- * Levanta los dobles, los cablea y deja el esquema del gateway limpio.
+ * Levanta los cuatro dobles y los cablea.
  *
  * @returns {Promise<object>} el doble de identidad, que es el que más manipulan
- *   las suites. El de inmuebles se obtiene con `inmueblesFalso()`.
+ *   las suites. Los otros tres se obtienen con `inmueblesFalso()`,
+ *   `contratosFalso()` y `financieroFalso()`.
  */
 const prepararEntorno = async () => {
     identidad = await crearIdentidadFalsa();
@@ -108,39 +117,45 @@ const prepararEntorno = async () => {
     // preguntándole a Inmuebles de quién es cada inmueble, y compone el
     // `Inquilino` con los datos de Identidad. Igual que el servicio real.
     contratos = await crearContratosFalso({ identidad, inmuebles });
+    // El de financiero no necesita a nadie: en el servicio real la pertenencia
+    // se la resuelve ms-contratos, y aquí las suites la declaran.
+    financiero = await crearFinancieroFalso();
 
     // La costura lee `process.env` en cada petición, así que basta con ponerlo.
     process.env.MS_IDENTIDAD_URL = identidad.url;
     process.env.MS_INMUEBLES_URL = inmuebles.url;
     process.env.MS_CONTRATOS_URL = contratos.url;
+    process.env.MS_FINANCIERO_URL = financiero.url;
 
-    await recrearEsquema(sequelize);
+    // NO hay `recrearEsquema()`: el gateway no tiene tablas desde el paso 6e.
     return identidad;
 };
 
 const cerrarEntorno = async () => {
-    if (identidad) {
-        await identidad.cerrar();
-        identidad = null;
+    for (const doble of [identidad, inmuebles, contratos, financiero]) {
+        if (doble) {
+            await doble.cerrar();
+        }
     }
-    if (inmuebles) {
-        await inmuebles.cerrar();
-        inmuebles = null;
-    }
-    if (contratos) {
-        await contratos.cerrar();
-        contratos = null;
-    }
+
+    identidad = null;
+    inmuebles = null;
+    contratos = null;
+    financiero = null;
+
     delete process.env.MS_IDENTIDAD_URL;
     delete process.env.MS_INMUEBLES_URL;
     delete process.env.MS_CONTRATOS_URL;
-    await sequelize.close();
+    delete process.env.MS_FINANCIERO_URL;
+
+    // Tampoco hay `sequelize.close()`: no hay conexión que cerrar.
 };
 
 /** Los dobles en curso, para pruebas que necesiten inspeccionarlos. */
 const identidadFalsa = () => identidad;
 const inmueblesFalso = () => inmuebles;
 const contratosFalso = () => contratos;
+const financieroFalso = () => financiero;
 
 /**
  * Crea un contrato a través del gateway y devuelve su id.
@@ -236,10 +251,10 @@ module.exports = {
     crearInmueble,
     crearInquilino,
     entregarEventos,
+    financieroFalso,
     identidadFalsa,
     iniciarSesion,
     inmueblesFalso,
     prepararEntorno,
-    registrarPropietario,
-    sequelize
+    registrarPropietario
 };
