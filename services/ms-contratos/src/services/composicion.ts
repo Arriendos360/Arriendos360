@@ -166,3 +166,49 @@ export const adjuntarPartesA = async (
   const [conPartes] = await adjuntarPartes([contrato]);
   return conPartes as Record<string, unknown>;
 };
+
+/**
+ * Adjunta SOLO el `Inmueble` a una lista de contratos.
+ *
+ * ── PARA QUIEN ES ESTO ──────────────────────────────────────────────────────
+ *
+ * Para `/interno/contratos?incluir=inmueble`, que llama ms-financiero desde el
+ * paso 6e. Sus comprobantes imprimen la direccion del inmueble y su motor avisa
+ * al propietario, y ninguna de las dos cosas esta en la fila del contrato.
+ *
+ * ── POR QUE LO RESUELVE ESTE SERVICIO Y NO EL QUE PREGUNTA ──────────────────
+ *
+ * Son DOS saltos encadenados: hasta que este servicio no dice de que inmueble es
+ * cada contrato, nadie sabe que inmuebles pedir. Si los encadenara ms-financiero
+ * serian dos viajes de red suyos; resueltos aqui es uno solo, y ademas ese
+ * servicio no necesita enterarse de que un contrato tiene inmueble ni de donde
+ * vive ese dato. Es la misma razon por la que la pertenencia se resuelve aqui y
+ * no cruzando dos listas en el gateway (`docs/adr/0017`).
+ *
+ * ── UN LOTE, NUNCA UNO POR FILA ─────────────────────────────────────────────
+ *
+ * Una peticion a ms-inmuebles para la lista entera, sea de uno o de quinientos.
+ * Es lo que sostiene la garantia de «un viaje por barrido» del motor de
+ * Financiero, y lo que su prueba comprueba.
+ *
+ * ── NO ADJUNTA EL `Inquilino`, Y ESO ES LA MITAD DE LA GRACIA ───────────────
+ *
+ * `adjuntarPartes` haria las dos cosas en dos peticiones paralelas, pero quien
+ * llama a `/interno` ya le pregunta a ms-identidad por su cuenta —necesita
+ * ademas al propietario, que sale de este mismo inmueble— asi que mandarle el
+ * inquilino desde aqui seria pedirlo dos veces.
+ *
+ * DEGRADA a `null`, como todo lo de este archivo: esto decora, no autoriza.
+ */
+export const adjuntarInmuebles = async (
+  contratos: Contrato[],
+): Promise<Array<Record<string, unknown>>> => {
+  const lista = contratos.map((contrato) => contrato.toJSON() as Record<string, unknown>);
+
+  const inmuebles = await inmueblesPorIds(lista.map((c) => c['id_inmueble'] as string));
+
+  return lista.map((contrato) => ({
+    ...contrato,
+    Inmueble: inmuebles.get(contrato['id_inmueble'] as string) ?? null,
+  }));
+};

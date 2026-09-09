@@ -1,0 +1,394 @@
+/**
+ * MOTOR FINANCIERO — Arriendos360
+ *
+ * Trazabilidad: la generacion de recibos es RF-11 y las alertas de mora son
+ * RF-12. El control de dias de gracia no tiene requisito propio identificado;
+ * queda marcado como pendiente de confirmar contra el SRS en vez de inventarle
+ * un numero.
+ *
+ * Este proceso corre sin usuario autenticado, asi que las columnas de auditoria
+ * quedan a nombre de USUARIO_SISTEMA (ver `models/columnas.ts`).
+ *
+ * ── LO QUE CAMBIA EN EL PASO 6e, Y ES LO MAS IMPORTANTE DE ESTE ARCHIVO ─────
+ *
+ * `procesarContratos` YA NO GENERA LA PRIMERA CUENTA DE COBRO. La primera nace
+ * del evento `ContratoFormalizado`, en `eventos/index.ts`, que es el caso que el
+ * Capitulo 2 especifica textualmente: «MS-Financiero consume el evento, extrae
+ * `id_contrato`, `canon` y `fecha_inicio_corte`, e inserta la primera
+ * Cuenta_cobro».
+ *
+ * Este barrido se queda con LOS MESES SIGUIENTES, que es lo que un evento no
+ * puede dar: el contrato se formaliza una vez y hay que facturarlo doce.
+ *
+ * La frontera entre los dos esta en `primerPeriodoDe()`, y no es una
+ * comprobacion de si «ya existe»: es una comprobacion de CUAL es el periodo. El
+ * primero es del consumidor y este barrido lo salta siempre, exista o no. La
+ * diferencia importa — saltarlo solo cuando ya existe dejaria que el motor
+ * generase la primera cuenta de un contrato cuyo evento todavia no ha llegado, y
+ * entonces habria dos caminos escribiendo la misma fila y una carrera entre
+ * ellos. Hay ademas un indice unico `(id_contrato, inicio)` debajo, pero eso es
+ * la red, no el diseño.
+ *
+ * ── EL BARRIDO SIGUE SIENDO UN NUMERO FIJO DE VIAJES ───────────────────────
+ *
+ * La garantia no cambia con la extraccion: **el numero de peticiones no depende
+ * de cuantos contratos haya.**
+ *
+ *   `procesarContratos` — 1 a ms-contratos (todos los activos, con su inmueble
+ *   dentro) + 1 a ms-identidad (inquilinos y propietarios en lote) = 2 por
+ *   barrido, haya 5 contratos o 500.
+ *
+ *   `procesarPagos` — 1 a ms-contratos (los contratos de las cuentas vencidas,
+ *   POR IDENTIFICADOR y en lote) + 1 a ms-identidad = 2.
+ *
+ * Son DOS y no tres porque el inmueble viaja dentro del contrato: se pide con
+ * `incluir=inmueble` y lo resuelve ms-contratos, que ya sabe hacerlo en lote
+ * para su propia respuesta. Antes de la extraccion eran tres, y el tercero era
+ * un salto encadenado que este servicio ya no tiene que dar. Ver la cabecera de
+ * `clientes/contratos.ts`.
+ *
+ * La forma de romper la garantia seria pedir el contrato dentro del bucle, que
+ * es exactamente lo que `porIds` existe para evitar. La prueba lo comprueba.
+ *
+ * ── DEGRADAR AQUI ES LO CORRECTO, AL REVES QUE EN LOS CONTROLADORES ────────
+ *
+ * Este proceso no autoriza a nadie, solo factura y avisa. Si ms-identidad no
+ * responde, esa parte queda en `null` y el aviso se omite: el motor sigue
+ * generando cuentas de cobro y marcando mora, que es su trabajo principal. Si
+ * ms-contratos no responde, en cambio, el barrido no genera NADA — generar la
+ * mitad de las cuentas del mes seria peor que no generar ninguna, porque al dia
+ * siguiente el motor no sabria cuales faltan, y con la comprobacion de
+ * duplicados que ya hay, no generar nada hoy se arregla solo mañana.
+ *
+ * ── LAS FECHAS SON DE BOGOTA, NO DEL SERVIDOR ──────────────────────────────
+ *
+ * El paso 6c lo cerro: el motor no compara contra `new Date()` local sino contra
+ * `hoyEnZonaNegocio()`, y `diasEntre()` cuenta dias de calendario en vez de
+ * intervalos de 24 horas. Quien decide que un arriendo entro en mora al sexto
+ * dia lo hace en Bogota; en un contenedor en UTC el corte se adelantaria cinco
+ * horas.
+ *
+ * NO hay intereses ni recargos, y no los va a haber por esta via: RF-12 es
+ * alertas de vencimiento, no cobro de mora.
+ *
+ * ── EL CRON NO DISPARA SI EL CONTENEDOR ESTA APAGADO ───────────────────────
+ *
+ * Ver `iniciarMotorFinanciero()`. Es una limitacion conocida y bloqueante para
+ * produccion, anotada en `docs/adr/0018`.
+ */
+
+import cron from 'node-cron';
+import { Op } from 'sequelize';
+import {
+  diaDeCorte,
+  diasEntre,
+  hoyEnZonaNegocio,
+  mesSiguiente,
+  partesDeISO,
+  periodoDeCorte,
+  periodoQueEmpiezaEn,
+  soloFecha,
+} from 'arriendos360-shared';
+import type { Periodo } from 'arriendos360-shared';
+
+import { enviarCorreo } from '../config/mailer';
+import { contratosConEstado, porIds as contratosPorIds } from '../clientes/contratos';
+import { CuentaCobro } from '../models/CuentaCobro';
+import {
+  ESTADO_CONTRATO_ACTIVO,
+  ESTADO_CUENTA_EN_MORA,
+  ESTADO_CUENTA_PENDIENTE,
+} from '../models/constantes';
+import { adjuntarPartes } from './composicion';
+
+/**
+ * Dias desde el corte a partir de los cuales una cuenta esta EN MORA.
+ *
+ * ── ESTA CONSTANTE CIERRA UNA TRAMPA QUE CLAUDE.md TENIA ANOTADA ───────────
+ *
+ * «Un contrato de 16 lineas de mora no existe: `verificar-mora` y el motor no
+ * aplican la misma regla». El endpoint manual marcaba EN_MORA con que el corte
+ * hubiera pasado un solo dia; este barrido espera al sexto. Las dos reglas
+ * vivian en dos archivos y nada las ataba.
+ *
+ * Ahora es un numero, exportado, y lo usan los dos: este barrido y
+ * `verificarMora` en `controllers/pago.controller.ts`. Cambiar el periodo de
+ * gracia es cambiarlo aqui.
+ */
+export const DIAS_PARA_MORA = 6;
+
+/**
+ * Dias desde el corte en que se avisa de que el plazo se acaba.
+ *
+ * Uno antes de que expire la gracia, de ahi que sea `DIAS_PARA_MORA - 2`: el
+ * aviso sale el cuarto dia y la mora entra al sexto, asi que entre el uno y la
+ * otra hay un dia entero para pagar. Escrito en funcion de la otra constante
+ * para que mover el periodo de gracia mueva el aviso con el.
+ */
+export const DIAS_AVISO_PREVIO = DIAS_PARA_MORA - 2;
+
+/** El concepto que se imprime en la cuenta de cobro. */
+export const detalleDelPeriodo = (periodo: Periodo): string =>
+  `Canon de arrendamiento del ${periodo.inicio} al ${periodo.fin}`;
+
+/**
+ * El periodo que le toca facturar hoy a un contrato con este dia de corte.
+ *
+ * Reproduce exactamente la decision que tomaba la version anterior con
+ * aritmetica de `Date`, solo que sobre componentes de calendario:
+ *
+ *   - se parte del corte de ESTE mes;
+ *   - si hoy ya paso de ese dia por mas de dos, el que toca es el del mes que
+ *     viene (si hoy es 25 y el corte es 5, la proxima factura es la de junio,
+ *     no la de mayo, que ya esta).
+ *
+ * @param diaCorte dia pactado, 1-31
+ * @param hoy `YYYY-MM-DD` en la zona del negocio
+ */
+export const periodoAFacturar = (diaCorte: number, hoy: string): Periodo => {
+  const { anio, mes, dia } = partesDeISO(hoy);
+
+  if (dia > diaCorte + 2) {
+    const siguiente = mesSiguiente(anio, mes);
+    return periodoDeCorte(diaCorte, siguiente.anio, siguiente.mes);
+  }
+
+  return periodoDeCorte(diaCorte, anio, mes);
+};
+
+/**
+ * El PRIMER periodo del contrato: el que arranca en su fecha de inicio de corte.
+ *
+ * Es el que crea el consumidor de `ContratoFormalizado`, y por eso el barrido lo
+ * salta. Se calcula igual que alli —`periodoDeCorte()` sobre los componentes de
+ * `fecha_inicio_corte`— para que las dos mitades no puedan discrepar: si una
+ * usara el dia pactado y la otra el dia recortado, un contrato con corte el 31
+ * firmado en enero tendria dos «primeros periodos» distintos y el motor
+ * duplicaria la factura de febrero.
+ */
+export const primerPeriodoDe = (fechaInicioCorte: unknown): Periodo | null => {
+  const fecha = soloFecha(fechaInicioCorte);
+  const dia = diaDeCorte(fecha);
+
+  return fecha === null || dia === null ? null : periodoQueEmpiezaEn(fecha, dia);
+};
+
+/**
+ * RF-11: generacion automatica de recibos, DE LOS MESES SIGUIENTES.
+ * Regla: 2 dias antes de la fecha de corte (aniversario).
+ *
+ * La cuenta de cobro nace con el PERIODO EXPLICITO, no con un mes suelto: `fin`
+ * es el dia anterior al siguiente corte, de modo que los periodos teselan el
+ * calendario sin huecos ni solapes. La regla esta en `periodoDeCorte()`, en
+ * `packages/shared`.
+ */
+export const procesarContratos = async (): Promise<void> => {
+  try {
+    const hoy = hoyEnZonaNegocio();
+
+    // UNA peticion para todos los contratos activos del sistema, con su
+    // inmueble dentro. Si no responde, el `catch` de abajo lo registra y este
+    // barrido no genera nada. Ver la nota sobre degradacion de la cabecera.
+    const contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
+
+    // Un viaje a ms-identidad para todos los contratos del barrido, no uno por
+    // contrato.
+    const contratosConPartes = await adjuntarPartes(contratos);
+
+    for (const contrato of contratosConPartes) {
+      const fechaInicioCorte = contrato['fecha_inicio_corte'] as string;
+
+      // El dia de corte sale de SU COLUMNA, no de recalcularlo desde el inicio
+      // del contrato. Es la diferencia que trajo el paso 6a: si alguien
+      // renegocia el ciclo de facturacion, el motor lo respeta.
+      const diaCorte = diaDeCorte(fechaInicioCorte);
+      if (diaCorte === null) {
+        continue;
+      }
+
+      const periodo = periodoAFacturar(diaCorte, hoy);
+
+      // ¿Estamos dentro de la ventana de 2 dias antes del corte? ¿O el corte ya
+      // llego y no se ha cobrado?
+      if (diasEntre(hoy, periodo.inicio) > 2) {
+        continue;
+      }
+
+      // EL PRIMER PERIODO ES DEL CONSUMIDOR DEL EVENTO, no de este barrido. Se
+      // salta SIEMPRE, exista ya la cuenta o no: ver la cabecera.
+      const primero = primerPeriodoDe(fechaInicioCorte);
+      if (primero && primero.inicio === periodo.inicio) {
+        continue;
+      }
+
+      // La comprobacion es una igualdad sobre `inicio` en vez de un `date_part`
+      // sobre el mes: identifica el periodo exacto y ademas puede usar el indice
+      // unico que lo respalda.
+      const yaExiste = await CuentaCobro.findOne({
+        where: { id_contrato: contrato['id_contrato'] as string, inicio: periodo.inicio },
+      });
+
+      if (yaExiste) {
+        continue;
+      }
+
+      await CuentaCobro.create({
+        id_contrato: contrato['id_contrato'],
+        detalle: detalleDelPeriodo(periodo),
+        valor: contrato['canon'],
+        inicio: periodo.inicio,
+        fin: periodo.fin,
+        estado: ESTADO_CUENTA_PENDIENTE,
+      });
+
+      console.log(
+        `✅ Cuenta de cobro generada para contrato ${String(contrato['id_contrato'])}` +
+          ` — periodo ${periodo.inicio} a ${periodo.fin}`,
+      );
+
+      const inquilino = contrato['Inquilino'] as { email?: string; nombres?: string } | null;
+
+      if (inquilino) {
+        await enviarCorreo(
+          inquilino.email,
+          '🏠 Nuevo recibo de arriendo generado',
+          `Hola ${inquilino.nombres ?? ''}, se ha generado tu recibo de arriendo para el periodo que inicia el ${diaCorte}. Valor: $${String(contrato['canon'])}.`,
+        );
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error en procesarContratos:', error);
+  }
+};
+
+/**
+ * Control de dias de gracia (requisito por confirmar en el SRS).
+ * RF-12: alertas de vencimiento y vencido.
+ *
+ * Barre las cuentas PENDIENTE y EN_MORA, igual que antes barria los estados 1 y
+ * 3. `PARCIAL` sigue quedando fuera, que es lo que hacia: una cuenta con algo
+ * abonado no se marca en mora por este camino.
+ *
+ * Los dias se cuentan desde `inicio`, que es la fecha de corte y es exactamente
+ * lo que guardaba `mes_correspondiente`.
+ */
+export const procesarPagos = async (): Promise<void> => {
+  try {
+    const hoy = hoyEnZonaNegocio();
+
+    const cuentasPendientes = await CuentaCobro.findAll({
+      where: { estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_EN_MORA] } },
+    });
+
+    // Los contratos de todas las cuentas del barrido en UNA peticion, por
+    // identificador y con su inmueble dentro. No uno por cuenta.
+    const contratos = await contratosPorIds(
+      cuentasPendientes.map((cuenta) => cuenta.id_contrato),
+      { conInmueble: true },
+    );
+
+    // Igual que arriba: se componen las partes de todos los contratos
+    // implicados de una vez, no uno por uno dentro del bucle.
+    const contratosConPartes = await adjuntarPartes([...contratos.values()]);
+    const porContrato = new Map(
+      contratosConPartes.map((contrato) => [contrato['id_contrato'] as string, contrato]),
+    );
+
+    for (const cuenta of cuentasPendientes) {
+      const contrato = porContrato.get(cuenta.id_contrato);
+      if (!contrato) {
+        continue;
+      }
+
+      const inquilino = contrato['Inquilino'] as { email?: string } | null;
+      const inmueble = contrato['Inmueble'] as
+        | { direccion?: string; Propietario?: { email?: string } | null }
+        | null;
+      const propietario = inmueble?.Propietario ?? null;
+
+      const diasDesdeCorte = diasEntre(cuenta.inicio, hoy);
+
+      // RF-12: vencimiento proximo (1 dia antes de que expire el tiempo de gracia).
+      if (diasDesdeCorte === DIAS_AVISO_PREVIO && cuenta.estado === ESTADO_CUENTA_PENDIENTE) {
+        if (inquilino) {
+          await enviarCorreo(
+            inquilino.email,
+            '⚠️ Aviso: Tu pago vence pronto',
+            'Recuerda que tienes hasta mañana para realizar el pago de tu arriendo sin generar mora.',
+          );
+        }
+        if (propietario) {
+          await enviarCorreo(
+            propietario.email,
+            '📢 Recordatorio de pago próximo a vencer',
+            `El pago del inmueble ${inmueble?.direccion ?? ''} vence mañana.`,
+          );
+        }
+      }
+
+      // Cambio a mora. La MISMA constante que aplica `verificarMora`, que es lo
+      // que cierra la trampa de las dos reglas distintas.
+      if (diasDesdeCorte >= DIAS_PARA_MORA && cuenta.estado === ESTADO_CUENTA_PENDIENTE) {
+        await cuenta.update({ estado: ESTADO_CUENTA_EN_MORA });
+        console.log(`🚫 Cuenta de cobro ${cuenta.id_cuenta_cobro} marcada como EN MORA`);
+
+        // RF-12: vencido (al inquilino y al propietario).
+        if (inquilino) {
+          await enviarCorreo(
+            inquilino.email,
+            '🚨 Pago Vencido - Mora Generada',
+            'Tu pago de arriendo ha superado el periodo de gracia. Por favor regulariza tu situación.',
+          );
+        }
+        if (propietario) {
+          await enviarCorreo(
+            propietario.email,
+            '🔴 Notificación de Inquilino en Mora',
+            `El inquilino del inmueble ${inmueble?.direccion ?? ''} ha entrado en mora.`,
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error en procesarPagos:', error);
+  }
+};
+
+/**
+ * Programa el barrido diario.
+ *
+ * ── ESTO NO DISPARA SI EL CONTENEDOR ESTA APAGADO, Y ES UN PROBLEMA REAL ────
+ *
+ * `node-cron` es un temporizador DENTRO del proceso. Funciona mientras el
+ * proceso vive, y eso hoy es cierto —Compose mantiene el contenedor en pie— pero
+ * deja de serlo en el destino del paso 8: Azure Container Apps escala a cero
+ * cuando no hay trafico. Un contenedor dormido a las 00:01 no genera las cuentas
+ * de cobro de ese dia, y nadie se entera hasta que un inquilino pregunta por su
+ * recibo.
+ *
+ * No se arregla aqui. La salida es un **trabajo programado de Container Apps**
+ * (un `Job` con `triggerType: Schedule`), que levanta un contenedor a la hora
+ * pactada, ejecuta `npm run motor` y se apaga. El codigo ya esta listo para eso:
+ * `scripts/motor.ts` hace exactamente ese barrido y no depende de que la API
+ * este escuchando.
+ *
+ * Queda como decision abierta MARCADA COMO BLOQUEANTE PARA PRODUCCION en
+ * CLAUDE.md y en `docs/adr/0018`. Mantener `node-cron` mientras tanto es lo
+ * correcto: es lo que hace el motor demostrable en la defensa sin desplegar
+ * nada, y su sustituto no es codigo sino infraestructura.
+ */
+export const iniciarMotorFinanciero = (): void => {
+  // Ejecutar cada dia a la medianoche (00:01).
+  cron.schedule('1 0 * * *', () => {
+    void (async () => {
+      console.log('⏳ Iniciando proceso diario del Motor Financiero...');
+      await procesarContratos();
+      await procesarPagos();
+    })();
+  });
+  console.log('🚀 Motor Financiero programado (ejecución diaria)');
+  console.warn(
+    '⚠️  ms-financiero: el cron vive DENTRO del proceso. Con scale-to-zero no dispara. ' +
+      'Ver docs/adr/0018.',
+  );
+};

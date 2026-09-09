@@ -143,9 +143,18 @@ services:
       # inquilino; Inmuebles, para resolver la pertenencia de cada contrato.
       # Core dependiendo de Soporte, que es la direccion correcta.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
-      # Y ADEMAS es la lista de suscriptores del bus: el publicador entrega
-      # `ContratoFormalizado` y `ContratoFinalizado` a esta URL.
+      # Y ADEMAS son la lista de suscriptores del bus. Desde el paso 6e son DOS:
+      # `ContratoFormalizado` va a ms-inmuebles, que pone el inmueble en
+      # `arrendado`, y a ms-financiero, que crea la primera cuenta de cobro.
+      # `ContratoFinalizado` va solo a ms-inmuebles: finalizar un contrato no
+      # cancela lo que se debe.
+      #
+      # OJO al arranque en frio: si ms-financiero no esta en pie cuando se
+      # entrega un evento, la fila NO se marca entregada y se reintenta a los
+      # dos. Por eso ms-inmuebles descarta repetidos, y por eso ms-financiero
+      # tiene que hacerlo tambien.
       - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
+      - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-http://ms-financiero:3014}
       # Cada cuanto barre el publicador su tabla de salida. Ese numero es la
       # ventana de consistencia del estado del inmueble.
       - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
@@ -175,6 +184,75 @@ services:
       retries: 20
       start_period: 10s
 
+  # MS-Financiero — cuentas de cobro, transacciones y el motor de facturacion.
+  #
+  # El ultimo servicio del paso 6, y el que deja al gateway sin tablas propias.
+  # MS_FINANCIERO_URL apunta aqui, asi que la costura reenvia /api/pagos a este
+  # servicio. Sus dos tablas viven en el esquema `financiero`.
+  #
+  # Es CONSUMIDOR del bus: `ContratoFormalizado` le llega por POST
+  # /interno/eventos desde el publicador de ms-contratos, y con el crea la
+  # primera cuenta de cobro. Es el caso que el Capitulo 2 especifica
+  # textualmente. No es productor: no emite ningun evento todavia, asi que no
+  # tiene tabla de salida ni publicador.
+  ms-financiero:
+    build:
+      context: ..
+      dockerfile: services/ms-financiero/Dockerfile
+    container_name: arriendos360_financiero
+    command: npm run dev
+    ports:
+      - "3014:3014"
+    environment:
+      - PORT=3014
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=arriendos360_db
+      - DB_NAME_TEST=arriendos360_test
+      # Identico al del gateway: todos verifican la misma firma.
+      - JWT_SECRET=${JWT_SECRET}
+      - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
+      - SERVICIO_NOMBRE=ms-financiero
+      # A quien pregunta. Contratos, para la pertenencia de cada cuenta de cobro
+      # y para los datos que imprimen los comprobantes —el inmueble viaja DENTRO
+      # del contrato, con `incluir=inmueble`, asi que este servicio no habla con
+      # ms-inmuebles—. Identidad, para la revocacion y para los correos del motor.
+      - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-http://ms-contratos:3013}
+      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
+      # Correo del motor. Sin EMAIL_USER apunta a un buzon de pruebas y no llega
+      # a nadie. En el paso 7 esto se va: el motor pasara a publicar eventos y
+      # sera ms-notificaciones quien mande los avisos.
+      - EMAIL_HOST=${EMAIL_HOST:-smtp.ethereal.email}
+      - EMAIL_PORT=${EMAIL_PORT:-587}
+      - EMAIL_USER=${EMAIL_USER:-}
+      - EMAIL_PASS=${EMAIL_PASS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      ms-identidad:
+        condition: service_started
+      ms-contratos:
+        condition: service_started
+    volumes:
+      - ../services/ms-financiero:/repo/services/ms-financiero
+      - /repo/services/ms-financiero/node_modules
+    # El servicio solo escucha DESPUES de aplicar sus migraciones, y una de ellas
+    # —`database/financiero/002`— copia las cuentas de cobro que estaban en
+    # `public` y RETIRA el original en la misma transaccion. Responder aqui
+    # significa que esa mudanza ya ocurrio.
+    #
+    # A diferencia de las tres extracciones anteriores, el gateway no tiene que
+    # esperar a esto para retirar nada: se quedo sin base, asi que ya no aplica
+    # migraciones. Sigue dependiendo del healthcheck por otra razon —el dashboard
+    # le pregunta las cifras de dinero nada mas arrancar.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3014/ || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
   # Servidor Backend
   backend:
     # Contexto en la raiz del monorepo: el gateway depende de packages/shared
@@ -188,45 +266,49 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
-      - DB_HOST=db
-      - DB_USER=postgres
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=arriendos360_db
+      # SIN DB_*: desde el paso 6e el gateway NO TIENE TABLAS ni conexion a
+      # PostgreSQL. `cuentas_cobro` y `transacciones` eran las dos ultimas y se
+      # fueron con ms-financiero. Arranca sin base, que es lo que se espera de un
+      # Policy Enforcement Point.
       - JWT_SECRET=${JWT_SECRET}
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=gateway
-      # Enrutamiento: vacias = todos los prefijos resuelven local. Poner una URL
-      # aqui hace que el gateway reenvie ese prefijo al microservicio.
-      # Cableados: identidad (dos prefijos), inmuebles y —desde el paso 6d—
-      # contratos. Solo queda local /api/pagos, que se va en el 6e.
+      # Enrutamiento. DESDE EL PASO 6e LAS CUATRO ESTAN CABLEADAS: no queda
+      # codigo local al que caer. Los cinco prefijos de la API los sirven los
+      # servicios, y el unico que se resuelve en el gateway es /api/dashboard,
+      # que no aparece aqui porque no tiene servicio propio (regla dura 5).
       #
-      # Estas URL sirven ADEMAS para componer: el gateway le pide a ms-contratos
-      # la pertenencia de cada contrato y los datos que antes traia un `include`.
-      # Lo que YA NO hacen es alimentar el bus: el publicador se fue con
+      # Estas URL sirven ADEMAS para componer: el dashboard le pide a los tres
+      # las cifras que agrega, y `clientes/` las usa para la pertenencia y para
+      # el guardia de borrado.
+      #
+      # Lo que NO hacen es alimentar el bus: el publicador se fue con
       # ms-contratos, que es quien escribe el contrato y quien lo anuncia.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
       - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
       - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-http://ms-contratos:3013}
-      - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-}
+      - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-http://ms-financiero:3014}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     depends_on:
-      db:
-        condition: service_healthy
-      # El gateway carga su cache de revocados al arrancar; si ms-identidad no
-      # esta en pie, arranca con la cache vacia y un aviso en el log.
+      # SIN `db`: el gateway ya no se conecta a PostgreSQL.
+      #
+      # Y ninguno de estos es ya `service_healthy` por la razon que lo era hasta
+      # el 6d —esperar a que el servicio copiara sus tablas antes de que el
+      # gateway retirara las originales—. Esa coreografia desaparecio con las
+      # migraciones del gateway: ahora cada servicio adopta Y retira lo suyo.
+      #
+      # Se espera a que esten ARRANCADOS y no sanos porque el gateway degrada
+      # bien mientras no lo esten: la cache de revocados arranca vacia con un
+      # aviso, y el dashboard responde 502 en vez de cifras en cero.
       ms-identidad:
         condition: service_started
-      # Aqui SI es service_healthy, y no por comodidad: la migracion
-      # `dominio/002` retira `public.inmuebles`, y no puede correr antes de que
-      # ms-inmuebles haya copiado las filas a su esquema. Sano = ya migro.
       ms-inmuebles:
-        condition: service_healthy
-      # Lo mismo con `dominio/007`, que retira `public.contratos`,
-      # `public.anexos` y `public.eventos_salida`. Sano = ya adopto las tres,
-      # incluidos los eventos que quedaban sin entregar.
+        condition: service_started
       ms-contratos:
-        condition: service_healthy
+        condition: service_started
+      ms-financiero:
+        condition: service_started
     volumes:
       # Recarga en caliente del codigo del gateway. `packages/` y `database/`
       # NO se montan: viven dentro de la imagen, asi que tocarlos exige

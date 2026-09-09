@@ -8,7 +8,7 @@ const {
     prepararEntorno,
     registrarPropietario
 } = require('./utiles/entorno');
-const { ESTADO_CONTRATO_FINALIZADO } = require('../src/models/constantes');
+const { ESTADO_CONTRATO_FINALIZADO } = require('../src/constantes');
 
 let token, idInmueble, idContrato;
 
@@ -66,34 +66,19 @@ describe('Cobertura Total - Contratos', () => {
     });
 });
 
-describe('Cobertura Total - Pagos', () => {
-    test('POST /api/pagos/verificar-mora', async () => {
-        // Crear una cuenta de cobro vencida manualmente. Ya no lleva
-        // `saldo_pendiente`: el saldo se deriva de sus transacciones, y esta no
-        // tiene ninguna, asi que vale su importe entero.
-        const CuentaCobro = require('../src/models/CuentaCobro');
-        await CuentaCobro.create({
-            id_contrato: idContrato,
-            detalle: 'Canon vencido de prueba',
-            valor: 500,
-            inicio: '2020-01-01',
-            fin: '2020-01-31',
-            estado: 'PENDIENTE'
-        });
-
-        const res = await request(app).post('/api/pagos/verificar-mora').set(...conToken(token));
-        expect(res.statusCode).toBe(200);
-        expect(res.body.pagos_actualizados).toBeGreaterThan(0);
-    });
-
-    test('GET /api/pagos/:id/recibo', async () => {
-        const CuentaCobro = require('../src/models/CuentaCobro');
-        const c = await CuentaCobro.findOne();
-        const res = await request(app).get(`/api/pagos/${c.id_cuenta_cobro}/recibo`).set(...conToken(token));
-        expect(res.statusCode).toBe(200);
-        expect(res.header['content-type']).toBe('application/pdf');
-    });
-});
+// AQUI ESTABA `describe('Cobertura Total - Pagos')`. Se fue con ms-financiero en
+// el paso 6e, y no podia quedarse: llegaba a la tabla con
+// `require('../src/models/CuentaCobro')` para sembrar una cuenta vencida, y esa
+// tabla ya no esta en la base del gateway. Reescribirla contra el doble habria
+// sido probar el doble.
+//
+// Los dos casos que cubria viven ahora en el servicio:
+//
+//   - `POST /api/pagos/verificar-mora`  ->  `tests/pagos.test.ts`, en el bloque
+//     «verificar-mora aplica la MISMA regla que el motor», que ademas cierra la
+//     trampa de las dos reglas distintas que CLAUDE.md tenia anotada.
+//   - `GET /api/pagos/:id/recibo`       ->  `tests/comprobantes.test.ts`, que
+//     comprueba el PDF entero y no solo su `content-type`.
 
 describe('Cobertura Total - Dashboard', () => {
     test('Endpoints de métricas', async () => {

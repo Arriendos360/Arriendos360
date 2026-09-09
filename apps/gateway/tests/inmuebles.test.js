@@ -245,82 +245,18 @@ describe('El CRUD sigue funcionando a través de la costura', () => {
     });
 });
 
-describe('Los pagos y abonos siguen trayendo el inmueble de su contrato', () => {
-    // Regresión. La pantalla de Pagos imprime `pago.Contrato.Inmueble.direccion`
-    // y `transaccion.CuentaCobro.Contrato.Inmueble.direccion`, rutas que producía un `include`
-    // anidado de dos y tres niveles. Al quitar Inmuebles de esos `include` la
-    // columna pasó a mostrar el UUID del contrato en crudo — la API respondía
-    // 200 y la pantalla salía «bien», que es como esto se coló.
-    let idInmueble;
-    let idCuenta;
-
-    beforeAll(async () => {
-        const creado = await contratoSobreInmuebleNuevo('Avenida del Pago 7');
-        idInmueble = creado.idInmueble;
-
-        const cuenta = await request(app)
-            .post('/api/pagos/cuentas-cobro')
-            .set(...conToken(tokenProp))
-            .send({
-                id_contrato: creado.idContrato,
-                valor: 1000,
-                inicio: '2026-01-01'
-            });
-        idCuenta = cuenta.body.cuenta_cobro.id_cuenta_cobro;
-
-        await request(app)
-            .post('/api/pagos')
-            .set(...conToken(tokenProp))
-            .send({
-                id_cuenta_cobro: idCuenta,
-                monto: 400,
-                tipo: 'INGRESO',
-                medio_pago: 'Transferencia'
-            });
-    });
-
-    test('GET /api/pagos compone Contrato.Inmueble', async () => {
-        const respuesta = await request(app)
-            .get('/api/pagos')
-            .set(...conToken(tokenProp));
-
-        const pago = respuesta.body.find((p) => p.id_cuenta_cobro === idCuenta);
-        expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
-    });
-
-    test('GET /api/pagos/pendientes también', async () => {
-        const respuesta = await request(app)
-            .get('/api/pagos/pendientes')
-            .set(...conToken(tokenProp));
-
-        const pago = respuesta.body.find((p) => p.id_cuenta_cobro === idCuenta);
-        expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
-    });
-
-    test('El historial de transacciones lo compone un nivel más abajo', async () => {
-        const respuesta = await request(app)
-            .get('/api/pagos/historial-transacciones')
-            .set(...conToken(tokenProp));
-
-        const transaccion = respuesta.body.find((a) => a.id_cuenta_cobro === idCuenta);
-        expect(transaccion.CuentaCobro.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
-    });
-
-    test('Y el inquilino ve lo mismo sobre el inmueble que arrienda', async () => {
-        // No es suyo, pero es parte del contrato: la composición va por
-        // `/interno` con credencial de servicio, sin filtro de pertenencia, y
-        // quien autoriza es el gateway.
-        const login = await iniciarSesion('inq@inm.com', CONTRASENA_POR_DEFECTO);
-
-        const respuesta = await request(app)
-            .get('/api/pagos')
-            .set(...conToken(login.body.token));
-
-        const pago = respuesta.body.find((p) => p.id_cuenta_cobro === idCuenta);
-        expect(pago.Contrato.Inmueble.direccion).toBe('Avenida del Pago 7');
-        expect(pago.Contrato.Inmueble.id_propietario).not.toBe(login.body.usuario.id);
-    });
-});
+// AQUI ESTABA `describe('Los pagos y abonos siguen trayendo el inmueble de su
+// contrato')`. Se fue con ms-financiero en el paso 6e, y no porque sobrara: la
+// regresion que vigilaba sigue siendo real —la pantalla de Pagos imprime
+// `cuenta.Contrato.Inmueble.direccion`, y al quitar Inmuebles de aquel `include`
+// la columna paso a mostrar el UUID en crudo, con la API respondiendo 200—.
+//
+// Lo que cambio es quien compone esa ruta. Ya no la compone el gateway: la
+// compone ms-financiero pidiendole el contrato a ms-contratos con
+// `incluir=inmueble`. Probarla aqui seria probar el doble.
+//
+// Vive ahora en `services/ms-financiero/tests/pagos.test.ts`, en «la lista trae
+// el contrato y su inmueble compuestos».
 
 describe('Los contratos siguen trayendo su inmueble', () => {
     test('el listado compone el Inmueble como lo hacía el include', async () => {

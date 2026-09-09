@@ -12,11 +12,13 @@
     "test": "npm test --workspaces --if-present",
     "test:integracion": "node --test tests/integracion/caminos-criticos.test.js",
     "build:packages": "npm run build --workspace=packages/contracts --workspace=packages/shared",
-    "typecheck": "npm run typecheck --workspace=packages/contracts --workspace=packages/shared --workspace=services/ms-identidad --workspace=services/ms-inmuebles --workspace=services/ms-contratos"
+    "typecheck": "npm run typecheck --workspace=packages/contracts --workspace=packages/shared --workspace=services/ms-identidad --workspace=services/ms-inmuebles --workspace=services/ms-contratos --workspace=services/ms-financiero"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^20.17.0",
+    "dotenv": "^16.6.1",
+    "pg": "^8.10.0",
     "typescript": "^5.7.3"
   }
 }

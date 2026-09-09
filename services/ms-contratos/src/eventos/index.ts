@@ -50,12 +50,31 @@ export const almacen: AlmacenSalida = crearAlmacenSalidaSql({
  * gateway con `MS_*_URL`, y por el mismo motivo practico: las pruebas apuntan el
  * destino a un doble despues de haber cargado este modulo.
  *
- * Hoy los dos eventos van al mismo sitio. En el paso 6e `ContratoFormalizado`
- * gana un segundo suscriptor —ms-financiero, que crea la primera cuenta de
- * cobro— y esto es lo unico que cambia.
+ * ── DESDE EL PASO 6e HAY DOS SUSCRIPTORES DE UN MISMO EVENTO ───────────────
+ *
+ * `ContratoFormalizado` va a ms-inmuebles, que pone el inmueble en `arrendado`,
+ * y a ms-financiero, que inserta la primera cuenta de cobro. Es el caso que el
+ * Capitulo 2 describe y para el que se diseño el bus.
+ *
+ * Y cambiarlo ha sido añadir una linea, que era la promesa del diseño. Este
+ * servicio NO se entera: no llama a ms-financiero, no sabe que existe y no
+ * cambia su comportamiento segun lo que aquel conteste. Anuncia un hecho de su
+ * dominio y quien escuche vera que hace con el. Coreografia, no orquestacion.
+ *
+ * LO QUE SI CAMBIA ES LA POLITICA DE ENTREGA, y conviene saberlo: la fila se
+ * marca entregada cuando ACEPTAN LOS DOS. Si ms-financiero esta caido, el evento
+ * se reintenta y ms-inmuebles lo recibe otra vez — de ahi que la idempotencia
+ * del consumidor deje de ser una precaucion teorica. Ver `entrega.ts`.
+ *
+ * `ContratoFinalizado` sigue teniendo uno solo. No es un olvido: finalizar un
+ * contrato no cancela lo que se debe, asi que Financiero no tiene nada que hacer
+ * con el. Lo explica `eventos/index.ts` de ese servicio.
  */
 const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>> = {
-  [TIPO_CONTRATO_FORMALIZADO]: [{ nombre: 'ms-inmuebles', variable: 'MS_INMUEBLES_URL' }],
+  [TIPO_CONTRATO_FORMALIZADO]: [
+    { nombre: 'ms-inmuebles', variable: 'MS_INMUEBLES_URL' },
+    { nombre: 'ms-financiero', variable: 'MS_FINANCIERO_URL' },
+  ],
   [TIPO_CONTRATO_FINALIZADO]: [{ nombre: 'ms-inmuebles', variable: 'MS_INMUEBLES_URL' }],
 };
 

@@ -32,6 +32,7 @@ import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
 
 import { Contrato } from '../models/Contrato';
+import { adjuntarInmuebles } from '../services/composicion';
 import { ESTADO_CONTRATO_ACTIVO } from '../models/constantes';
 import { esUuid } from '../models/uuid';
 import {
@@ -54,6 +55,29 @@ const responderServicioCaido = (res: Response, error: unknown, accion: string): 
 };
 
 /**
+ * ¿Pidieron el inmueble dentro?
+ *
+ * `incluir=inmueble` lo usa ms-financiero desde el paso 6e: sus comprobantes
+ * imprimen la direccion y su motor avisa al propietario, y ninguna de las dos
+ * cosas esta en la fila del contrato. Resolverlo aqui le ahorra un salto de red
+ * encadenado y le evita saber que un contrato tiene inmueble. Ver
+ * `services/composicion.ts`.
+ *
+ * Es OPCIONAL a proposito: el gateway pide estos mismos endpoints para filtrar y
+ * para vetar borrados, y no necesita el inmueble. Componerlo siempre le costaria
+ * una peticion a ms-inmuebles en cada llamada, para tirarla.
+ */
+const conInmueble = (req: Request): boolean => req.query['incluir'] === 'inmueble';
+
+/** Responde la lista, con el inmueble dentro si lo pidieron. */
+const responderContratos = async (
+  req: Request,
+  res: Response,
+  contratos: Contrato[],
+): Promise<Response> =>
+  res.json({ contratos: conInmueble(req) ? await adjuntarInmuebles(contratos) : contratos });
+
+/**
  * GET /interno/contratos
  *
  * Cinco preguntas, un endpoint, y las cinco son «dame contratos que cumplan
@@ -70,6 +94,9 @@ const responderServicioCaido = (res: Response, error: unknown, accion: string): 
  *                          — los contratos vivos de un inmueble, para el guardia
  *                            de borrado del gateway.
  *
+ * Y un modificador transversal, `?incluir=inmueble`, que vale con cualquiera de
+ * los cinco: adjunta el `Inmueble` de cada contrato en un solo lote.
+ *
  * Sin filtro NO se devuelve la tabla entera: este endpoint sirve para componer
  * respuestas de alguien concreto, no para volcar el catalogo. El motor
  * financiero es la unica excepcion y usa `?estado=activo` a secas, que es un
@@ -80,16 +107,16 @@ export const listar = async (req: Request, res: Response): Promise<Response> => 
 
   try {
     if (esUuid(parte)) {
-      return res.json({ contratos: await contratosDondeEsParte(parte) });
+      return await responderContratos(req, res, await contratosDondeEsParte(parte));
     }
 
     if (esUuid(propietario)) {
-      return res.json({ contratos: await contratosDePropietario(propietario) });
+      return await responderContratos(req, res, await contratosDePropietario(propietario));
     }
 
     if (esUuid(inquilino)) {
       const contratos = await Contrato.findAll({ where: { id_inquilino: inquilino } });
-      return res.json({ contratos });
+      return await responderContratos(req, res, contratos);
     }
 
     if (esUuid(inmueble)) {
@@ -100,7 +127,7 @@ export const listar = async (req: Request, res: Response): Promise<Response> => 
           ? await contratosActivosDeInmueble(inmueble)
           : await Contrato.findAll({ where: { id_inmueble: inmueble } });
 
-      return res.json({ contratos });
+      return await responderContratos(req, res, contratos);
     }
 
     if (typeof ids === 'string') {
@@ -116,14 +143,14 @@ export const listar = async (req: Request, res: Response): Promise<Response> => 
       }
 
       const contratos = await Contrato.findAll({ where: { id_contrato: solicitados } });
-      return res.json({ contratos });
+      return await responderContratos(req, res, contratos);
     }
 
     // El barrido del motor financiero: todos los activos del sistema. Es el
     // unico caso sin sujeto, y se declara aparte para que se vea que lo es.
     if (typeof estado === 'string' && estado !== '') {
       const contratos = await Contrato.findAll({ where: { estado } });
-      return res.json({ contratos });
+      return await responderContratos(req, res, contratos);
     }
 
     return res

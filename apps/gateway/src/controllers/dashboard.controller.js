@@ -5,49 +5,67 @@
  * Todas sus rutas exigen PROPIETARIO en `dashboard.routes.js`, así que aquí el
  * `sub` del token es siempre el del dueño.
  *
- * ── ES EL CONTROLADOR QUE MÁS CAMBIA EN CADA EXTRACCIÓN ─────────────────────
+ * ── ES EL CONTROLADOR QUE MÁS CAMBIA EN CADA EXTRACCIÓN, Y ÉSTA ES LA ÚLTIMA ─
  *
- * Y no por casualidad: es el único que toca los tres contextos a la vez, así que
+ * No es casualidad: es el único que toca los tres contextos a la vez, así que
  * cada servicio que sale le quita un `include`. El paso 4 le quitó el de
- * Inmuebles; el 6d le quita el de Contratos, que era el que quedaba.
+ * Inmuebles; el 6d el de Contratos; el 6e le quita el último que le quedaba —el
+ * de sus propias cuentas de cobro, que ya no son suyas.
  *
- * Lo que sostiene el diseño después de los dos es la misma regla: **cada dato
- * externo se pide UNA VEZ por petición, no una por métrica.** `obtenerResumen`
+ * A partir de aquí este controlador NO CONSULTA NINGUNA BASE. Ni ésta ni otra:
+ * el gateway se quedó sin tablas, que es lo que el Capítulo 2 dice que tiene que
+ * ser. Todo lo que devuelve sale de componer respuestas de otros tres servicios.
+ *
+ * ── CADA DATO EXTERNO SE PIDE UNA VEZ POR PETICIÓN, NO UNA POR MÉTRICA ──────
+ *
+ * Es lo que sostiene el diseño después de las tres extracciones. `obtenerResumen`
  * calcula seis cosas, y una llamada de red por cada una convertiría el dashboard
- * en la pantalla más lenta de la aplicación. Ahora son dos llamadas —los
- * inmuebles del propietario y sus contratos— y de ellas salen las seis.
+ * en la pantalla más lenta de la aplicación. Son TRES llamadas —los inmuebles del
+ * propietario, sus contratos y las cuentas de cobro de esos contratos— y de
+ * ellas salen las seis.
+ *
+ * Las dos primeras van en paralelo porque no dependen entre sí. La tercera no
+ * puede: hasta que ms-contratos no dice cuáles son sus contratos, no se sabe qué
+ * cuentas de cobro pedir.
  *
  * ── UN FALLO NO SE DEGRADA A CEROS ──────────────────────────────────────────
  *
- * Vale para los dos servicios. Un dashboard que dice «0 contratos activos, $0 de
- * ingresos» cuando en realidad no pudo preguntar es peor que un error: parece
- * una respuesta. Por eso las dos llamadas propagan y aquí se traducen en 502.
+ * Vale para los tres servicios, y desde el paso 6e importa más que nunca porque
+ * el que aporta las cifras de dinero es el nuevo. Un dashboard que dice «0
+ * contratos activos, $0 de ingresos» cuando en realidad no pudo preguntar es
+ * peor que un error: PARECE una respuesta, y el propietario se la cree. Por eso
+ * las tres llamadas propagan y aquí se traducen en 502.
  */
-const { Sequelize } = require('sequelize');
 
 const { contratosDePropietario } = require('../clientes/contratos');
+const { cuentasDeContratos } = require('../clientes/financiero');
 const { dePropietario, ESTADO_ARRENDADO, ESTADO_DISPONIBLE } = require('../clientes/inmuebles');
 const { adjuntarInmuebles } = require('../clientes/composicion');
-const CuentaCobro = require('../models/CuentaCobro');
 const {
     ESTADO_CONTRATO_ACTIVO,
     ESTADO_CONTRATO_FINALIZADO,
     ESTADO_CUENTA_EN_MORA,
     ESTADO_CUENTA_PAGADA,
     ESTADO_CUENTA_PENDIENTE
-} = require('../models/constantes');
+} = require('../constantes');
 const { hoyEnZonaNegocio } = require('arriendos360-shared');
-const { conSaldos } = require('../services/saldos');
 
 /**
  * 502 con el formato de error del proyecto.
  *
- * El mensaje nombra el servicio que falló, porque ya son dos y saber cuál
- * ahorra el rato de mirar los dos logs.
+ * El mensaje nombra el servicio que falló, porque ya son TRES y saber cuál
+ * ahorra el rato de mirar tres logs.
  */
 const responderServicioCaido = (res, error, accion) => {
     console.error(`Error al ${accion}:`, error.message);
-    const servicio = String(error.message).includes('ms-contratos') ? 'contratos' : 'inmuebles';
+
+    const mensaje = String(error.message);
+    const servicio = mensaje.includes('ms-financiero')
+        ? 'financiero'
+        : mensaje.includes('ms-contratos')
+          ? 'contratos'
+          : 'inmuebles';
+
     return res.status(502).json({ mensaje: `No se pudo contactar el servicio de ${servicio}` });
 };
 
@@ -55,8 +73,9 @@ const responderServicioCaido = (res, error, accion) => {
 const idsDeContratos = async (sub) =>
     (await contratosDePropietario(sub)).map((contrato) => contrato.id_contrato);
 
-/** Filtro sobre las cuentas de cobro de esos contratos. */
-const deSusContratos = (idsContratos) => ({ id_contrato: idsContratos });
+/** Suma un campo numérico de una lista de cuentas de cobro. */
+const sumar = (cuentas, campo) =>
+    cuentas.reduce((total, cuenta) => total + parseFloat(cuenta[campo] || 0), 0);
 
 // Obtener ingresos totales (suma de cuentas de cobro pagadas)
 const obtenerIngresos = async (req, res) => {
@@ -64,18 +83,15 @@ const obtenerIngresos = async (req, res) => {
         const { sub } = req.usuario;
         const mios = await idsDeContratos(sub);
 
-        const resultado = await CuentaCobro.findAll({
-            where: { estado: ESTADO_CUENTA_PAGADA, ...deSusContratos(mios) },
-            attributes: [
-                [Sequelize.fn('SUM', Sequelize.col('valor')), 'total_ingresos'],
-                [Sequelize.fn('COUNT', Sequelize.col('id_cuenta_cobro')), 'cantidad_pagos']
-            ],
-            raw: true
-        });
+        // El `SUM` y el `COUNT` que hacía PostgreSQL se convierten en sumar una
+        // lista en memoria. Son decenas de filas por propietario, no millones:
+        // contarlas aquí cuesta menos que un endpoint de agregación en
+        // ms-financiero que tendría que saber qué es un dashboard.
+        const pagadas = await cuentasDeContratos(mios, [ESTADO_CUENTA_PAGADA]);
 
         res.json({
-            total_ingresos: resultado[0].total_ingresos || 0,
-            cantidad_pagos: resultado[0].cantidad_pagos || 0
+            total_ingresos: sumar(pagadas, 'valor'),
+            cantidad_pagos: pagadas.length
         });
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener ingresos');
@@ -89,32 +105,32 @@ const obtenerMora = async (req, res) => {
         const hoy = hoyEnZonaNegocio();
         const mios = await idsDeContratos(sub);
 
-        const enMora = await CuentaCobro.findAll({
-            where: {
-                ...deSusContratos(mios),
-                [Sequelize.Op.or]: [
-                    {
-                        estado: ESTADO_CUENTA_PENDIENTE,
-                        inicio: { [Sequelize.Op.lt]: hoy }
-                    },
-                    { estado: ESTADO_CUENTA_EN_MORA }
-                ]
-            }
-        });
+        // Los dos estados en UNA petición, y el `Op.or` que había se convierte
+        // en un filtro sobre lo que vuelve. La condición no es simétrica —las
+        // EN_MORA entran todas, las PENDIENTE sólo si su corte ya pasó— así que
+        // no cabía en un filtro de estado y se aplica aquí, igual que antes se
+        // aplicaba en el `where`.
+        const candidatas = await cuentasDeContratos(mios, [
+            ESTADO_CUENTA_PENDIENTE,
+            ESTADO_CUENTA_EN_MORA
+        ]);
 
-        // El saldo se deriva para toda la lista de una vez, y el detalle sale de
-        // aquí ya con el campo `saldo_pendiente` que la pantalla espera.
-        const conSaldo = await conSaldos(enMora);
+        const enMora = candidatas.filter(
+            (cuenta) => cuenta.estado === ESTADO_CUENTA_EN_MORA || cuenta.inicio < hoy
+        );
 
-        const totalMora = conSaldo.reduce((sum, cuenta) => {
-            const pendiente = cuenta.saldo_pendiente;
-            return sum + (pendiente > 0 ? pendiente : parseFloat(cuenta.valor));
+        // `saldo_pendiente` ya viene derivado de ms-financiero: es lo único de
+        // esa respuesta que el gateway no podría calcular, porque necesitaría
+        // las transacciones.
+        const totalMora = enMora.reduce((suma, cuenta) => {
+            const pendiente = parseFloat(cuenta.saldo_pendiente);
+            return suma + (pendiente > 0 ? pendiente : parseFloat(cuenta.valor));
         }, 0);
 
         res.json({
-            cantidad_en_mora: conSaldo.length,
+            cantidad_en_mora: enMora.length,
             total_mora: totalMora,
-            detalle: conSaldo
+            detalle: enMora
         });
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener mora');
@@ -126,8 +142,8 @@ const obtenerContratosActivos = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        // Ya no hay `Contrato.findAll`: la lista viene de ms-contratos, que
-        // aplica el filtro de pertenencia y devuelve sólo los de sus inmuebles.
+        // La lista viene de ms-contratos, que aplica el filtro de pertenencia y
+        // devuelve sólo los de sus inmuebles.
         const contratos = await contratosDePropietario(sub);
         const activos = contratos.filter((c) => c.estado === ESTADO_CONTRATO_ACTIVO);
 
@@ -147,8 +163,7 @@ const obtenerResumen = async (req, res) => {
     try {
         const { sub } = req.usuario;
 
-        // DOS peticiones para las seis métricas, y en paralelo porque no
-        // dependen entre sí: los inmuebles del propietario y sus contratos.
+        // Las dos primeras en paralelo porque no dependen entre sí.
         const [inmuebles, contratos] = await Promise.all([
             dePropietario(sub),
             contratosDePropietario(sub)
@@ -156,26 +171,24 @@ const obtenerResumen = async (req, res) => {
 
         const idsContratos = contratos.map((c) => c.id_contrato);
 
-        const [ingresos, pagosPendientes] = await Promise.all([
-            CuentaCobro.findAll({
-                where: { estado: ESTADO_CUENTA_PAGADA, ...deSusContratos(idsContratos) },
-                attributes: [[Sequelize.fn('SUM', Sequelize.col('valor')), 'total']],
-                raw: true
-            }),
-            CuentaCobro.count({
-                where: { estado: ESTADO_CUENTA_PENDIENTE, ...deSusContratos(idsContratos) }
-            })
+        // La tercera va después y no en paralelo: hasta que no se sabe cuáles
+        // son sus contratos, no se sabe qué cuentas de cobro pedir. Los dos
+        // estados que hacen falta viajan en la MISMA petición.
+        const cuentas = await cuentasDeContratos(idsContratos, [
+            ESTADO_CUENTA_PAGADA,
+            ESTADO_CUENTA_PENDIENTE
         ]);
 
-        // Los dos `COUNT` contra la tabla de contratos y los dos contra la de
-        // inmuebles se convierten en contar sobre lo que ya se trajo. Son listas
-        // de decenas de filas, no de millones: contarlas en memoria cuesta menos
-        // que cuatro viajes de red.
+        const deEstado = (estado) => cuentas.filter((c) => c.estado === estado);
+
+        // Contar sobre lo que ya se trajo en vez de pedir cuatro `COUNT`. Son
+        // listas de decenas de filas, no de millones: contarlas en memoria
+        // cuesta menos que cuatro viajes de red.
         const inmueblesPorEstado = (estado) => inmuebles.filter((i) => i.estado === estado).length;
         const contratosPorEstado = (estado) => contratos.filter((c) => c.estado === estado).length;
 
         res.json({
-            ingresos_totales: ingresos[0].total || 0,
+            ingresos_totales: sumar(deEstado(ESTADO_CUENTA_PAGADA), 'valor'),
             contratos: {
                 activos: contratosPorEstado(ESTADO_CONTRATO_ACTIVO),
                 finalizados: contratosPorEstado(ESTADO_CONTRATO_FINALIZADO)
@@ -184,7 +197,7 @@ const obtenerResumen = async (req, res) => {
                 disponibles: inmueblesPorEstado(ESTADO_DISPONIBLE),
                 arrendados: inmueblesPorEstado(ESTADO_ARRENDADO)
             },
-            pagos_pendientes: pagosPendientes
+            pagos_pendientes: deEstado(ESTADO_CUENTA_PENDIENTE).length
         });
     } catch (error) {
         return responderServicioCaido(res, error, 'obtener resumen');

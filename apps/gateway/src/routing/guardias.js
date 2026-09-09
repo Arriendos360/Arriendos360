@@ -33,7 +33,7 @@
  */
 
 const { activosDeInmueble } = require('../clientes/contratos');
-const { esUuid } = require('../models/uuid');
+const { esUuid } = require('../uuid');
 
 const MENSAJE_CON_CONTRATO =
     'No se puede eliminar un inmueble con un contrato activo. Finaliza el contrato primero.';
