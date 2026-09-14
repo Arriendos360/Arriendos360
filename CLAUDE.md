@@ -286,8 +286,15 @@ Tipos en `packages/shared/src/eventos.ts`.
 
 ### El motor
 
-`services/ms-financiero/src/services/motor.ts`, con `node-cron` dentro del proceso. **La
-primera cuenta de cobro es del evento**: `procesarContratos()` hace las siguientes y
+`services/ms-financiero/src/services/motor.ts`. **Cuándo corre lo decide
+`MOTOR_PROGRAMACION`, obligatoria y sin defecto:** `cron` en Compose y local (node-cron en
+el proceso, 00:01 de Bogotá) y `trabajo` en Container Apps, donde un Job programado
+(`infra/azure/motor-financiero-job.bicep`, `1 5 * * *` en UTC) ejecuta `npm run motor` y
+el proceso no programa nada (`docs/adr/0021`). **El motor es idempotente**: puede correr
+dos veces el mismo día, seguidas o a la vez, sin duplicar cuentas ni avisos, y
+`npm run motor` sale con 1 si algo falla para que el Job reintente.
+
+**La primera cuenta de cobro es del evento**: `procesarContratos()` hace las siguientes y
 **salta el primer periodo SIEMPRE, exista o no**, para no facturar dos veces dentro de la
 ventana de entrega. Motor y `verificar-mora` comparten `DIAS_PARA_MORA` y
 `ESTADOS_QUE_ENTRAN_EN_MORA` (`PENDIENTE` y `PARCIAL`): **saldo mayor que cero y corte
@@ -394,7 +401,7 @@ docker compose -f infra/docker-compose.yml up --build     # levantar todo
 docker compose -f infra/docker-compose.yml down -v        # reinicio limpio
 npm test --workspace=services/ms-identidad                # pruebas de un servicio
 npm test --workspaces --if-present                        # todas, contra dobles
-npm run motor --workspace=services/ms-financiero          # barrido manual del motor
+npm run motor --workspace=services/ms-financiero          # motor: demostraciones y comando del Job
 npm run enviar --workspace=services/ms-notificaciones     # barrido manual de los envios
 npm run test:integracion                                  # caminos criticos, stack arriba
 npm run seed --workspace=services/ms-identidad            # usuarios de prueba
@@ -458,18 +465,15 @@ Pasos 1 a 7 hechos: monorepo, gateway, identidad y seguridad, ms-inmuebles, bus,
 ms-contratos y ms-financiero, ms-notificaciones.
 
 **Paso 8 — Azure Container Apps, lo único que queda.** Bicep, pipeline y terminación
-SSL; no crea servicios ni toca tablas ni bus. Primero el **Job del motor** (bloqueante);
-después réplicas del publicador, clave por servicio y limitación de tasa. Los anexos van
-a Azure Blob, elegido por variable de entorno.
+SSL; no crea servicios ni toca tablas ni bus. El Job del motor ya tiene su módulo
+(`infra/azure/motor-financiero-job.bicep`, `docs/adr/0021`); falta integrarlo con el resto
+del despliegue, las réplicas del publicador y la clave por servicio. Los anexos van a
+Azure Blob, elegido por variable de entorno.
 
 ## Decisiones abiertas
 
 Resuélvelas con un ADR cuando llegue el momento, no antes.
 
-- **🔴 BLOQUEANTE PARA PRODUCCIÓN — el cron del motor no dispara con scale-to-zero.** Un
-  contenedor dormido a las 00:01 no factura ni marca moras, **sin error ni log**. Salida:
-  `Job` de Container Apps (`triggerType: Schedule`) que ejecute `npm run motor`, que ya
-  sale ≠ 0 si falla. Falta el Bicep (`docs/adr/0018`).
 - **Varias réplicas de un productor.** La doble entrega está cubierta; el orden por clave
   no, si se usa `FOR UPDATE SKIP LOCKED` (`docs/adr/0012`).
 - **Clave por servicio.** Todos comparten `SERVICIO_JWT_SECRET`. Claves asimétricas por

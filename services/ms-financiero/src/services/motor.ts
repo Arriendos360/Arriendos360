@@ -91,14 +91,29 @@
  * NO hay intereses ni recargos, y no los va a haber por esta via: RF-12 es
  * alertas de vencimiento, no cobro de mora.
  *
- * ── EL CRON NO DISPARA SI EL CONTENEDOR ESTA APAGADO ───────────────────────
+ * ── CUANDO CORRE, Y POR QUE TIENE QUE PODER CORRER DOS VECES ───────────────
  *
- * Ver `iniciarMotorFinanciero()`. Es una limitacion conocida y bloqueante para
- * produccion, anotada en `docs/adr/0018`.
+ * Lo decide `MOTOR_PROGRAMACION`, obligatoria y sin valor por defecto: `cron` en
+ * Compose y en local —node-cron dentro de este proceso— y `trabajo` en Container Apps,
+ * donde un Job programado ejecuta `npm run motor` y el proceso no programa nada. Con
+ * scale-to-zero un cron dentro del contenedor no dispara. Ver `docs/adr/0021`.
+ *
+ * Un Job se reintenta si sale con error y no garantiza no solaparse con otra
+ * ejecucion, asi que el motor es IDEMPOTENTE: dos ejecuciones el mismo dia, seguidas o
+ * a la vez, no generan dos cuentas ni anotan dos avisos.
+ *
+ *   - Generacion: comprobacion previa e indice unico `(id_contrato, inicio)`. Si una
+ *     ejecucion concurrente gana la carrera, el choque se trata como «ya existe».
+ *   - Aviso previo: `id_evento` derivado del hecho; la segunda anotacion no se escribe.
+ *   - Mora: la cuenta se relee BLOQUEADA y con el estado en el filtro; si otra
+ *     ejecucion ya la marco, no se marca ni se avisa otra vez.
+ *
+ * Y no se traga los fallos: los devuelve, y `scripts/motor.ts` sale con 1 para que el
+ * Job reintente. Reintentar es seguro precisamente por lo anterior.
  */
 
 import cron from 'node-cron';
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import {
   diaDeCorte,
   diasEntre,
@@ -109,8 +124,11 @@ import {
   periodoQueEmpiezaEn,
   soloFecha,
   sumarDias,
+  ErrorDeEntorno,
+  leerEntorno,
+  ZONA_NEGOCIO,
 } from 'arriendos360-shared';
-import type { Periodo } from 'arriendos360-shared';
+import type { Entorno, Periodo } from 'arriendos360-shared';
 
 import { sequelize } from '../config/database';
 import { contratosConEstado, porIds as contratosPorIds } from '../clientes/contratos';
@@ -222,19 +240,37 @@ export const primerPeriodoDe = (fechaInicioCorte: unknown): Periodo | null => {
  * calendario sin huecos ni solapes. La regla esta en `periodoDeCorte()`, en
  * `packages/shared`.
  */
-export const procesarContratos = async (): Promise<void> => {
+/** Lo que deja un barrido de generacion. */
+export interface ResultadoGeneracion {
+  generadas: number;
+  /** Lo que fallo. Vacio = todo bien; si no, `scripts/motor.ts` sale con 1. */
+  fallos: string[];
+}
+
+export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
+  const resultado: ResultadoGeneracion = { generadas: 0, fallos: [] };
+  const hoy = hoyEnZonaNegocio();
+
+  // UNA peticion para todos los contratos activos del sistema, con su inmueble
+  // dentro. Si no responde, no hay nada que facturar: se anota el fallo —el trabajo
+  // programado reintentara— y este barrido no genera nada.
+  let contratos: Awaited<ReturnType<typeof contratosConEstado>>;
   try {
-    const hoy = hoyEnZonaNegocio();
+    contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
+  } catch (error) {
+    console.error('❌ Error en procesarContratos: no se pudieron pedir los contratos:', error);
+    resultado.fallos.push(`contratos activos: ${(error as Error).message}`);
+    return resultado;
+  }
 
-    // UNA peticion para todos los contratos activos del sistema, con su
-    // inmueble dentro. Si no responde, el `catch` de abajo lo registra y este
-    // barrido no genera nada. Ver la nota sobre degradacion de la cabecera.
-    const contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
-
-    // Y NO hay segundo viaje. Hasta el paso 6e habia una llamada a ms-identidad aqui
-    // para conseguir la direccion de correo del inquilino; los eventos llevan el
-    // `id_usuario`, asi que ya no hace falta.
-    for (const contrato of contratos) {
+  // Y NO hay segundo viaje. Hasta el paso 6e habia una llamada a ms-identidad aqui
+  // para conseguir la direccion de correo del inquilino; los eventos llevan el
+  // `id_usuario`, asi que ya no hace falta.
+  //
+  // Un contrato que falla no para a los demas: se anota y se sigue. Reintentar el
+  // barrido entero es seguro, y el reintento solo hara lo que falte.
+  for (const contrato of contratos) {
+    try {
       const fechaInicioCorte = contrato.fecha_inicio_corte;
 
       // El dia de corte sale de SU COLUMNA, no de recalcularlo desde el inicio
@@ -275,23 +311,37 @@ export const procesarContratos = async (): Promise<void> => {
       // crea. El correo ya no se manda desde aqui: `emitirCuentaCobro` anota
       // `CuentaCobroGenerada` en la tabla de salida y ms-notificaciones decide a
       // quien avisar. Ver `services/cuentas.ts`.
-      await emitirCuentaCobro({
-        id_contrato: contrato.id_contrato,
-        id_inquilino: contrato.id_inquilino,
-        detalle: detalleDelPeriodo(periodo),
-        valor: contrato.canon,
-        inicio: periodo.inicio,
-        fin: periodo.fin,
-      });
+      try {
+        await emitirCuentaCobro({
+          id_contrato: contrato.id_contrato,
+          id_inquilino: contrato.id_inquilino,
+          detalle: detalleDelPeriodo(periodo),
+          valor: contrato.canon,
+          inicio: periodo.inicio,
+          fin: periodo.fin,
+        });
+      } catch (error) {
+        // Otra ejecucion del motor —un reintento solapado, el cron y el trabajo a la
+        // vez— la creo entre la comprobacion de arriba y este INSERT. El indice unico
+        // la freno, y la transaccion se llevo con ella su aviso: ya esta hecha.
+        if (error instanceof UniqueConstraintError) {
+          continue;
+        }
+        throw error;
+      }
 
+      resultado.generadas += 1;
       console.log(
         `✅ Cuenta de cobro generada para contrato ${contrato.id_contrato}` +
           ` — periodo ${periodo.inicio} a ${periodo.fin}`,
       );
+    } catch (error) {
+      console.error(`❌ Error al facturar el contrato ${contrato.id_contrato}:`, error);
+      resultado.fallos.push(`contrato ${contrato.id_contrato}: ${(error as Error).message}`);
     }
-  } catch (error) {
-    console.error('❌ Error en procesarContratos:', error);
   }
+
+  return resultado;
 };
 
 /**
@@ -332,11 +382,22 @@ const puedeEntrarEnMora = (estado: string): boolean => ESTADOS_QUE_ENTRAN_EN_MOR
  * Los dias se cuentan desde `inicio`, que es la fecha de corte y es exactamente
  * lo que guardaba `mes_correspondiente`.
  */
-export const procesarPagos = async (): Promise<void> => {
-  try {
-    const hoy = hoyEnZonaNegocio();
+/** Lo que deja un barrido de vencimientos. */
+export interface ResultadoVencimientos {
+  /** Cuentas que ESTA ejecucion paso a EN_MORA. */
+  moras: number;
+  /** Lo que fallo. Vacio = todo bien; si no, `scripts/motor.ts` sale con 1. */
+  fallos: string[];
+}
 
-    const cuentasPendientes = await CuentaCobro.findAll({
+export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
+  const resultado: ResultadoVencimientos = { moras: 0, fallos: [] };
+  const hoy = hoyEnZonaNegocio();
+
+  let cuentasPendientes: CuentaCobro[];
+  let contratos: Awaited<ReturnType<typeof contratosPorIds>>;
+  try {
+    cuentasPendientes = await CuentaCobro.findAll({
       where: {
         estado: { [Op.in]: [...ESTADOS_QUE_ENTRAN_EN_MORA, ESTADO_CUENTA_EN_MORA] },
       },
@@ -346,12 +407,18 @@ export const procesarPagos = async (): Promise<void> => {
     // identificador y con su inmueble dentro. No uno por cuenta. Y NO hay segundo
     // viaje a ms-identidad: lo que hacia falta de alli eran las direcciones de
     // correo, y los eventos llevan el `id_usuario`.
-    const contratos = await contratosPorIds(
+    contratos = await contratosPorIds(
       cuentasPendientes.map((cuenta) => cuenta.id_contrato),
       { conInmueble: true },
     );
+  } catch (error) {
+    console.error('❌ Error en procesarPagos:', error);
+    resultado.fallos.push(`vencimientos: ${(error as Error).message}`);
+    return resultado;
+  }
 
-    for (const cuenta of cuentasPendientes) {
+  for (const cuenta of cuentasPendientes) {
+    try {
       const contrato = contratos.get(cuenta.id_contrato);
       if (!contrato) {
         continue;
@@ -393,9 +460,9 @@ export const procesarPagos = async (): Promise<void> => {
       // RF-12: vencimiento proximo (2 dias antes de que expire el tiempo de gracia).
       //
       // La igualdad exacta NO es una comodidad: es lo que hace que el aviso sea de un
-      // dia y no de todos los que quedan. Y ademas es lo unico que impide el aviso
-      // repetido, porque esta rama no cambia nada en la base — no hay estado que haga
-      // de bitacora, al contrario que en la de la mora. Ver `eventos/salida.ts`.
+      // dia y no de todos los que quedan. Que no se repita si el motor corre dos veces
+      // ese dia lo garantiza el `id_evento` derivado de la cuenta, porque esta rama no
+      // escribe nada en la base que haga de bitacora. Ver `eventos/salida.ts`.
       //
       // Se avisa tambien a una cuenta PARCIAL: si va a entrar en mora dentro de dos
       // dias, tiene el mismo derecho a enterarse que una que no ha abonado nada.
@@ -417,12 +484,25 @@ export const procesarPagos = async (): Promise<void> => {
       // que cierra la trampa de las dos reglas distintas.
       if (diasDesdeCorte >= DIAS_PARA_MORA && puedeEntrarEnMora(cuenta.estado)) {
         // El UPDATE y su aviso van en UNA transaccion: no puede haber una mora sin
-        // aviso ni un aviso sin mora. Y como la condicion exige que venga de
-        // `PENDIENTE` o `PARCIAL`, una segunda pasada no vuelve a cambiar el estado y
-        // por tanto tampoco vuelve a anotar el evento — el estado de la cuenta hace de
-        // bitacora.
-        await sequelize.transaction(async (transaccion) => {
-          await cuenta.update(
+        // aviso ni un aviso sin mora. El estado de la cuenta hace de bitacora, y para
+        // que lo haga tambien entre dos ejecuciones SIMULTANEAS la cuenta se relee
+        // dentro de la transaccion, bloqueada y con el estado en el filtro. La segunda
+        // ejecucion espera el bloqueo, ya no la encuentra y no marca ni avisa nada.
+        const marcada = await sequelize.transaction(async (transaccion) => {
+          const vigente = await CuentaCobro.findOne({
+            where: {
+              id_cuenta_cobro: cuenta.id_cuenta_cobro,
+              estado: { [Op.in]: [...ESTADOS_QUE_ENTRAN_EN_MORA] },
+            },
+            transaction: transaccion,
+            lock: transaccion.LOCK.UPDATE,
+          });
+
+          if (!vigente) {
+            return false;
+          }
+
+          await vigente.update(
             { estado: ESTADO_CUENTA_EN_MORA },
             { transaction: transaccion } as never,
           );
@@ -433,51 +513,125 @@ export const procesarPagos = async (): Promise<void> => {
               transaccion,
             );
           }
+
+          return true;
         });
 
-        console.log(`🚫 Cuenta de cobro ${cuenta.id_cuenta_cobro} marcada como EN MORA`);
+        if (marcada) {
+          resultado.moras += 1;
+          console.log(`🚫 Cuenta de cobro ${cuenta.id_cuenta_cobro} marcada como EN MORA`);
+        }
       }
+    } catch (error) {
+      console.error(`❌ Error al revisar la cuenta ${cuenta.id_cuenta_cobro}:`, error);
+      resultado.fallos.push(`cuenta ${cuenta.id_cuenta_cobro}: ${(error as Error).message}`);
     }
-  } catch (error) {
-    console.error('❌ Error en procesarPagos:', error);
   }
+
+  return resultado;
 };
 
+/** Lo que deja una ejecucion completa del motor. */
+export interface ResultadoMotor {
+  generadas: number;
+  moras: number;
+  /** Vacio = todo bien. Si no, `scripts/motor.ts` sale con 1 y el Job reintenta. */
+  fallos: string[];
+}
+
 /**
- * Programa el barrido diario.
+ * Una ejecucion completa: generacion y vencimientos.
  *
- * ── ESTO NO DISPARA SI EL CONTENEDOR ESTA APAGADO, Y ES UN PROBLEMA REAL ────
- *
- * `node-cron` es un temporizador DENTRO del proceso. Funciona mientras el
- * proceso vive, y eso hoy es cierto —Compose mantiene el contenedor en pie— pero
- * deja de serlo en el destino del paso 8: Azure Container Apps escala a cero
- * cuando no hay trafico. Un contenedor dormido a las 00:01 no genera las cuentas
- * de cobro de ese dia, y nadie se entera hasta que un inquilino pregunta por su
- * recibo.
- *
- * No se arregla aqui. La salida es un **trabajo programado de Container Apps**
- * (un `Job` con `triggerType: Schedule`), que levanta un contenedor a la hora
- * pactada, ejecuta `npm run motor` y se apaga. El codigo ya esta listo para eso:
- * `scripts/motor.ts` hace exactamente ese barrido y no depende de que la API
- * este escuchando.
- *
- * Queda como decision abierta MARCADA COMO BLOQUEANTE PARA PRODUCCION en
- * CLAUDE.md y en `docs/adr/0018`. Mantener `node-cron` mientras tanto es lo
- * correcto: es lo que hace el motor demostrable en la defensa sin desplegar
- * nada, y su sustituto no es codigo sino infraestructura.
+ * La usan el cron de desarrollo y `scripts/motor.ts`, que es el comando del trabajo
+ * programado y el de las demostraciones. Se puede ejecutar las veces que haga falta el
+ * mismo dia, seguidas o a la vez: ver la cabecera.
  */
-export const iniciarMotorFinanciero = (): void => {
-  // Ejecutar cada dia a la medianoche (00:01).
-  cron.schedule('1 0 * * *', () => {
-    void (async () => {
-      console.log('⏳ Iniciando proceso diario del Motor Financiero...');
-      await procesarContratos();
-      await procesarPagos();
-    })();
-  });
-  console.log('🚀 Motor Financiero programado (ejecución diaria)');
-  console.warn(
-    '⚠️  ms-financiero: el cron vive DENTRO del proceso. Con scale-to-zero no dispara. ' +
-      'Ver docs/adr/0018.',
+export const ejecutarMotor = async (): Promise<ResultadoMotor> => {
+  const generacion = await procesarContratos();
+  const vencimientos = await procesarPagos();
+
+  return {
+    generadas: generacion.generadas,
+    moras: vencimientos.moras,
+    fallos: [...generacion.fallos, ...vencimientos.fallos],
+  };
+};
+
+/** Como se programa el motor en este despliegue. */
+export type ModoProgramacion = 'cron' | 'trabajo';
+
+/**
+ * El modo, de `MOTOR_PROGRAMACION`. LANZA si falta o no es uno de los dos.
+ *
+ * Sin valor por defecto, a proposito: que un entorno programe el motor dentro del
+ * proceso y otro no es una diferencia que tiene que estar escrita en su configuracion,
+ * no deducirse de si hay o no un contenedor encendido a medianoche.
+ */
+export const modoDeProgramacion = (entorno: Entorno = process.env): ModoProgramacion => {
+  const valor = leerEntorno('MOTOR_PROGRAMACION', entorno);
+  if (valor === 'cron' || valor === 'trabajo') {
+    return valor;
+  }
+
+  throw new ErrorDeEntorno(
+    `MOTOR_PROGRAMACION debe ser «cron» (Compose y local) o «trabajo» (Container Apps)` +
+      `${valor === undefined ? '' : `, no «${valor}»`}. Ver docs/adr/0021.`,
+    ['MOTOR_PROGRAMACION'],
+  );
+};
+
+/** 00:01, en la zona del negocio. El Job lo expresa en UTC: `1 5 * * *`. */
+export const HORARIO_CRON = '1 0 * * *';
+
+/**
+ * Programa el barrido diario, SOLO si `MOTOR_PROGRAMACION=cron`.
+ *
+ * ── DOS ENTORNOS, DOS FORMAS, Y LAS DOS ESCRITAS ───────────────────────────
+ *
+ * `cron` (Compose y local): `node-cron` DENTRO del proceso, a las 00:01 de Bogota.
+ * Funciona porque Compose mantiene el contenedor encendido, y hace el motor
+ * demostrable sin desplegar nada.
+ *
+ * `trabajo` (Container Apps): este proceso NO programa nada. Container Apps escala a
+ * cero sin trafico, y un contenedor dormido a las 00:01 no dispararia su cron: no se
+ * generarian cuentas ni alertas, sin error ni log. Lo ejecuta un trabajo programado
+ * (`infra/azure/motor-financiero-job.bicep`) que levanta la misma imagen, corre
+ * `npm run motor` y se apaga. Ver `docs/adr/0021`.
+ *
+ * La zona horaria va explicita: sin ella el cron usa la del contenedor, y en uno en UTC
+ * las 00:01 son las 19:01 del dia anterior en Bogota. `noOverlap` evita que un barrido
+ * lento se pise con el siguiente; si pasara igual, el motor es idempotente.
+ */
+export const iniciarMotorFinanciero = (entorno: Entorno = process.env): void => {
+  const modo = modoDeProgramacion(entorno);
+
+  if (modo === 'trabajo') {
+    console.log(
+      '🗓️  ms-financiero: MOTOR_PROGRAMACION=trabajo — el motor NO se programa en este ' +
+        'proceso: lo ejecuta el trabajo programado de Container Apps con `npm run motor`.',
+    );
+    return;
+  }
+
+  cron.schedule(
+    HORARIO_CRON,
+    () => {
+      void (async () => {
+        console.log('⏳ Iniciando proceso diario del Motor Financiero...');
+        const resultado = await ejecutarMotor();
+        if (resultado.fallos.length > 0) {
+          console.error(
+            `❌ Motor Financiero: ${resultado.fallos.length} fallo(s). Se puede repetir con ` +
+              '`npm run motor` sin riesgo de duplicar.',
+          );
+        }
+      })();
+    },
+    { timezone: ZONA_NEGOCIO, noOverlap: true },
+  );
+
+  console.log(
+    `🗓️  ms-financiero: MOTOR_PROGRAMACION=cron — motor programado en este proceso a las 00:01 ` +
+      `(${ZONA_NEGOCIO}). Sólo para Compose y local: con scale-to-zero no dispararía.`,
   );
 };

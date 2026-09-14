@@ -239,6 +239,10 @@ services:
       # hay error que lo delate.
       - MS_NOTIFICACIONES_URL=${MS_NOTIFICACIONES_URL:-http://ms-notificaciones:3015}
       - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
+      # En Compose el contenedor no se duerme, asi que el motor puede programarse
+      # dentro del proceso. En Container Apps es `trabajo`: lo ejecuta un Job
+      # programado. La diferencia se escribe aqui, no se deduce. Ver docs/adr/0021.
+      - MOTOR_PROGRAMACION=cron
     depends_on:
       db:
         condition: service_healthy

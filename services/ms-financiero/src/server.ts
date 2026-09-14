@@ -22,12 +22,12 @@
  * y no al cargar el modulo: un temporizador corriendo durante una suite haria que las
  * entregas ocurrieran en momentos que la prueba no controla.
  *
- * ── EL MOTOR ARRANCA AQUI, Y ESO TIENE FECHA DE CADUCIDAD ──────────────────
+ * ── EL MOTOR SE PROGRAMA AQUI SOLO EN COMPOSE ──────────────────────────────
  *
- * `iniciarMotorFinanciero()` programa el barrido diario con `node-cron`, que
- * vive DENTRO de este proceso. Funciona mientras el proceso viva; con
- * scale-to-zero en Container Apps deja de hacerlo. Ver `services/motor.ts` y
- * `docs/adr/0018`.
+ * `iniciarMotorFinanciero()` lee `MOTOR_PROGRAMACION`: con `cron` programa el barrido
+ * dentro de este proceso (Compose y local); con `trabajo` no programa nada, porque en
+ * Container Apps lo ejecuta un Job con `npm run motor`. Ver `services/motor.ts` y
+ * `docs/adr/0021`.
  */
 
 import { app } from './app';
@@ -55,6 +55,9 @@ const OBLIGATORIAS = [
   'MS_CONTRATOS_URL',
   'MS_IDENTIDAD_URL',
   'MS_NOTIFICACIONES_URL',
+  // `cron` o `trabajo`. Sin defecto: la diferencia entre entornos se escribe. El valor
+  // lo valida `iniciarMotorFinanciero()`.
+  'MOTOR_PROGRAMACION',
 ];
 
 const iniciar = async (): Promise<void> => {

@@ -43,6 +43,7 @@ import {
   crearPublicador,
   crearSobre,
   enteroOpcionalDeEntorno,
+  idDeEventoDeterminista,
   leerEntorno,
   textoDeEntorno,
   TIPO_CUENTA_COBRO_EN_MORA,
@@ -152,22 +153,31 @@ export const registrarCuentaCobroGenerada = (
  * saberlo. Los otros dos van con un INSERT o un UPDATE; este es un aviso puro — el
  * motor detecta que a una cuenta le quedan dos dias y no escribe nada sobre ella.
  *
- * La consecuencia es que la idempotencia de ESTE aviso no la protege ninguna fila de
- * dominio: si el barrido corriera dos veces el mismo dia, anotaria el evento dos
- * veces con dos `id_evento` distintos, y ms-notificaciones los veria como dos hechos
- * diferentes porque lo son desde su punto de vista. Lo que evita el correo repetido
- * es que el barrido corre una vez al dia y la condicion es una igualdad exacta
- * (`diasDesdeCorte === DIAS_AVISO_PREVIO`), no un «mayor que». Esa igualdad no es una
- * comodidad: es lo que hace que el aviso sea de un dia y no de todos los que quedan.
+ * Asi que la idempotencia de ESTE aviso no la protege ninguna fila de dominio, y el
+ * motor ya no corre «una vez al dia» por construccion: en Container Apps lo ejecuta un
+ * trabajo programado que se reintenta si falla y que no garantiza no solaparse
+ * (`docs/adr/0021`). Con `id_evento` aleatorio, cada ejecucion anotaria su aviso y
+ * ms-notificaciones mandaria un correo por cada una.
+ *
+ * Por eso el `id_evento` sale del HECHO —tipo y cuenta de cobro—, y la segunda
+ * anotacion choca con la primera en la clave primaria y no se escribe
+ * (`ignorarSiExiste`). Una cuenta solo tiene un dia de aviso previo, asi que un aviso
+ * por cuenta es exactamente lo correcto.
  */
 export const registrarCuentaCobroPorVencer = (
   carga: CuentaCobroPorVencer,
   transaccion: unknown,
 ): Promise<void> =>
-  almacen.registrar(crearSobre(TIPO_CUENTA_COBRO_POR_VENCER, carga), {
-    transaccion: transaccion as never,
-    ...claveDe(carga.id_cuenta_cobro),
-  });
+  almacen.registrar(
+    crearSobre(TIPO_CUENTA_COBRO_POR_VENCER, carga, {
+      id_evento: idDeEventoDeterminista(TIPO_CUENTA_COBRO_POR_VENCER, carga.id_cuenta_cobro),
+    }),
+    {
+      transaccion: transaccion as never,
+      ignorarSiExiste: true,
+      ...claveDe(carga.id_cuenta_cobro),
+    },
+  );
 
 /**
  * Anota `CuentaCobroEnMora`.
