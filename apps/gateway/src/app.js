@@ -12,6 +12,7 @@ const {
 } = require('./routing');
 const { crearCacheRevocados } = require('./routing/cacheRevocados');
 const { crearConfianzaDeProxy } = require('./routing/origen');
+const { opcionesCors } = require('./routing/cors');
 const { enteroDeEntorno, validarEntorno } = require('arriendos360-shared');
 
 /**
@@ -54,7 +55,8 @@ app.set('trust proxy', crearConfianzaDeProxy());
  */
 const cacheRevocados = crearCacheRevocados();
 
-app.use(cors());
+// Sin CORS_ORIGENES, cualquier origen (desarrollo); en Azure, sólo la SPA. Ver `routing/cors.js`.
+app.use(cors(opcionesCors()));
 
 // Control de acceso (Capa 2 del módulo de seguridad): la matriz RBAC decide si
 // la petición sigue viva. Va ANTES de la costura para que una petición denegada

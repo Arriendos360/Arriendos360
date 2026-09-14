@@ -1,23 +1,19 @@
-# MS-Notificaciones — se construye desde la RAIZ del monorepo.
+# MS-Notificaciones — se construye desde la RAIZ del monorepo, en dos sabores:
 #
-#   docker build -f services/ms-notificaciones/Dockerfile .
+#   docker build -f services/ms-notificaciones/Dockerfile --target desarrollo .   # Compose
+#   docker build -f services/ms-notificaciones/Dockerfile --target produccion .   # Azure
 #
-# Mismo patron que los otros cuatro servicios y el gateway: contexto raiz porque
-# el servicio depende de `packages/shared` como workspace.
-#
-# A diferencia de los demas, NO depende de `packages/contracts`: no tiene
-# endpoints publicos, asi que no comparte ningun DTO con el frontend. Lo unico que
-# habla con el exterior es el sobre del evento, y eso vive en `shared`.
+# Mismo patron que los otros cuatro servicios; las etapas y por que son estas estan en
+# `docs/adr/0022`. El servicio no usa `packages/contracts` —no tiene endpoints
+# publicos—, pero el workspace entra igual para que el lockfile resuelva el mismo grafo.
 
-FROM node:18-alpine
+# ═══════════════════════════════════════════════════════════════ dependencias
+FROM node:18-alpine AS dependencias
 
 WORKDIR /repo
 
-# ---------------------------------------------------------------- dependencias
-# Manifiestos y paquetes primero, en su propia capa: mientras no cambien, Docker
-# reutiliza el `npm ci` aunque cambie el codigo del servicio. Se copian los
-# package.json de TODOS los workspaces porque npm resuelve el grafo completo
-# contra el lockfile de la raiz.
+# Manifiestos y paquetes primero, en su propia capa. Se copian los package.json de
+# TODOS los workspaces porque npm resuelve el grafo completo contra el lockfile.
 COPY package.json package-lock.json ./
 COPY apps/gateway/package.json                apps/gateway/
 COPY apps/web/package.json                    apps/web/
@@ -27,9 +23,7 @@ COPY services/ms-contratos/package.json       services/ms-contratos/
 COPY services/ms-financiero/package.json      services/ms-financiero/
 COPY services/ms-notificaciones/package.json  services/ms-notificaciones/
 
-# `packages/` entra entero y ANTES del `npm ci`: sus scripts `prepare` compilan
-# TypeScript y necesitan las fuentes. `--ignore-scripts` no sirve de atajo, en
-# npm 10 no cubre el `prepare` de un workspace y `tsc` corre sin fuentes.
+# `packages/` entra entero y ANTES del `npm ci`: sus `prepare` compilan TypeScript.
 COPY packages/ packages/
 
 RUN npm ci --include-workspace-root \
@@ -37,15 +31,53 @@ RUN npm ci --include-workspace-root \
     --workspace=packages/contracts \
     --workspace=packages/shared
 
-# -------------------------------------------------------------------- codigo
-# `database/notificaciones` son SUS migraciones: el esquema es suyo y nadie mas lo
-# prepara. Son dos tablas y ninguna de dominio — la bitacora de eventos
-# procesados y la de envios.
+# `database/notificaciones` son SUS migraciones: dos tablas, ninguna de dominio.
 COPY database/notificaciones/ database/notificaciones/
 COPY services/ms-notificaciones/ services/ms-notificaciones/
 
+# ═════════════════════════════════════════════════════════════════ desarrollo
+FROM dependencias AS desarrollo
+
 WORKDIR /repo/services/ms-notificaciones
-
 EXPOSE 3015
-
 CMD ["npm", "run", "dev"]
+
+# ════════════════════════════════════════════════════════════════ compilacion
+FROM dependencias AS compilacion
+
+WORKDIR /repo
+# Dependencias de produccion con una instalacion limpia, no con `npm prune`: ver
+# `infra/docker/solo-produccion.js`.
+COPY infra/docker/solo-produccion.js infra/docker/
+RUN npm run build --workspace=services/ms-notificaciones \
+    && rm -rf node_modules apps/*/node_modules services/*/node_modules packages/*/node_modules \
+    && node infra/docker/solo-produccion.js services/ms-notificaciones packages/shared packages/contracts \
+    && npm install --omit=dev --no-audit --no-fund \
+    && mkdir -p services/ms-notificaciones/node_modules packages/shared/node_modules packages/contracts/node_modules
+
+# ═════════════════════════════════════════════════════════════════ produccion
+# Solo JavaScript compilado y dependencias de produccion. Las migraciones las aplica
+# un Job con `node dist/database/aplicar.js`; el barrido manual de envios es
+# `node dist/scripts/enviar.js`.
+FROM node:18-alpine AS produccion
+
+ENV NODE_ENV=production
+WORKDIR /repo
+
+COPY --from=compilacion /repo/package.json ./
+COPY --from=compilacion /repo/node_modules/ node_modules/
+COPY --from=compilacion /repo/packages/shared/package.json      packages/shared/
+COPY --from=compilacion /repo/packages/shared/dist/             packages/shared/dist/
+COPY --from=compilacion /repo/packages/shared/node_modules/     packages/shared/node_modules/
+COPY --from=compilacion /repo/packages/contracts/package.json   packages/contracts/
+COPY --from=compilacion /repo/packages/contracts/dist/          packages/contracts/dist/
+COPY --from=compilacion /repo/packages/contracts/node_modules/  packages/contracts/node_modules/
+COPY --from=compilacion /repo/database/notificaciones/          database/notificaciones/
+COPY --from=compilacion /repo/services/ms-notificaciones/package.json services/ms-notificaciones/
+COPY --from=compilacion /repo/services/ms-notificaciones/dist/  services/ms-notificaciones/dist/
+COPY --from=compilacion /repo/services/ms-notificaciones/node_modules/ services/ms-notificaciones/node_modules/
+
+WORKDIR /repo/services/ms-notificaciones
+USER node
+EXPOSE 3015
+CMD ["node", "dist/server.js"]

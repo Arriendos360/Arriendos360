@@ -498,7 +498,7 @@ ramas nuevas desde `main` con ese prefijo.
   B1ms disponibles en `mexicocentral`; proveedores registrados; gasto actual en Cost
   Management —el App Service y el Static Web App de otros proyectos consumen **el mismo
   crédito**—; contraseña de aplicación de Gmail; token `read:packages` de GHCR.
-- [ ] **1 — Código para producción (PR, $0).** Dockerfiles multietapa; `DB_SSL` y
+- [x] **1 — Código para producción (PR, $0).** Dockerfiles multietapa; `DB_SSL` y
   `DB_POOL_MAX`; `MIGRACIONES_AL_ARRANCAR` y bloqueo consultivo; migrar, motor y seed
   compilados; tiempo límite del proxy y `CORS_ORIGENES` en el gateway; aviso de
   «despertando» y reintento en el login de la SPA; borrador del ADR 0022. *Verifica:* todas

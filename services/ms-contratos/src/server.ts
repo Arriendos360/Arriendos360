@@ -14,11 +14,11 @@
 
 import { app } from './app';
 import { sequelize } from './config/database';
-import { aplicarMigraciones } from './database/migraciones';
+import { aplicarMigraciones, migracionesPendientes } from './database/migraciones';
 import { publicador } from './eventos';
 import { cache } from './seguridad/cache';
 import { almacenamiento } from './services/almacenamiento';
-import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
+import { enteroDeEntorno, validarEntorno, siNoDeEntorno } from 'arriendos360-shared';
 
 const PUERTO = enteroDeEntorno('PORT', 3013);
 
@@ -35,6 +35,7 @@ const OBLIGATORIAS = [
   'MS_IDENTIDAD_URL',
   'MS_INMUEBLES_URL',
   'MS_FINANCIERO_URL',
+  'MIGRACIONES_AL_ARRANCAR',
 ];
 
 const iniciar = async (): Promise<void> => {
@@ -44,12 +45,26 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-contratos: conexión a PostgreSQL exitosa');
 
-    const aplicadas = await aplicarMigraciones(sequelize);
-    console.log(
-      aplicadas.length > 0
-        ? `✅ ms-contratos: migraciones aplicadas: ${aplicadas.join(', ')}`
-        : '✅ ms-contratos: esquema al día, sin migraciones pendientes',
-    );
+    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
+    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
+    // Ver docs/adr/0022.
+    if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
+      const aplicadas = await aplicarMigraciones(sequelize);
+      console.log(
+        aplicadas.length > 0
+          ? `✅ ms-contratos: migraciones aplicadas: ${aplicadas.join(', ')}`
+          : '✅ ms-contratos: esquema al día, sin migraciones pendientes',
+      );
+    } else {
+      const pendientes = await migracionesPendientes(sequelize);
+      if (pendientes.length > 0) {
+        throw new Error(
+          `ms-contratos: MIGRACIONES_AL_ARRANCAR=no y hay migraciones pendientes: ${pendientes.join(', ')}. ` +
+            'Aplícalas antes con el Job de migración (node dist/database/aplicar.js).',
+        );
+      }
+      console.log('✅ ms-contratos: esquema al día (las migraciones las aplica el Job, no este proceso)');
+    }
 
     console.log(`📎 ms-contratos: anexos en ${almacenamiento().describir()}`);
 

@@ -12,7 +12,7 @@
 
 import { Sequelize } from 'sequelize';
 import dotenv from 'dotenv';
-import { enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
+import { enteroDeEntorno, textoDeEntorno, siNoDeEntorno } from 'arriendos360-shared';
 
 dotenv.config();
 
@@ -39,7 +39,12 @@ export const sequelize = new Sequelize(
       // Cinturon y tirantes: aunque un modelo olvidara declarar el esquema, el
       // search_path de la sesion no incluye `public` para las tablas de negocio.
       options: `-c search_path=${ESQUEMA}`,
+      // En Azure la base exige TLS (`DB_SSL=si`), y se verifica el certificado: TLS sin
+      // verificar cifra, pero no dice con quien se habla.
+      ...(siNoDeEntorno('DB_SSL', false) ? { ssl: { rejectUnauthorized: true } } : {}),
     },
-    pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
+    // Cada replica cuenta contra el limite de conexiones de la base; en Azure B1ms son 35
+    // para los cinco servicios y sus Jobs (`DB_POOL_MAX`).
+    pool: { max: enteroDeEntorno('DB_POOL_MAX', 5), min: 0, acquire: 30000, idle: 10000 },
   },
 );

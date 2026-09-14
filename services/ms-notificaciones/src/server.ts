@@ -36,11 +36,11 @@
 
 import { app } from './app';
 import { sequelize } from './config/database';
-import { aplicarMigraciones } from './database/migraciones';
+import { aplicarMigraciones, migracionesPendientes } from './database/migraciones';
 import { consumidor } from './eventos';
 import { esSimulado } from './config/mailer';
 import { contarEnvios, enviador } from './services/enviador';
-import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
+import { enteroDeEntorno, validarEntorno, siNoDeEntorno } from 'arriendos360-shared';
 
 const PUERTO = enteroDeEntorno('PORT', 3015);
 
@@ -48,7 +48,12 @@ const PUERTO = enteroDeEntorno('PORT', 3015);
  * Lo que no tiene defecto razonable. `EMAIL_USER` NO esta: sin ella los correos se
  * simulan, que es lo correcto en desarrollo, y el arranque lo avisa mas abajo.
  */
-const OBLIGATORIAS = ['DB_PASSWORD', 'SERVICIO_JWT_SECRET', 'MS_IDENTIDAD_URL'];
+const OBLIGATORIAS = [
+  'DB_PASSWORD',
+  'SERVICIO_JWT_SECRET',
+  'MS_IDENTIDAD_URL',
+  'MIGRACIONES_AL_ARRANCAR',
+];
 
 const iniciar = async (): Promise<void> => {
   try {
@@ -57,12 +62,26 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-notificaciones: conexión a PostgreSQL exitosa');
 
-    const aplicadas = await aplicarMigraciones(sequelize);
-    console.log(
-      aplicadas.length > 0
-        ? `✅ ms-notificaciones: migraciones aplicadas: ${aplicadas.join(', ')}`
-        : '✅ ms-notificaciones: esquema al día, sin migraciones pendientes',
-    );
+    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
+    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
+    // Ver docs/adr/0022.
+    if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
+      const aplicadas = await aplicarMigraciones(sequelize);
+      console.log(
+        aplicadas.length > 0
+          ? `✅ ms-notificaciones: migraciones aplicadas: ${aplicadas.join(', ')}`
+          : '✅ ms-notificaciones: esquema al día, sin migraciones pendientes',
+      );
+    } else {
+      const pendientes = await migracionesPendientes(sequelize);
+      if (pendientes.length > 0) {
+        throw new Error(
+          `ms-notificaciones: MIGRACIONES_AL_ARRANCAR=no y hay migraciones pendientes: ${pendientes.join(', ')}. ` +
+            'Aplícalas antes con el Job de migración (node dist/database/aplicar.js).',
+        );
+      }
+      console.log('✅ ms-notificaciones: esquema al día (las migraciones las aplica el Job, no este proceso)');
+    }
 
     // El consumidor no arranca nada: es un manejador HTTP. Se cuenta lo que lleva
     // procesado porque es el numero que dice si el bus esta llegando.
