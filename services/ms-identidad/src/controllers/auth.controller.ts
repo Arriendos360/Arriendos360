@@ -4,6 +4,9 @@
  * Es el mismo comportamiento que servia el monolito, portado a TypeScript. Los
  * mensajes y codigos de estado se conservan literalmente para que el cambio no
  * se note desde el frontend ni desde la coleccion de Postman.
+ *
+ * Con una excepcion deliberada: el login fallido responde lo mismo exista o no la
+ * cuenta, y las rutas publicas llevan limitacion de tasa. Ver `docs/adr/0020`.
  */
 
 import bcrypt from 'bcryptjs';
@@ -17,6 +20,16 @@ import { Rol } from '../models/Rol';
 import { RolUsuario } from '../models/RolUsuario';
 import { Usuario } from '../models/Usuario';
 import { generarContrasenaTemporal } from '../services/contrasenaTemporal';
+import {
+  consultar,
+  contar,
+  enmascararEmail,
+  grupoDeIp,
+  ipDeOrigen,
+  limite,
+  normalizarEmail,
+  responderLimite,
+} from '../services/limites';
 import {
   registrarContrasenaTemporalEmitida,
   registrarRecuperacionSolicitada,
@@ -42,6 +55,21 @@ export const CAMPOS_SIN_CONTRASENA = ['nombres', 'apellidos', 'email', 'document
 
 /** Minimo de la contrasena que elige la persona. */
 export const LONGITUD_MINIMA_CONTRASENA = 8;
+
+/** Unica respuesta del login fallido, exista o no la cuenta. */
+export const MENSAJE_CREDENCIALES = 'Correo o contraseña incorrectos';
+
+/**
+ * Hash contra el que se compara cuando el correo no existe.
+ *
+ * Igualar el mensaje no basta: si con un correo desconocido se saltara
+ * `bcrypt.compare`, la respuesta llegaria decenas de milisegundos antes y el tiempo
+ * seguiria diciendo que correos estan registrados. Mismo coste (10) que los hashes
+ * reales. Se calcula la primera vez que hace falta y se reutiliza.
+ */
+let hashFicticio: string | null = null;
+const hashDeComparacion = (): string =>
+  (hashFicticio ??= bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 10));
 
 /** Devuelve el nombre del primer campo obligatorio que falte, o null. */
 export const campoFaltante = (
@@ -213,13 +241,29 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
       return res.status(500).json(crearError('Error de configuración en el servidor'));
     }
 
-    const usuario = await Usuario.findOne({ where: { email } });
-    if (!usuario) {
-      return res.status(404).json(crearError('Usuario no encontrado'));
+    // Fallos por cuenta e IP: se consulta ANTES de comparar y solo suma si falla.
+    // Fallar el login de alguien bloquea la IP del atacante para esa cuenta, no a la
+    // victima, que entra desde la suya. Cuenta igual si el correo no existe: si no,
+    // el propio 429 diria que correos estan registrados.
+    const fallos = limite('loginFallidosPorCuentaEIp');
+    const cuentaEIp = [normalizarEmail(email), grupoDeIp(ipDeOrigen(req))];
+    if ((await consultar(fallos, cuentaEIp)) >= fallos.maximo) {
+      return responderLimite(res, fallos);
     }
 
-    if (!(await bcrypt.compare(contrasena, usuario.contrasena))) {
-      return res.status(401).json(crearError('Contraseña incorrecta'));
+    const usuario = await Usuario.findOne({ where: { email } });
+
+    // UNA respuesta para «no existe» y «contrasena mal», y bcrypt.compare en los dos
+    // casos. Con mensajes distintos, o con un correo desconocido respondido antes por
+    // saltarse la comparacion, el login seria un verificador de cuentas.
+    const coincide = await bcrypt.compare(
+      String(contrasena),
+      usuario?.contrasena ?? hashDeComparacion(),
+    );
+
+    if (!usuario || !coincide) {
+      await contar(fallos, cuentaEIp);
+      return res.status(401).json(crearError(MENSAJE_CREDENCIALES));
     }
 
     const roles = await rolesDe(usuario.id_usuario);
@@ -406,6 +450,24 @@ export const recuperar = async (req: Request, res: Response): Promise<Response> 
 
     if (!email || typeof email !== 'string') {
       return res.status(400).json(crearError('El email es obligatorio'));
+    }
+
+    // Limite por cuenta, SILENCIOSO: pasado el maximo no se emite enlace, pero se
+    // responde lo de siempre, porque un 429 aqui diria que el correo existe. Frena
+    // el bombardeo a una victima desde muchas IP, y el ultimo enlace enviado sigue
+    // valiendo. Se registra la PRIMERA vez que salta en la ventana: si no, nadie
+    // entenderia por que alguien no recibe su enlace.
+    const porCuenta = limite('recuperarPorCuenta');
+    const solicitudes = await contar(porCuenta, [normalizarEmail(email)]);
+    if (solicitudes > porCuenta.maximo) {
+      if (solicitudes === porCuenta.maximo + 1) {
+        console.warn(
+          `⚠️  ms-identidad: límite de recuperación por cuenta alcanzado para ${enmascararEmail(email)}: ` +
+            `más de ${porCuenta.maximo} solicitudes en ${porCuenta.ventanaSegundos / 60} min. ` +
+            'No se emiten más enlaces en esta ventana; la respuesta sigue siendo la de siempre.',
+        );
+      }
+      return res.json(respuestaUnica);
     }
 
     const usuario = await Usuario.findOne({ where: { email } });

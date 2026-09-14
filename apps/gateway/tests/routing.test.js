@@ -22,6 +22,10 @@ const {
     TABLA_RUTAS,
     urlDestino
 } = require('../src/routing');
+const { firmarOrigenCliente, verificarOrigenCliente } = require('arriendos360-shared');
+const { crearConfianzaDeProxy } = require('../src/routing/origen');
+
+const SECRETO_SERVICIO = 'secreto-de-servicio-de-prueba';
 
 const PDF_DE_PRUEBA = Buffer.from('%PDF-1.4\n%bytes de prueba\n%%EOF');
 
@@ -67,6 +71,8 @@ beforeAll(async () => {
                     metodo: req.method,
                     url: req.url,
                     autorizacion: req.headers.authorization || null,
+                    origen: req.headers['x-origen-cliente'] || null,
+                    reenviadoPara: req.headers['x-forwarded-for'] || null,
                     contentType: req.headers['content-type'] || null,
                     bytesCuerpo: cuerpo.length,
                     cuerpoTexto: cuerpo.toString('utf8')
@@ -89,7 +95,9 @@ beforeAll(async () => {
     };
 
     app = express();
-    app.use(crearEnrutadorGateway({ entorno, timeoutMs: 2000 }));
+    // Un proxy de confianza delante, como el ingreso de Container Apps.
+    app.set('trust proxy', crearConfianzaDeProxy({ PROXY_SALTOS_CONFIANZA: '1' }));
+    app.use(crearEnrutadorGateway({ entorno, timeoutMs: 2000, secretoServicio: SECRETO_SERVICIO }));
     app.use(express.json());
 
     // Rutas "locales" de mentira, que hacen las veces del monolito.
@@ -137,6 +145,69 @@ describe('Costura de enrutamiento: modo local', () => {
         expect(respuesta.status).toBe(200);
         expect(respuesta.body.desde).toBe('local');
         expect(respuesta.body.recibido).toEqual({ correo: 'prueba@arriendos360.test' });
+    });
+});
+
+describe('Origen del cliente', () => {
+    /** La IP que el servicio de destino puede verificar, o null. */
+    const origenDe = (respuesta) =>
+        verificarOrigenCliente(respuesta.body.origen, {
+            destinatario: 'ms-inmuebles',
+            secreto: SECRETO_SERVICIO
+        });
+
+    test('firma la IP de CADA petición: un token nunca se reutiliza entre clientes', async () => {
+        // Si la firma se cacheara, la segunda petición llegaría con la IP de la primera y
+        // ms-identidad contaría a todos los clientes bajo el primero que pasó.
+        const primera = await request(app).get('/api/inmuebles').set('X-Forwarded-For', '203.0.113.7');
+        const segunda = await request(app).get('/api/inmuebles').set('X-Forwarded-For', '198.51.100.9');
+        const tercera = await request(app).get('/api/inmuebles').set('X-Forwarded-For', '203.0.113.7');
+
+        expect(origenDe(primera)).toBe('203.0.113.7');
+        expect(origenDe(segunda)).toBe('198.51.100.9');
+        expect(origenDe(tercera)).toBe('203.0.113.7');
+        // Ni la misma IP reutiliza el token.
+        expect(new Set([primera.body.origen, segunda.body.origen, tercera.body.origen]).size).toBe(3);
+    });
+
+    test('sobrescribe X-Forwarded-For: sólo llega la IP que resolvió el gateway', async () => {
+        const respuesta = await request(app)
+            .get('/api/inmuebles')
+            .set('X-Forwarded-For', '10.9.9.9, 203.0.113.7');
+
+        expect(respuesta.body.reenviadoPara).toBe('203.0.113.7');
+        expect(origenDe(respuesta)).toBe('203.0.113.7');
+    });
+
+    test('una cabecera de origen escrita por el cliente se descarta', async () => {
+        const falsa = firmarOrigenCliente({
+            ip: '1.1.1.1',
+            emisor: 'gateway',
+            destinatario: 'ms-inmuebles',
+            secreto: 'clave-que-no-es-la-del-gateway'
+        });
+
+        const respuesta = await request(app).get('/api/inmuebles').set('X-Origen-Cliente', falsa);
+
+        expect(respuesta.body.origen).not.toBe(falsa);
+        expect(origenDe(respuesta)).not.toBe('1.1.1.1');
+    });
+
+    test('sin proxies de confianza, el X-Forwarded-For del cliente no cuenta', async () => {
+        const sinProxy = express();
+        sinProxy.set('trust proxy', crearConfianzaDeProxy({}));
+        sinProxy.use(
+            crearEnrutadorGateway({
+                entorno: { MS_INMUEBLES_URL: urlServicio },
+                timeoutMs: 2000,
+                secretoServicio: SECRETO_SERVICIO
+            })
+        );
+
+        const respuesta = await request(sinProxy).get('/api/inmuebles').set('X-Forwarded-For', '203.0.113.7');
+
+        expect(origenDe(respuesta)).not.toBe('203.0.113.7');
+        expect(respuesta.body.reenviadoPara).not.toContain('203.0.113.7');
     });
 });
 

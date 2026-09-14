@@ -116,6 +116,39 @@ const pedir = async (metodo, ruta, { token, cuerpo, base = GATEWAY } = {}) => {
 };
 
 /**
+ * Vacía los contadores de limitación de tasa de ms-identidad.
+ *
+ * Toda la suite llama desde la misma IP, y restablecer admite cinco por hora: sin
+ * esto, la tercera ejecución en una hora fallaría por el límite y no por un defecto.
+ * Si la tabla todavía no existe —un stack anterior a `database/identidad/007`— no
+ * hace nada.
+ */
+const limpiarLimitesDeTasa = async () => {
+    const cliente = new Client({
+        host: process.env.DB_HOST_TEST_INTEGRACION || 'localhost',
+        port: Number(process.env.DB_PORT || 5432),
+        database: process.env.DB_NAME || 'arriendos360_db',
+        user: process.env.DB_USER || 'postgres',
+        password: process.env.DB_PASSWORD
+    });
+
+    await cliente.connect();
+    try {
+        await cliente.query(`
+            DO $$ BEGIN
+                IF to_regclass('identidad.limites_tasa') IS NOT NULL THEN
+                    TRUNCATE identidad.limites_tasa;
+                END IF;
+            END $$;
+        `);
+    } finally {
+        await cliente.end();
+    }
+};
+
+before(limpiarLimitesDeTasa);
+
+/**
  * El sobre que el gateway anotó para un contrato.
  *
  * Se abre y se cierra una conexión por consulta a propósito: son dos consultas

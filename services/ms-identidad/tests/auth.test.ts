@@ -6,6 +6,7 @@
  * que demuestra que la extracción no cambió el comportamiento.
  */
 
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 
@@ -124,9 +125,24 @@ describe('Login', () => {
     expect(respuesta.status).toBe(401);
   });
 
-  test('usuario inexistente responde 404', async () => {
-    const respuesta = await iniciarSesion('nadie@test.com');
-    expect(respuesta.status).toBe(404);
+  test('usuario inexistente responde 401 con el MISMO cuerpo que la contraseña incorrecta', async () => {
+    // Antes era 404 «Usuario no encontrado» frente a 401 «Contraseña incorrecta»: el
+    // login decía qué correos estaban registrados. Ver docs/adr/0020.
+    const inexistente = await iniciarSesion('nadie@test.com');
+    const malaClave = await iniciarSesion('logout@test.com', 'no-es');
+
+    expect(inexistente.status).toBe(401);
+    expect(inexistente.body).toEqual(malaClave.body);
+  });
+
+  test('con un correo inexistente TAMBIÉN compara con bcrypt: el tiempo no lo delata', async () => {
+    const comparar = jest.spyOn(bcrypt, 'compare');
+    try {
+      await iniciarSesion('otro-que-no-existe@test.com');
+      expect(comparar).toHaveBeenCalledTimes(1);
+    } finally {
+      comparar.mockRestore();
+    }
   });
 
   test('sin email ni contraseña responde 400, no 500', async () => {
