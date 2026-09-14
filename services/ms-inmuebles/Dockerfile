@@ -21,6 +21,7 @@ COPY services/ms-identidad/package.json   services/ms-identidad/
 COPY services/ms-inmuebles/package.json   services/ms-inmuebles/
 COPY services/ms-contratos/package.json   services/ms-contratos/
 COPY services/ms-financiero/package.json  services/ms-financiero/
+COPY services/ms-notificaciones/package.json services/ms-notificaciones/
 
 # `packages/` entra entero y ANTES del `npm ci`: sus scripts `prepare` compilan
 # TypeScript y necesitan las fuentes. `--ignore-scripts` no sirve de atajo, en

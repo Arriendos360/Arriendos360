@@ -39,28 +39,61 @@ const BYTES_TOKEN = 32;
 export const hashDeToken = (token: string): string =>
   crypto.createHash('sha256').update(token).digest('hex');
 
+/** Lo que se emite: el secreto y cuando deja de valer. */
+export interface TokenEmitido {
+  /** El token EN CLARO. Es la unica vez que existe fuera del correo. */
+  token: string;
+  /** Cuando caduca. Viaja en el evento para que el correo no prometa de mas. */
+  expiraEn: Date;
+}
+
 /**
  * Emite un token para un usuario e invalida los que tuviera pendientes.
  *
- * @returns el token EN CLARO. Es la unica vez que existe fuera del correo.
+ * ── RECIBE LA TRANSACCION, Y DESDE EL PASO 7 ES OBLIGATORIO QUE LA USE ─────
+ *
+ * Las tres escrituras que rodean a esto —invalidar los anteriores, crear el nuevo y
+ * anotar `RecuperacionSolicitada` en la tabla de salida— tienen que quedar todas o
+ * ninguna. Si el token se guardara y el evento no, habria un enlace vivo que nadie
+ * recibio; si el evento se anotara y el token no, llegaria un correo con un enlace
+ * inexistente. Las tres van al esquema `identidad`, asi que caben en una
+ * transaccion y ninguno de los dos casos es posible.
+ *
+ * Antes del paso 7 no hacia falta, porque el correo salia dentro de la peticion y su
+ * fallo no podia dejar nada a medias: no habia nada mas que escribir.
+ *
+ * ── DEVUELVE TAMBIEN LA CADUCIDAD ─────────────────────────────────────────
+ *
+ * Porque ahora hay que ponerla en el sobre. El consumidor NO la recalcula: los 30
+ * minutos empiezan aqui, y si la entrega se retrasa, el correo tiene que decir la
+ * hora de verdad en vez de prometer media hora que ya no existe.
  */
-export const emitirTokenDeRecuperacion = async (idUsuario: string): Promise<string> => {
+export const emitirTokenDeRecuperacion = async (
+  idUsuario: string,
+  transaccion?: unknown,
+): Promise<TokenEmitido> => {
+  const opciones = { transaction: transaccion as never };
+
   // Los pendientes se marcan como usados: pedir recuperacion otra vez deja
   // valido solo el ultimo enlace.
   await TokenRecuperacion.update(
     { usado_en: new Date() },
-    { where: { id_usuario: idUsuario, usado_en: null } },
+    { where: { id_usuario: idUsuario, usado_en: null }, ...opciones },
   );
 
   const token = crypto.randomBytes(BYTES_TOKEN).toString('hex');
+  const expiraEn = new Date(Date.now() + VIGENCIA_MINUTOS * 60 * 1000);
 
-  await TokenRecuperacion.create({
-    hash_token: hashDeToken(token),
-    id_usuario: idUsuario,
-    expira_en: new Date(Date.now() + VIGENCIA_MINUTOS * 60 * 1000),
-  });
+  await TokenRecuperacion.create(
+    {
+      hash_token: hashDeToken(token),
+      id_usuario: idUsuario,
+      expira_en: expiraEn,
+    },
+    opciones,
+  );
 
-  return token;
+  return { token, expiraEn };
 };
 
 /**

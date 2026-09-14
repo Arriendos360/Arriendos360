@@ -137,6 +137,18 @@ export const registrarContratoFormalizado = (
       canon: Number(contrato.canon),
       // De la columna, tal cual. `DATEONLY` ya viene como `YYYY-MM-DD`.
       fecha_inicio_corte: contrato.fecha_inicio_corte,
+      // ── VERSION 2, DESDE EL PASO 7 ─────────────────────────────────────────
+      //
+      // Lo pide ms-financiero, y no para crear la cuenta de cobro —esa no guarda el
+      // inquilino en ninguna columna— sino para ANUNCIARLA: el aviso de
+      // `CuentaCobroGenerada` tiene que decir a quien se le factura, y dentro de la
+      // transaccion del consumidor ese dato no esta en ninguna parte. Lo guarda el
+      // contrato, que es de este servicio.
+      //
+      // Es el mismo argumento que puso `canon` aqui: pedirlo despues por HTTP
+      // convertiria la coreografia en una orquestacion disfrazada, y ademas obligaria
+      // a hacerlo con una transaccion abierta.
+      id_inquilino: contrato.id_inquilino,
     }),
     // El inmueble ordena: sus eventos se entregan en el orden en que se
     // registraron. Sin esto, un `Finalizado` podria adelantar a su

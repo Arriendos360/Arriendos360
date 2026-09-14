@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "types": ["node", "jest"],
+    "rootDir": "src",
+    "outDir": "dist",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Sin `allowJs`. La excepcion de ms-financiero existia por un archivo
+    // concreto —`pdfService.js`, que se mudo intacto desde el gateway— y aqui no
+    // se muda ningun JavaScript: el `config/mailer.js` que este servicio hereda
+    // se reescribe en TypeScript, porque ademas cambia de forma (deja de
+    // mandar correos sueltos y pasa a servir al enviador).
+    "allowJs": false,
+
+    // Un servicio no se consume como libreria: no emite .d.ts.
+    "declaration": false,
+    "sourceMap": true,
+
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

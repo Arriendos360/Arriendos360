@@ -17,12 +17,14 @@ import { Rol } from '../models/Rol';
 import { RolUsuario } from '../models/RolUsuario';
 import { Usuario } from '../models/Usuario';
 import { generarContrasenaTemporal } from '../services/contrasenaTemporal';
-import { notificador } from '../services/notificador';
+import {
+  registrarContrasenaTemporalEmitida,
+  registrarRecuperacionSolicitada,
+} from '../eventos';
 import {
   buscarTokenVigente,
   emitirTokenDeRecuperacion,
   marcarUsado,
-  VIGENCIA_MINUTOS,
 } from '../services/recuperacion';
 import {
   emitirToken,
@@ -130,6 +132,23 @@ export const crearUsuarioConRol = async ({
       { id_rol: ROLES[rol], id_usuario: idUsuario, creado_por: autor },
       { transaction: transaccion, usuarioAuditor: autor } as never,
     );
+
+    // ── EL AVISO SOLO SALE EN EL ALTA POR TERCEROS ─────────────────────────
+    //
+    // `generarContrasena` es exactamente la condicion que distingue los dos
+    // caminos, y por eso el evento cuelga de ella: quien se autorregistra eligio
+    // su contrasena y sabe perfectamente que tiene una cuenta — avisarselo por
+    // correo seria ruido. Quien fue dado de alta por su arrendador no pidio nada,
+    // y hasta el paso 7 no se enteraba de que existia una cuenta a su nombre.
+    //
+    // Dentro de la transaccion, como siempre: un correo que dice «se creó tu
+    // cuenta» sobre una cuenta que no se creo seria peor que no mandarlo.
+    if (generarContrasena) {
+      await registrarContrasenaTemporalEmitida(
+        { idUsuario, motivo: 'ALTA' },
+        transaccion,
+      );
+    }
 
     return nuevo;
   });
@@ -351,11 +370,35 @@ export const cambiarContrasena = async (req: Request, res: Response): Promise<Re
  *
  * Por la misma razon no se responde 404 con un email desconocido ni 429 con uno
  * conocido: cualquier diferencia observable sirve de oraculo.
+ *
+ * ── EL PASO 7 CAMBIA LA GARANTIA, Y POR ESO CAMBIA EL MENSAJE ──────────────
+ *
+ * Antes el correo salia DENTRO de esta peticion, asi que al responder ya se sabia
+ * si habia salido. Ahora esto solo anota el evento y el correo lo manda
+ * ms-notificaciones despues: la ventana esperada son los ~5 s del publicador mas lo
+ * que tarde el envio.
+ *
+ * Asi que «recibirás un enlace» pasa a «te enviaremos un enlace», y la diferencia
+ * no es de redaccion. Lo primero afirmaba un hecho consumado que este endpoint ya no
+ * puede afirmar; lo segundo es exactamente lo que garantiza —que el aviso esta
+ * anotado y va a salir— y es una promesa que el mecanismo si cumple: el evento esta
+ * en disco, se reintenta si falla y acaba en `notificaciones.envios` con su estado a
+ * la vista.
+ *
+ * Lo que NO cambia es que la respuesta sea siempre la misma. El texto nuevo tiene
+ * ademas la ventaja de no comprometerse con un momento, asi que sigue sirviendo
+ * igual para el caso en que la cuenta no existe y no se anota nada.
+ *
+ * ── Y LA TRANSACCION ES NUEVA ──────────────────────────────────────────────
+ *
+ * El token y el evento tienen que quedar los dos o ninguno: un token guardado sin
+ * evento es un enlace vivo que nadie recibe, y un evento sin token es un correo con
+ * un enlace que no existe. Ver `services/recuperacion.ts`.
  */
 export const recuperar = async (req: Request, res: Response): Promise<Response> => {
   const respuestaUnica = {
     mensaje:
-      'Si el correo corresponde a una cuenta, recibirás un enlace para restablecer tu contraseña.',
+      'Si el correo corresponde a una cuenta, te enviaremos un enlace para restablecer tu contraseña.',
   };
 
   try {
@@ -368,19 +411,19 @@ export const recuperar = async (req: Request, res: Response): Promise<Response> 
     const usuario = await Usuario.findOne({ where: { email } });
 
     if (usuario) {
-      const token = await emitirTokenDeRecuperacion(usuario.id_usuario);
-      const enlace = `${process.env['URL_APP'] ?? 'http://localhost:3000'}/restablecer?token=${token}`;
+      await sequelize.transaction(async (transaccion) => {
+        const { token, expiraEn } = await emitirTokenDeRecuperacion(
+          usuario.id_usuario,
+          transaccion,
+        );
 
-      await notificador().notificar({
-        para: usuario.email,
-        asunto: 'Restablece tu contraseña de Arriendos360',
-        cuerpoHtml: `
-          <p>Hola ${usuario.nombres},</p>
-          <p>Pediste restablecer tu contraseña. El enlace vale una sola vez y
-             caduca en ${VIGENCIA_MINUTOS} minutos:</p>
-          <p><a href="${enlace}">Restablecer mi contraseña</a></p>
-          <p>Si no fuiste tú, ignora este correo: tu contraseña no ha cambiado.</p>
-        `,
+        // El enlace NO se construye aqui: el evento lleva el token y `URL_APP` vive
+        // en ms-notificaciones. Armar la URL es cosa del canal, y este servicio ha
+        // dejado de saber que el canal es un correo.
+        await registrarRecuperacionSolicitada(
+          { idUsuario: usuario.id_usuario, token, expiraEn },
+          transaccion,
+        );
       });
     }
 
@@ -388,6 +431,11 @@ export const recuperar = async (req: Request, res: Response): Promise<Response> 
   } catch (error) {
     // Ni siquiera un fallo interno cambia la respuesta: un 500 con un email y un
     // 200 con otro tambien serviria de oraculo.
+    //
+    // Y ahora esto tapa un caso mas: que no se pueda anotar el evento. La
+    // transaccion se va entera, no queda token ni aviso, y quien lo pidio no recibe
+    // nada — pero tampoco se le dice si su cuenta existe. Es el precio de la
+    // respuesta unica, y el fallo si queda en el log.
     console.error('Error en recuperación:', (error as Error).message);
     return res.json(respuestaUnica);
   }

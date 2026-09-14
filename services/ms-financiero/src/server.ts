@@ -7,16 +7,20 @@
  * en `public` y retira el original en la misma transaccion, asi que el
  * healthcheck de Compose solo responde cuando eso ya ocurrio.
  *
- * ── ESTE SERVICIO NO ES PRODUCTOR, PERO SI CONSUMIDOR ──────────────────────
+ * ── ES CONSUMIDOR Y, DESDE EL PASO 7, TAMBIEN PRODUCTOR ────────────────────
  *
- * No arranca publicador: no emite ningun evento todavia y por eso no tiene tabla
- * de salida. Lo que si hace es CONSUMIR `ContratoFormalizado` por
- * `POST /interno/eventos`, y eso no necesita arrancar nada aqui — el consumidor
- * es un manejador HTTP, no un proceso. Quien barre y entrega es el publicador de
- * ms-contratos.
+ * El parrafo que habia aqui decia: «el dia que el motor publique eventos en vez de
+ * mandar correos (paso 7), este arranque ganara su publicador y `database/financiero/`
+ * una tabla de salida». Ese dia es este.
  *
- * El dia que el motor publique eventos en vez de mandar correos (paso 7), este
- * arranque ganara su publicador y `database/financiero/` una tabla de salida.
+ * CONSUMIDOR de `ContratoFormalizado`, por `POST /interno/eventos`. Eso no necesita
+ * arrancar nada: el consumidor es un manejador HTTP, no un proceso.
+ *
+ * PRODUCTOR de `CuentaCobroGenerada`, `CuentaCobroPorVencer` y `CuentaCobroEnMora`,
+ * con su tabla de salida en `financiero.eventos_salida` y su publicador, que SI es un
+ * proceso y arranca aqui. Como en los otros dos productores, se arranca en el servidor
+ * y no al cargar el modulo: un temporizador corriendo durante una suite haria que las
+ * entregas ocurrieran en momentos que la prueba no controla.
  *
  * ── EL MOTOR ARRANCA AQUI, Y ESO TIENE FECHA DE CADUCIDAD ──────────────────
  *
@@ -29,8 +33,11 @@
 import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
+import { TIPO_CUENTA_COBRO_GENERADA } from 'arriendos360-shared';
+
 import { cache, hayFuenteDeRevocacion } from './seguridad/cache';
 import { consumidor } from './eventos';
+import { almacen, publicador, suscriptoresDe } from './eventos/salida';
 import { iniciarMotorFinanciero } from './services/motor';
 
 const PUERTO = Number(process.env['PORT'] ?? 3014);
@@ -71,6 +78,35 @@ const iniciar = async (): Promise<void> => {
       `📥 ms-financiero: consumidor del bus con ${await consumidor.contar()} eventos procesados. ` +
         'Escucha ContratoFormalizado en POST /interno/eventos.',
     );
+
+    // Y desde el paso 7, la otra mitad: el publicador de sus propios eventos.
+    if (suscriptoresDe(TIPO_CUENTA_COBRO_GENERADA).length === 0) {
+      // Sin suscriptor, `crearEntregaHttp` da los eventos por entregados y no hay
+      // error en ninguna parte: el motor factura, marca moras y NO sale ni un correo.
+      // Es el mismo agujero silencioso que el cron con scale-to-zero, y se trata
+      // igual — gritarlo es lo unico que impide que pase inadvertido.
+      console.warn(
+        '⚠️  ms-financiero: MS_NOTIFICACIONES_URL sin definir. Los avisos se darán por ' +
+          'entregados sin que nadie los reciba: no saldrá ningún correo de recibo, de ' +
+          'vencimiento próximo ni de mora, y no habrá ningún error que lo delate.',
+      );
+    }
+
+    const pendientes = await almacen.contar();
+    await publicador.iniciar();
+    const estadoPublicador = publicador.estado();
+    console.log(
+      `📤 ms-financiero: publicador en marcha cada ${estadoPublicador.intervaloMs / 1000}s — ` +
+        `${pendientes.pendientes} evento(s) pendiente(s), ${pendientes.apartados} apartado(s).`,
+    );
+
+    if (pendientes.apartados > 0) {
+      console.warn(
+        `⚠️  ms-financiero: ${pendientes.apartados} evento(s) APARTADO(S) en ` +
+          'financiero.eventos_salida. No se reintentan solos: hay que mirar su ' +
+          'ultimo_error y reencolarlos.',
+      );
+    }
 
     iniciarMotorFinanciero();
 

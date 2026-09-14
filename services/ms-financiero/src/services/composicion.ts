@@ -19,6 +19,10 @@
  * `incluir=inmueble`, y es ms-contratos quien lo resuelve en lote. Ver la
  * cabecera de `clientes/contratos.ts`.
  *
+ * Desde el paso 7 los dos saltos son solo para los COMPROBANTES y los listados. El
+ * motor no compone nada: avisa con eventos que llevan identificadores, asi que ya no
+ * necesita direcciones de correo. Ver la nota al pie de este archivo.
+ *
  * Componer dentro de un bucle seria cambiar un JOIN por N llamadas de red, que
  * es peor que el problema que se estaba resolviendo.
  *
@@ -130,43 +134,18 @@ export const adjuntarInquilino = async (
 };
 
 /**
- * Adjunta `Inquilino` y el `Propietario` del inmueble a una lista de contratos.
+ * ── `adjuntarPartes` SE FUE EN EL PASO 7 ──────────────────────────────────
  *
- * Es lo que necesita el motor: avisa a las DOS partes, y para saber a quien
- * avisar hace falta la cadena entera. El propietario sale de
- * `contrato.Inmueble.id_propietario`, que ya viene dentro del contrato.
+ * Componia `Inquilino` y `Inmueble.Propietario` sobre una lista de contratos, y su
+ * unico llamante era el motor: los necesitaba para sacar las direcciones de correo a
+ * las que avisaba.
  *
- * UN VIAJE a ms-identidad para toda la lista, con los inquilinos y los
- * propietarios juntos. La version del gateway necesitaba encadenar dos saltos
- * —primero los inmuebles, para saber que propietarios pedir—; aqui no, porque el
- * inmueble llega con el contrato.
+ * El motor ya no manda correos. Anota eventos con el `id_usuario` de cada parte —que
+ * ya viene en el contrato— y quien resuelve las direcciones es ms-notificaciones, en
+ * el momento de manejar el evento, que es el unico en que la respuesta es actual.
+ * Asi que la funcion se queda sin llamantes y se borra en vez de quedarse
+ * «por si acaso».
  *
- * La forma se conserva: `contrato.Inmueble.Propietario.email` sigue siendo la
- * ruta que el motor lee.
+ * Lo que SI sobrevive es `adjuntarInquilino`, justo arriba: los comprobantes en PDF
+ * imprimen el nombre del arrendatario, y eso no es una notificacion.
  */
-export const adjuntarPartes = async (
-  contratos: ContratoAjeno[],
-): Promise<Array<Record<string, unknown>>> => {
-  const lista = contratos ?? [];
-
-  const ids: Array<string | undefined> = [];
-  for (const contrato of lista) {
-    ids.push(contrato.id_inquilino);
-    if (contrato.Inmueble) {
-      ids.push(contrato.Inmueble.id_propietario);
-    }
-  }
-
-  const usuarios = await usuariosPorIds(ids);
-
-  return lista.map((contrato) => ({
-    ...contrato,
-    Inquilino: comoUsuario(usuarios.get(contrato.id_inquilino)),
-    Inmueble: contrato.Inmueble
-      ? {
-          ...contrato.Inmueble,
-          Propietario: comoUsuario(usuarios.get(contrato.Inmueble.id_propietario)),
-        }
-      : null,
-  }));
-};

@@ -259,3 +259,32 @@ export const diasEntre = (desdeISO: FechaISO, hastaISO: FechaISO): number =>
   Math.round(
     (Date.parse(`${hastaISO}T00:00:00Z`) - Date.parse(`${desdeISO}T00:00:00Z`)) / MS_POR_DIA,
   );
+
+/**
+ * La fecha que cae `dias` dias de calendario despues de otra.
+ *
+ * La contrapartida exacta de `diasEntre`: `sumarDias(f, n)` es la fecha `g` tal que
+ * `diasEntre(f, g) === n`. Y esta aqui por la misma razon que aquella — en UTC, sobre
+ * el instante de medianoche, para que el resultado no dependa de donde corra el
+ * proceso.
+ *
+ * La agrega el paso 7, para `CuentaCobroPorVencer`: ese evento lleva la fecha en que
+ * la cuenta entraria en mora en vez del «tienes hasta mañana» que decia el correo
+ * anterior. Una frase relativa era cierta cuando el correo salia dentro del barrido;
+ * con el bus, entre el hecho y el envio hay una ventana que los reintentos estiran, y
+ * «mañana» se vuelve falso sin que nadie lo toque. Una fecha no.
+ *
+ * Suma sobre el instante y no sobre los componentes a proposito: el cambio de mes y de
+ * año lo resuelve `Date`, y no hay ningun caso de dia-que-no-existe que atender —a
+ * diferencia de `fechaEnMes`, sumar dias nunca puede caer fuera del calendario.
+ */
+export const sumarDias = (fechaISO: FechaISO, dias: number): FechaISO => {
+  const instante = new Date(Date.parse(`${fechaISO}T00:00:00Z`) + dias * MS_POR_DIA);
+
+  return comoISO(
+    instante.getUTCFullYear(),
+    // `comoISO` espera el mes 0-11, como `Date`.
+    instante.getUTCMonth(),
+    instante.getUTCDate(),
+  );
+};

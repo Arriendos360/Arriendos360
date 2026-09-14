@@ -55,13 +55,19 @@ services:
       # usuario serviria para llamar a /interno.
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-identidad
-      # Base publica de la SPA, para el enlace del correo de recuperacion.
-      - URL_APP=${URL_APP:-http://localhost:3000}
-      # Correo. Sin EMAIL_USER apunta a un buzon de pruebas y no llega a nadie.
-      - EMAIL_HOST=${EMAIL_HOST:-smtp.ethereal.email}
-      - EMAIL_PORT=${EMAIL_PORT:-587}
-      - EMAIL_USER=${EMAIL_USER:-}
-      - EMAIL_PASS=${EMAIL_PASS:-}
+      # DESDE EL PASO 7 ESTE SERVICIO PUBLICA EN EL BUS Y NO MANDA CORREOS.
+      #
+      # Aqui estaban URL_APP y las cuatro EMAIL_*, para el correo de recuperacion.
+      # Se fueron a ms-notificaciones, que es el unico sitio que habla SMTP: este
+      # servicio anota RecuperacionSolicitada y ContrasenaTemporalEmitida en su tabla
+      # de salida y se desentiende. Con eso se salda la desviacion del ADR 0010.
+      #
+      # OJO: sin MS_NOTIFICACIONES_URL los eventos se dan por entregados sin que nadie
+      # los reciba —es lo correcto en una coreografia, el productor no sabe quien
+      # escucha— asi que NO sale ningun correo y no hay ningun error. El arranque lo
+      # grita en el log.
+      - MS_NOTIFICACIONES_URL=${MS_NOTIFICACIONES_URL:-http://ms-notificaciones:3015}
+      - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
     depends_on:
       db:
         condition: service_healthy
@@ -220,13 +226,19 @@ services:
       # ms-inmuebles—. Identidad, para la revocacion y para los correos del motor.
       - MS_CONTRATOS_URL=${MS_CONTRATOS_URL:-http://ms-contratos:3013}
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
-      # Correo del motor. Sin EMAIL_USER apunta a un buzon de pruebas y no llega
-      # a nadie. En el paso 7 esto se va: el motor pasara a publicar eventos y
-      # sera ms-notificaciones quien mande los avisos.
-      - EMAIL_HOST=${EMAIL_HOST:-smtp.ethereal.email}
-      - EMAIL_PORT=${EMAIL_PORT:-587}
-      - EMAIL_USER=${EMAIL_USER:-}
-      - EMAIL_PASS=${EMAIL_PASS:-}
+      # ESO YA PASO. Aqui estaban las cuatro EMAIL_* del motor, con la nota de que
+      # «en el paso 7 esto se va: el motor pasara a publicar eventos y sera
+      # ms-notificaciones quien mande los avisos».
+      #
+      # Ahora el motor anota CuentaCobroGenerada, CuentaCobroPorVencer y
+      # CuentaCobroEnMora en financiero.eventos_salida. Efecto lateral que se buscaba:
+      # el barrido pierde una peticion HTTP: ya no le pide a ms-identidad las
+      # direcciones de correo, porque los eventos llevan el id_usuario.
+      #
+      # Mismo aviso que en ms-identidad: sin esta variable no sale ningun correo y no
+      # hay error que lo delate.
+      - MS_NOTIFICACIONES_URL=${MS_NOTIFICACIONES_URL:-http://ms-notificaciones:3015}
+      - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}
     depends_on:
       db:
         condition: service_healthy
@@ -248,6 +260,81 @@ services:
     # le pregunta las cifras de dinero nada mas arrancar.
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3014/ || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # MS-Notificaciones — el QUINTO y ultimo servicio, y el unico sin API publica.
+  #
+  # NO aparece en la costura de enrutamiento del gateway ni tiene filas en la matriz
+  # RBAC: se comunica solo por eventos. Su unica entrada es POST /interno/eventos, con
+  # credencial de servicio, y consume los cinco tipos del paso 7 — los dos de
+  # ms-identidad (recuperacion de contrasena, contrasena temporal) y los tres de
+  # ms-financiero (cuenta generada, proxima a vencer, en mora).
+  #
+  # Es el UNICO sitio del sistema que habla SMTP. Los dos mailers que habia en
+  # servicios de dominio se han borrado; este es el que el Capitulo 2 describe.
+  #
+  # Sin tablas de dominio: su esquema notificaciones solo tiene las dos operativas
+  # que el mecanismo necesita —la bitacora de eventos procesados, para no mandar un
+  # correo dos veces, y la de envios, que es un outbox de correos.
+  ms-notificaciones:
+    build:
+      context: ..
+      dockerfile: services/ms-notificaciones/Dockerfile
+    container_name: arriendos360_notificaciones
+    command: npm run dev
+    ports:
+      - "3015:3015"
+    environment:
+      - PORT=3015
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=arriendos360_db
+      - DB_NAME_TEST=arriendos360_test
+      # SIN JWT_SECRET, y es correcto: este servicio no tiene endpoints publicos, asi
+      # que nunca le llega un token de usuario y no hay nada que revalidar. La regla
+      # dura 7 se cumple por vacio.
+      - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
+      - SERVICIO_NOMBRE=ms-notificaciones
+      # A quien pregunta: SOLO a ms-identidad, y solo para resolver el correo de un
+      # id_usuario. Los eventos NO llevan direcciones de correo a proposito —un correo
+      # pertenece a identidad.usuarios y a nadie mas— asi que esta variable es lo que
+      # hace posible notificar. Sin ella los eventos entran, fallan con 500 y el
+      # productor los reintenta: no se pierden, pero no sale ningun correo.
+      - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
+      # Base publica de la SPA, para el enlace del correo de recuperacion. Vive aqui
+      # y no en ms-identidad porque armar el enlace es cosa del canal.
+      - URL_APP=${URL_APP:-http://localhost:3000}
+      # Correo. Sin EMAIL_USER apunta a un buzon de pruebas (Ethereal) y no llega a
+      # nadie; el mensaje se ve en la URL de vista previa del log o consultando
+      # notificaciones.envios. A diferencia de los dos mailers que sustituye, esto NO
+      # es provisional: es el sitio que el Capitulo 2 le asigna al canal.
+      - EMAIL_HOST=${EMAIL_HOST:-smtp.ethereal.email}
+      - EMAIL_PORT=${EMAIL_PORT:-587}
+      - EMAIL_USER=${EMAIL_USER:-}
+      - EMAIL_PASS=${EMAIL_PASS:-}
+      - EMAIL_REMITENTE=${EMAIL_REMITENTE:-}
+      # Cada cuanto barre el enviador la bitacora de envios pendientes.
+      - ENVIOS_INTERVALO_MS=${ENVIOS_INTERVALO_MS:-5000}
+    depends_on:
+      db:
+        condition: service_healthy
+      # Se espera a que ms-identidad este ARRANCADO y no sano: si no responde, los
+      # eventos fallan con 500 y el productor los reintenta, asi que la degradacion es
+      # un aviso retrasado y no uno perdido.
+      ms-identidad:
+        condition: service_started
+    volumes:
+      - ../services/ms-notificaciones:/repo/services/ms-notificaciones
+      - /repo/services/ms-notificaciones/node_modules
+    # El servicio solo escucha DESPUES de aplicar sus migraciones. A diferencia de las
+    # cuatro extracciones anteriores, aqui no hay ninguna mudanza que coreografiar: sus
+    # dos tablas son nuevas y nacen vacias, no se le quita ninguna a nadie.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3015/ || exit 1"]
       interval: 3s
       timeout: 3s
       retries: 20

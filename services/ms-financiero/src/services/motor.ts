@@ -29,36 +29,56 @@
  * ellos. Hay ademas un indice unico `(id_contrato, inicio)` debajo, pero eso es
  * la red, no el diseño.
  *
- * ── EL BARRIDO SIGUE SIENDO UN NUMERO FIJO DE VIAJES ───────────────────────
+ * ── LO QUE CAMBIA EN EL PASO 7: EL MOTOR NO MANDA CORREOS ──────────────────
  *
- * La garantia no cambia con la extraccion: **el numero de peticiones no depende
- * de cuantos contratos haya.**
+ * Los cuatro `enviarCorreo` que habia aqui —recibo generado, vencimiento proximo al
+ * inquilino y al propietario, mora a los dos— se han convertido en tres eventos:
+ * `CuentaCobroGenerada`, `CuentaCobroPorVencer` y `CuentaCobroEnMora`. Quien decide
+ * a quien avisar, en que idioma y por que canal es ms-notificaciones.
+ *
+ * Y no es solo mover codigo de sitio. Un barrido que abre una conexion SMTP hereda su
+ * latencia y sus fallos: el aviso del mes de alguien dependia de que un servidor de
+ * correo contestara mientras el bucle estaba a medias. Ahora el aviso es una fila mas
+ * en la misma transaccion, y lo que pueda fallar al mandarlo ya no ocurre aqui. Ver
+ * `docs/adr/0019`.
+ *
+ * ── EL BARRIDO SIGUE SIENDO UN NUMERO FIJO DE VIAJES, Y AHORA SON MENOS ────
+ *
+ * La garantia no cambia con el paso 7: **el numero de peticiones no depende de
+ * cuantos contratos haya.** Lo que cambia es el numero.
  *
  *   `procesarContratos` — 1 a ms-contratos (todos los activos, con su inmueble
- *   dentro) + 1 a ms-identidad (inquilinos y propietarios en lote) = 2 por
- *   barrido, haya 5 contratos o 500.
+ *   dentro). UNA, haya 5 contratos o 500.
  *
- *   `procesarPagos` — 1 a ms-contratos (los contratos de las cuentas vencidas,
- *   POR IDENTIFICADOR y en lote) + 1 a ms-identidad = 2.
+ *   `procesarPagos` — 1 a ms-contratos (los contratos de las cuentas vencidas, POR
+ *   IDENTIFICADOR y en lote). UNA.
  *
- * Son DOS y no tres porque el inmueble viaja dentro del contrato: se pide con
- * `incluir=inmueble` y lo resuelve ms-contratos, que ya sabe hacerlo en lote
- * para su propia respuesta. Antes de la extraccion eran tres, y el tercero era
- * un salto encadenado que este servicio ya no tiene que dar. Ver la cabecera de
- * `clientes/contratos.ts`.
+ * Eran DOS cada uno hasta el paso 6e: la segunda iba a ms-identidad, a por las
+ * direcciones de correo. Ha desaparecido porque los eventos NO LLEVAN direcciones de
+ * correo — llevan el `id_usuario`, y quien resuelve el destinatario es
+ * ms-notificaciones. La regla que existia por propiedad del dato resulta que tambien
+ * le quita un salto de red al barrido.
  *
  * La forma de romper la garantia seria pedir el contrato dentro del bucle, que
  * es exactamente lo que `porIds` existe para evitar. La prueba lo comprueba.
  *
- * ── DEGRADAR AQUI ES LO CORRECTO, AL REVES QUE EN LOS CONTROLADORES ────────
+ * ── Y CON ELLO DESAPARECE LA DEGRADACION QUE HABIA QUE EXPLICAR ────────────
  *
- * Este proceso no autoriza a nadie, solo factura y avisa. Si ms-identidad no
- * responde, esa parte queda en `null` y el aviso se omite: el motor sigue
- * generando cuentas de cobro y marcando mora, que es su trabajo principal. Si
- * ms-contratos no responde, en cambio, el barrido no genera NADA — generar la
- * mitad de las cuentas del mes seria peor que no generar ninguna, porque al dia
- * siguiente el motor no sabria cuales faltan, y con la comprobacion de
- * duplicados que ya hay, no generar nada hoy se arregla solo mañana.
+ * Hasta el paso 6e este archivo documentaba que si ms-identidad no respondia, el
+ * aviso se omitia y el barrido seguia facturando: degradar era lo correcto porque
+ * avisar es lo accesorio de un proceso que existe para facturar.
+ *
+ * Ese caso ya no existe. El aviso no necesita a nadie para anotarse, asi que no hay
+ * nada que degradar: o la transaccion escribe la cuenta y su evento, o no escribe
+ * ninguna de las dos cosas. La decision de si el correo es prescindible se ha mudado
+ * al sitio donde se puede tomar bien — ms-notificaciones, que si depende de
+ * ms-identidad para resolver el destinatario y que ante un fallo devuelve 500 para
+ * que el evento se reintente en vez de perderse.
+ *
+ * Lo que SI sigue igual: si ms-contratos no responde, el barrido no genera NADA.
+ * Generar la mitad de las cuentas del mes seria peor que no generar ninguna, porque al
+ * dia siguiente el motor no sabria cuales faltan, y con la comprobacion de duplicados
+ * que ya hay, no generar nada hoy se arregla solo mañana.
  *
  * ── LAS FECHAS SON DE BOGOTA, NO DEL SERVIDOR ──────────────────────────────
  *
@@ -88,10 +108,11 @@ import {
   periodoDeCorte,
   periodoQueEmpiezaEn,
   soloFecha,
+  sumarDias,
 } from 'arriendos360-shared';
 import type { Periodo } from 'arriendos360-shared';
 
-import { enviarCorreo } from '../config/mailer';
+import { sequelize } from '../config/database';
 import { contratosConEstado, porIds as contratosPorIds } from '../clientes/contratos';
 import { CuentaCobro } from '../models/CuentaCobro';
 import {
@@ -99,7 +120,11 @@ import {
   ESTADO_CUENTA_EN_MORA,
   ESTADO_CUENTA_PENDIENTE,
 } from '../models/constantes';
-import { adjuntarPartes } from './composicion';
+import {
+  registrarCuentaCobroEnMora,
+  registrarCuentaCobroPorVencer,
+} from '../eventos/salida';
+import { emitirCuentaCobro } from './cuentas';
 
 /**
  * Dias desde el corte a partir de los cuales una cuenta esta EN MORA.
@@ -126,6 +151,20 @@ export const DIAS_PARA_MORA = 6;
  * para que mover el periodo de gracia mueva el aviso con el.
  */
 export const DIAS_AVISO_PREVIO = DIAS_PARA_MORA - 2;
+
+/**
+ * El dia en que una cuenta con este corte pasaria a EN_MORA.
+ *
+ * Es `DIAS_PARA_MORA` dias de calendario despues del corte, calculado con la misma
+ * constante que decide la mora: si mañana el periodo de gracia cambia, la fecha que
+ * anuncia el aviso cambia con el. Escribirla como un numero aparte habria sido la
+ * forma de que un dia dijeran cosas distintas, que es la trampa que `DIAS_PARA_MORA`
+ * vino a cerrar.
+ *
+ * Lo consume `CuentaCobroPorVencer`, que lleva una FECHA y no un «mañana». Ver la
+ * cabecera del tipo en `packages/shared/src/eventos.ts`.
+ */
+export const diaDeMora = (inicio: string): string => sumarDias(inicio, DIAS_PARA_MORA);
 
 /** El concepto que se imprime en la cuenta de cobro. */
 export const detalleDelPeriodo = (periodo: Periodo): string =>
@@ -191,12 +230,11 @@ export const procesarContratos = async (): Promise<void> => {
     // barrido no genera nada. Ver la nota sobre degradacion de la cabecera.
     const contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
 
-    // Un viaje a ms-identidad para todos los contratos del barrido, no uno por
-    // contrato.
-    const contratosConPartes = await adjuntarPartes(contratos);
-
-    for (const contrato of contratosConPartes) {
-      const fechaInicioCorte = contrato['fecha_inicio_corte'] as string;
+    // Y NO hay segundo viaje. Hasta el paso 6e habia una llamada a ms-identidad aqui
+    // para conseguir la direccion de correo del inquilino; los eventos llevan el
+    // `id_usuario`, asi que ya no hace falta.
+    for (const contrato of contratos) {
+      const fechaInicioCorte = contrato.fecha_inicio_corte;
 
       // El dia de corte sale de SU COLUMNA, no de recalcularlo desde el inicio
       // del contrato. Es la diferencia que trajo el paso 6a: si alguien
@@ -225,36 +263,30 @@ export const procesarContratos = async (): Promise<void> => {
       // sobre el mes: identifica el periodo exacto y ademas puede usar el indice
       // unico que lo respalda.
       const yaExiste = await CuentaCobro.findOne({
-        where: { id_contrato: contrato['id_contrato'] as string, inicio: periodo.inicio },
+        where: { id_contrato: contrato.id_contrato, inicio: periodo.inicio },
       });
 
       if (yaExiste) {
         continue;
       }
 
-      await CuentaCobro.create({
-        id_contrato: contrato['id_contrato'],
+      // La cuenta y su aviso, en una transaccion y por el UNICO camino que las
+      // crea. El correo ya no se manda desde aqui: `emitirCuentaCobro` anota
+      // `CuentaCobroGenerada` en la tabla de salida y ms-notificaciones decide a
+      // quien avisar. Ver `services/cuentas.ts`.
+      await emitirCuentaCobro({
+        id_contrato: contrato.id_contrato,
+        id_inquilino: contrato.id_inquilino,
         detalle: detalleDelPeriodo(periodo),
-        valor: contrato['canon'],
+        valor: contrato.canon,
         inicio: periodo.inicio,
         fin: periodo.fin,
-        estado: ESTADO_CUENTA_PENDIENTE,
       });
 
       console.log(
-        `✅ Cuenta de cobro generada para contrato ${String(contrato['id_contrato'])}` +
+        `✅ Cuenta de cobro generada para contrato ${contrato.id_contrato}` +
           ` — periodo ${periodo.inicio} a ${periodo.fin}`,
       );
-
-      const inquilino = contrato['Inquilino'] as { email?: string; nombres?: string } | null;
-
-      if (inquilino) {
-        await enviarCorreo(
-          inquilino.email,
-          '🏠 Nuevo recibo de arriendo generado',
-          `Hola ${inquilino.nombres ?? ''}, se ha generado tu recibo de arriendo para el periodo que inicia el ${diaCorte}. Valor: $${String(contrato['canon'])}.`,
-        );
-      }
     }
   } catch (error) {
     console.error('❌ Error en procesarContratos:', error);
@@ -281,47 +313,69 @@ export const procesarPagos = async (): Promise<void> => {
     });
 
     // Los contratos de todas las cuentas del barrido en UNA peticion, por
-    // identificador y con su inmueble dentro. No uno por cuenta.
+    // identificador y con su inmueble dentro. No uno por cuenta. Y NO hay segundo
+    // viaje a ms-identidad: lo que hacia falta de alli eran las direcciones de
+    // correo, y los eventos llevan el `id_usuario`.
     const contratos = await contratosPorIds(
       cuentasPendientes.map((cuenta) => cuenta.id_contrato),
       { conInmueble: true },
     );
 
-    // Igual que arriba: se componen las partes de todos los contratos
-    // implicados de una vez, no uno por uno dentro del bucle.
-    const contratosConPartes = await adjuntarPartes([...contratos.values()]);
-    const porContrato = new Map(
-      contratosConPartes.map((contrato) => [contrato['id_contrato'] as string, contrato]),
-    );
-
     for (const cuenta of cuentasPendientes) {
-      const contrato = porContrato.get(cuenta.id_contrato);
+      const contrato = contratos.get(cuenta.id_contrato);
       if (!contrato) {
         continue;
       }
 
-      const inquilino = contrato['Inquilino'] as { email?: string } | null;
-      const inmueble = contrato['Inmueble'] as
-        | { direccion?: string; Propietario?: { email?: string } | null }
-        | null;
-      const propietario = inmueble?.Propietario ?? null;
+      const idInquilino = contrato.id_inquilino;
+      const inmueble = contrato.Inmueble ?? null;
 
       const diasDesdeCorte = diasEntre(cuenta.inicio, hoy);
 
-      // RF-12: vencimiento proximo (1 dia antes de que expire el tiempo de gracia).
+      // Lo que las dos ramas de abajo necesitan del inmueble. Si ms-contratos no lo
+      // compuso no hay a quien avisar por el lado del propietario, asi que el aviso
+      // se omite entero: un evento con `id_propietario` vacio acabaria apartado tras
+      // diez intentos sin que nadie pueda arreglarlo reintentando.
+      const puedeAvisar = Boolean(idInquilino && inmueble?.id_propietario);
+
+      if (!puedeAvisar) {
+        console.warn(
+          `⚠️  ms-financiero: cuenta ${cuenta.id_cuenta_cobro} sin inquilino o sin inmueble ` +
+            'compuesto: no se anuncia su aviso. Se sigue evaluando la mora.',
+        );
+      }
+
+      const partes = {
+        id_cuenta_cobro: cuenta.id_cuenta_cobro,
+        id_contrato: cuenta.id_contrato,
+        id_inquilino: idInquilino as string,
+        // Foto del momento del hecho, no una denormalizacion: si el inmueble cambia
+        // de dueño manaña, este aviso seguira diciendo a quien se le avisó hoy. La
+        // distincion importa porque `docs/adr/0017` prohibe guardar este dato
+        // cuando se usa para AUTORIZAR, y aqui solo se usa para avisar.
+        id_propietario: inmueble?.id_propietario as string,
+        valor: Number(cuenta.valor),
+        inicio: cuenta.inicio,
+        fin: cuenta.fin,
+        direccion_inmueble: inmueble?.direccion ?? 'Inmueble sin dirección registrada',
+      };
+
+      // RF-12: vencimiento proximo (2 dias antes de que expire el tiempo de gracia).
+      //
+      // La igualdad exacta NO es una comodidad: es lo que hace que el aviso sea de un
+      // dia y no de todos los que quedan. Y ademas es lo unico que impide el aviso
+      // repetido, porque esta rama no cambia nada en la base — no hay estado que haga
+      // de bitacora, al contrario que en la de la mora. Ver `eventos/salida.ts`.
       if (diasDesdeCorte === DIAS_AVISO_PREVIO && cuenta.estado === ESTADO_CUENTA_PENDIENTE) {
-        if (inquilino) {
-          await enviarCorreo(
-            inquilino.email,
-            '⚠️ Aviso: Tu pago vence pronto',
-            'Recuerda que tienes hasta mañana para realizar el pago de tu arriendo sin generar mora.',
-          );
-        }
-        if (propietario) {
-          await enviarCorreo(
-            propietario.email,
-            '📢 Recordatorio de pago próximo a vencer',
-            `El pago del inmueble ${inmueble?.direccion ?? ''} vence mañana.`,
+        if (puedeAvisar) {
+          // UN evento para las DOS partes. Quien decide que al inquilino se le habla
+          // de «tu pago» y al propietario de «el pago del inmueble X» es
+          // ms-notificaciones: el emisor anuncia un hecho, no una lista de correos.
+          await sequelize.transaction((transaccion) =>
+            registrarCuentaCobroPorVencer(
+              { ...partes, entra_en_mora_el: diaDeMora(cuenta.inicio) },
+              transaccion,
+            ),
           );
         }
       }
@@ -329,24 +383,25 @@ export const procesarPagos = async (): Promise<void> => {
       // Cambio a mora. La MISMA constante que aplica `verificarMora`, que es lo
       // que cierra la trampa de las dos reglas distintas.
       if (diasDesdeCorte >= DIAS_PARA_MORA && cuenta.estado === ESTADO_CUENTA_PENDIENTE) {
-        await cuenta.update({ estado: ESTADO_CUENTA_EN_MORA });
-        console.log(`🚫 Cuenta de cobro ${cuenta.id_cuenta_cobro} marcada como EN MORA`);
+        // El UPDATE y su aviso van en UNA transaccion: no puede haber una mora sin
+        // aviso ni un aviso sin mora. Y como la condicion exige que venga de
+        // `PENDIENTE`, una segunda pasada no vuelve a cambiar el estado y por tanto
+        // tampoco vuelve a anotar el evento — el estado de la cuenta hace de bitacora.
+        await sequelize.transaction(async (transaccion) => {
+          await cuenta.update(
+            { estado: ESTADO_CUENTA_EN_MORA },
+            { transaction: transaccion } as never,
+          );
 
-        // RF-12: vencido (al inquilino y al propietario).
-        if (inquilino) {
-          await enviarCorreo(
-            inquilino.email,
-            '🚨 Pago Vencido - Mora Generada',
-            'Tu pago de arriendo ha superado el periodo de gracia. Por favor regulariza tu situación.',
-          );
-        }
-        if (propietario) {
-          await enviarCorreo(
-            propietario.email,
-            '🔴 Notificación de Inquilino en Mora',
-            `El inquilino del inmueble ${inmueble?.direccion ?? ''} ha entrado en mora.`,
-          );
-        }
+          if (puedeAvisar) {
+            await registrarCuentaCobroEnMora(
+              { ...partes, dias_de_mora: diasDesdeCorte },
+              transaccion,
+            );
+          }
+        });
+
+        console.log(`🚫 Cuenta de cobro ${cuenta.id_cuenta_cobro} marcada como EN MORA`);
       }
     }
   } catch (error) {
