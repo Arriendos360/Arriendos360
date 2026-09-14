@@ -33,17 +33,34 @@
 import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
-import { TIPO_CUENTA_COBRO_GENERADA } from 'arriendos360-shared';
+import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
 
-import { cache, hayFuenteDeRevocacion } from './seguridad/cache';
+import { cache } from './seguridad/cache';
 import { consumidor } from './eventos';
-import { almacen, publicador, suscriptoresDe } from './eventos/salida';
+import { almacen, publicador } from './eventos/salida';
 import { iniciarMotorFinanciero } from './services/motor';
 
-const PUERTO = Number(process.env['PORT'] ?? 3014);
+const PUERTO = enteroDeEntorno('PORT', 3014);
+
+/**
+ * Lo que no tiene defecto razonable. Sin `MS_IDENTIDAD_URL` entraban tokens de
+ * sesiones cerradas; sin `MS_NOTIFICACIONES_URL` los avisos del motor se daban por
+ * entregados sin que saliera un correo; sin `MS_CONTRATOS_URL` no hay nada que
+ * facturar. Los dos primeros arrancaban con un aviso en el log; ahora no arrancan.
+ */
+const OBLIGATORIAS = [
+  'DB_PASSWORD',
+  'JWT_SECRET',
+  'SERVICIO_JWT_SECRET',
+  'MS_CONTRATOS_URL',
+  'MS_IDENTIDAD_URL',
+  'MS_NOTIFICACIONES_URL',
+];
 
 const iniciar = async (): Promise<void> => {
   try {
+    validarEntorno('ms-financiero', OBLIGATORIAS);
+
     await sequelize.authenticate();
     console.log('✅ ms-financiero: conexión a PostgreSQL exitosa');
 
@@ -54,23 +71,14 @@ const iniciar = async (): Promise<void> => {
         : '✅ ms-financiero: esquema al día, sin migraciones pendientes',
     );
 
-    if (hayFuenteDeRevocacion()) {
-      await cache.iniciar();
-      const estado = cache.estado();
-      console.log(
-        `🔑 ms-financiero: caché de invalidación con ${estado.vigentes} tokens revocados y ` +
-          `${estado.sesionesInvalidadas} sesiones caídas, refresco cada ${
-            estado.intervaloMs / 1000
-          }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
-      );
-    } else {
-      // No se aborta el arranque, pero tampoco se calla: sin fuente, un token de
-      // una sesion cerrada entra. Es aceptable en una prueba aislada y no lo es
-      // en ningun despliegue.
-      console.warn(
-        '⚠️  ms-financiero: MS_IDENTIDAD_URL sin definir. NO se comprobará la revocación de tokens.',
-      );
-    }
+    await cache.iniciar();
+    const estado = cache.estado();
+    console.log(
+      `🔑 ms-financiero: caché de invalidación con ${estado.vigentes} tokens revocados y ` +
+        `${estado.sesionesInvalidadas} sesiones caídas, refresco cada ${
+          estado.intervaloMs / 1000
+        }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
+    );
 
     // No arranca nada: el consumidor es un manejador HTTP. Se cuenta lo que
     // lleva procesado porque es el numero que dice si el bus esta llegando.
@@ -79,19 +87,8 @@ const iniciar = async (): Promise<void> => {
         'Escucha ContratoFormalizado en POST /interno/eventos.',
     );
 
-    // Y desde el paso 7, la otra mitad: el publicador de sus propios eventos.
-    if (suscriptoresDe(TIPO_CUENTA_COBRO_GENERADA).length === 0) {
-      // Sin suscriptor, `crearEntregaHttp` da los eventos por entregados y no hay
-      // error en ninguna parte: el motor factura, marca moras y NO sale ni un correo.
-      // Es el mismo agujero silencioso que el cron con scale-to-zero, y se trata
-      // igual — gritarlo es lo unico que impide que pase inadvertido.
-      console.warn(
-        '⚠️  ms-financiero: MS_NOTIFICACIONES_URL sin definir. Los avisos se darán por ' +
-          'entregados sin que nadie los reciba: no saldrá ningún correo de recibo, de ' +
-          'vencimiento próximo ni de mora, y no habrá ningún error que lo delate.',
-      );
-    }
-
+    // Y desde el paso 7, la otra mitad: el publicador de sus propios eventos. Su
+    // suscriptor, `MS_NOTIFICACIONES_URL`, ya lo exigio `validarEntorno`.
     const pendientes = await almacen.contar();
     await publicador.iniciar();
     const estadoPublicador = publicador.estado();

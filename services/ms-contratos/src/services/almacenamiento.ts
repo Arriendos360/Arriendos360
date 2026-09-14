@@ -38,6 +38,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
+import { textoDeEntorno } from 'arriendos360-shared';
 
 /** Carpeta logica donde viven los anexos dentro del almacenamiento. */
 export const CARPETA_ANEXOS = 'contratos';
@@ -100,7 +101,7 @@ const nombreNuevo = (extension = '.pdf'): string => `${crypto.randomUUID()}${ext
 export class AlmacenamientoDisco implements Almacenamiento {
   private readonly raiz: string;
 
-  constructor(raiz: string = process.env['ALMACENAMIENTO_RUTA'] ?? 'almacenamiento') {
+  constructor(raiz: string = textoDeEntorno('ALMACENAMIENTO_RUTA', 'almacenamiento')) {
     this.raiz = path.resolve(raiz);
   }
 
@@ -191,7 +192,7 @@ export class AlmacenamientoAzureBlob implements Almacenamiento {
     this.cadenaConexion =
       opciones.cadenaConexion ?? process.env['AZURE_STORAGE_CONNECTION_STRING'];
     this.contenedor =
-      opciones.contenedor ?? process.env['AZURE_STORAGE_CONTENEDOR'] ?? 'anexos';
+      opciones.contenedor ?? textoDeEntorno('AZURE_STORAGE_CONTENEDOR', 'anexos');
   }
 
   /** Cliente del contenedor, creado la primera vez que hace falta. */

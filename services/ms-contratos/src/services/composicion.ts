@@ -45,7 +45,7 @@
  * `contrato.Inmueble ? ... : contrato.id_inmueble` que tiene escritos.
  */
 
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 
 import type { InmuebleAjeno } from '../clientes/inmuebles';
 import type { UsuarioAjeno } from '../clientes/identidad';
@@ -53,7 +53,7 @@ import { urlBase as urlIdentidad } from '../clientes/identidad';
 import { urlBase as urlInmuebles } from '../clientes/inmuebles';
 import type { Contrato } from '../models/Contrato';
 
-const TIEMPO_LIMITE_MS = Number(process.env['COMPOSICION_TIMEOUT_MS'] ?? 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('COMPOSICION_TIMEOUT_MS', 3000);
 
 /** Da al usuario del servicio la forma que tenia el modelo del monolito. */
 const comoUsuario = (usuario: UsuarioAjeno | undefined): Record<string, unknown> | null =>
@@ -79,7 +79,7 @@ const pedirONada = async (url: string, destinatario: string): Promise<unknown> =
   try {
     const respuesta = await fetch(url, {
       headers: cabeceraDeServicio({
-        emisor: process.env['SERVICIO_NOMBRE'] ?? 'ms-contratos',
+        emisor: textoDeEntorno('SERVICIO_NOMBRE', 'ms-contratos'),
         destinatario,
         secreto: process.env['SERVICIO_JWT_SECRET'],
       }),

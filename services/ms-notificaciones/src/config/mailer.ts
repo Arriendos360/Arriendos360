@@ -53,35 +53,26 @@
 
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { enteroDeEntorno, leerEntorno, textoDeEntorno } from 'arriendos360-shared';
 
 import { REMITENTE } from '../plantillas';
 
 dotenv.config();
 
-/**
- * Lo que hay configurado, si hay algo.
- *
- * `?? ` NO sirve aqui y esa es la trampa que hizo invisible el fallo anterior: Compose
- * pasa `EMAIL_USER=` cuando la variable del host esta vacia, y eso es una CADENA VACIA,
- * no `undefined`. Con `??` la cadena vacia pasa el filtro y acaba en el `auth` del
- * transporte. Es la misma razon por la que CLAUDE.md avisa de no usar `??` con
- * `REVOCADOS_INTERVALO_MS`.
- */
-const valorDe = (nombre: string): string | undefined => {
-  const valor = process.env[nombre]?.trim();
-  return valor === '' ? undefined : valor;
-};
-
-const usuarioSmtp = valorDe('EMAIL_USER');
+// Con `??` directo sobre `process.env`, el `EMAIL_USER=` que pasa Compose —una cadena
+// vacia, no `undefined`— acababa en el `auth` del transporte, y eso es lo que hizo
+// invisible el fallo anterior. Aqui habia un `valorDe` local por esa razon; ahora lo
+// resuelve `packages/shared/src/entorno.ts` para todos los servicios.
+const usuarioSmtp = leerEntorno('EMAIL_USER');
 
 /** `true` cuando no hay SMTP configurado: el mensaje no sale de la maquina. */
 export const esSimulado = (): boolean => usuarioSmtp === undefined;
 
 const transporte = usuarioSmtp
   ? nodemailer.createTransport({
-      host: valorDe('EMAIL_HOST') ?? 'smtp.ethereal.email',
-      port: Number(valorDe('EMAIL_PORT') ?? 587),
-      auth: { user: usuarioSmtp, pass: valorDe('EMAIL_PASS') ?? '' },
+      host: textoDeEntorno('EMAIL_HOST', 'smtp.ethereal.email'),
+      port: enteroDeEntorno('EMAIL_PORT', 587),
+      auth: { user: usuarioSmtp, pass: textoDeEntorno('EMAIL_PASS', '') },
     })
   : // Sin credenciales. `jsonTransport` acepta el mensaje y lo devuelve serializado sin
     // abrir una conexion, que es lo unico honesto que se puede hacer aqui: apuntar a un

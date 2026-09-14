@@ -40,9 +40,9 @@
  * estado lo sigue eligiendo el gateway. Ver `docs/adr/0017`.
  */
 
-const { cabeceraDeServicio } = require('arriendos360-shared');
+const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
 
-const TIEMPO_LIMITE_MS = Number(process.env.MS_CONTRATOS_TIMEOUT_MS || 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_CONTRATOS_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-contratos';
 
@@ -61,7 +61,7 @@ const urlBase = (entorno = process.env) => {
 const pedirJson = async (url) => {
     const respuesta = await fetch(url, {
         headers: cabeceraDeServicio({
-            emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+            emisor: textoDeEntorno('SERVICIO_NOMBRE', 'gateway'),
             destinatario: DESTINATARIO,
             secreto: process.env.SERVICIO_JWT_SECRET
         }),

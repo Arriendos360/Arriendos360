@@ -417,6 +417,14 @@ npm run seed --workspace=services/ms-identidad            # usuarios de prueba
   en `packages/shared/src/fechas.ts`.
 - **Día pactado que el mes no tiene** (un 31 en febrero): se recorta al último día del mes
   al resolverlo; el día pactado se guarda sin tocar.
+- **Variables de entorno: nunca `process.env.X ?? defecto` ni `|| defecto`.** Compose y
+  un `.env` copiado de `.env.example` dejan `VAR=` como cadena vacía, que `??` deja pasar
+  (mordió en `REVOCADOS_INTERVALO_MS`, el mailer y el remitente). Se lee con
+  `leerEntorno`, `textoDeEntorno` o `enteroDeEntorno` de `packages/shared/src/entorno.ts`:
+  vacío es ausente y un entero mal formado lanza. Lo que no tiene defecto razonable
+  —secretos, `DB_PASSWORD`, las `MS_*_URL` de las que depende— se exige con
+  `validarEntorno` al arrancar, y **sin eso el proceso no levanta**. Fuera de alcance:
+  `apps/web` (CRA, se resuelve al compilar) y `tests/integracion`.
 
 ## Git Flow
 
@@ -460,8 +468,6 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
 
 ## Trampas conocidas
 
-- **Compose pasa `VAR=` como cadena vacía**: lee con `||`, nunca `??`. Con `??`,
-  `REVOCADOS_INTERVALO_MS=` es un bucle y `EMAIL_USER=` rompió el correo en silencio.
 - **En desarrollo el correo no sale de la máquina**: sin `EMAIL_USER` va al log de
   ms-notificaciones, único sitio donde leer el enlace de recuperación.
 - **La contraseña temporal se entrega en mano** (`docs/adr/0007`): el correo sólo avisa.

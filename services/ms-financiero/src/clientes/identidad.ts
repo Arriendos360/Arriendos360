@@ -30,10 +30,10 @@
  * revocados es confianza cero, y el nombre del arrendatario lo imprime un PDF.
  */
 
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 import type { Invalidaciones } from 'arriendos360-shared';
 
-const TIEMPO_LIMITE_MS = Number(process.env['MS_IDENTIDAD_TIMEOUT_MS'] ?? 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_IDENTIDAD_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-identidad';
 
@@ -69,7 +69,7 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
 const pedirJson = async (url: string): Promise<unknown> => {
   const respuesta = await fetch(url, {
     headers: cabeceraDeServicio({
-      emisor: process.env['SERVICIO_NOMBRE'] ?? 'ms-financiero',
+      emisor: textoDeEntorno('SERVICIO_NOMBRE', 'ms-financiero'),
       destinatario: DESTINATARIO,
       secreto: process.env['SERVICIO_JWT_SECRET'],
     }),

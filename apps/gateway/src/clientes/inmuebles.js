@@ -28,9 +28,9 @@
  * dispara el evento `ContratoFormalizado`. Ver la nota al final del archivo.
  */
 
-const { cabeceraDeServicio } = require('arriendos360-shared');
+const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
 
-const TIEMPO_LIMITE_MS = Number(process.env.MS_INMUEBLES_TIMEOUT_MS || 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_INMUEBLES_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-inmuebles';
 
@@ -49,7 +49,7 @@ const urlBase = (entorno = process.env) => {
 const pedirJson = async (url) => {
     const respuesta = await fetch(url, {
         headers: cabeceraDeServicio({
-            emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+            emisor: textoDeEntorno('SERVICIO_NOMBRE', 'gateway'),
             destinatario: DESTINATARIO,
             secreto: process.env.SERVICIO_JWT_SECRET
         }),

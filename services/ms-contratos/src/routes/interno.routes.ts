@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { exigirServicio } from 'arriendos360-shared';
+import { exigirServicio, textoDeEntorno } from 'arriendos360-shared';
 
 import { listar, obtenerPorId } from '../controllers/interno.controller';
 
@@ -19,7 +19,7 @@ const router: Router = Router();
  */
 router.use(
   exigirServicio({
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-contratos',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-contratos'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   }),
 );

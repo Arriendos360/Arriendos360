@@ -18,12 +18,16 @@
  * y por qué un fallo de red conserva la última copia buena.
  */
 
-const { INTERVALO_POR_DEFECTO_MS, crearCacheInvalidacion } = require('arriendos360-shared');
+const {
+    INTERVALO_POR_DEFECTO_MS,
+    crearCacheInvalidacion,
+    enteroDeEntorno
+} = require('arriendos360-shared');
 
 const { revocadosVigentes } = require('../clientes/identidad');
 
 /** Cada cuánto se vuelve a preguntar. Ver ADR 0008. */
-const INTERVALO_MS = Number(process.env.REVOCADOS_INTERVALO_MS || INTERVALO_POR_DEFECTO_MS);
+const INTERVALO_MS = enteroDeEntorno('REVOCADOS_INTERVALO_MS', INTERVALO_POR_DEFECTO_MS);
 
 /**
  * Construye la caché del gateway.

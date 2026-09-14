@@ -30,10 +30,10 @@
  * aporta nada al hacerlo el: solo reenvia. Ver `docs/adr/0017`.
  */
 
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 import type { Invalidaciones } from 'arriendos360-shared';
 
-const TIEMPO_LIMITE_MS = Number(process.env['MS_IDENTIDAD_TIMEOUT_MS'] ?? 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_IDENTIDAD_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-identidad';
 
@@ -75,7 +75,7 @@ const pedirJson = async (
     method: metodo,
     headers: {
       ...cabeceraDeServicio({
-        emisor: process.env['SERVICIO_NOMBRE'] ?? 'ms-contratos',
+        emisor: textoDeEntorno('SERVICIO_NOMBRE', 'ms-contratos'),
         destinatario: DESTINATARIO,
         secreto: process.env['SERVICIO_JWT_SECRET'],
       }),

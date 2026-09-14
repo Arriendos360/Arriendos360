@@ -20,7 +20,7 @@
 import express from 'express';
 import type { Server } from 'http';
 import request from 'supertest';
-import { cabeceraDeServicio, exigirServicio, filasDe } from 'arriendos360-shared';
+import { cabeceraDeServicio, exigirServicio, filasDe, textoDeEntorno } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
 import { sequelize } from '../../src/config/database';
@@ -104,7 +104,7 @@ export const conToken = (token: string): [string, string] => ['Authorization', `
 export const conServicio = (emisor = 'gateway'): [string, string] => {
   const cabecera = cabeceraDeServicio({
     emisor,
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-identidad',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-identidad'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   });
 

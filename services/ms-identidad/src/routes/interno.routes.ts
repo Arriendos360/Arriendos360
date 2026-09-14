@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { exigirServicio } from 'arriendos360-shared';
+import { exigirServicio, textoDeEntorno } from 'arriendos360-shared';
 
 import { reemitirContrasenaTemporal, usuariosPorIds } from '../controllers/usuario.controller';
 import { revocadosVigentes, sesionesInvalidadas } from '../services/tokenService';
@@ -16,7 +16,7 @@ const router: Router = Router();
  */
 router.use(
   exigirServicio({
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-identidad',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-identidad'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   }),
 );

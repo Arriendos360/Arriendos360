@@ -16,13 +16,31 @@ import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
 import { publicador } from './eventos';
-import { cache, hayFuenteDeRevocacion } from './seguridad/cache';
+import { cache } from './seguridad/cache';
 import { almacenamiento } from './services/almacenamiento';
+import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
 
-const PUERTO = Number(process.env['PORT'] ?? 3013);
+const PUERTO = enteroDeEntorno('PORT', 3013);
+
+/**
+ * Lo que no tiene defecto razonable. Sin `MS_IDENTIDAD_URL` un token de una sesion
+ * cerrada entraria; sin `MS_INMUEBLES_URL` no hay pertenencia; sin `MS_FINANCIERO_URL`
+ * `ContratoFormalizado` se daria por entregado y ningun contrato facturaria. Antes el
+ * primer caso arrancaba con un aviso y los otros dos ni eso.
+ */
+const OBLIGATORIAS = [
+  'DB_PASSWORD',
+  'JWT_SECRET',
+  'SERVICIO_JWT_SECRET',
+  'MS_IDENTIDAD_URL',
+  'MS_INMUEBLES_URL',
+  'MS_FINANCIERO_URL',
+];
 
 const iniciar = async (): Promise<void> => {
   try {
+    validarEntorno('ms-contratos', OBLIGATORIAS);
+
     await sequelize.authenticate();
     console.log('✅ ms-contratos: conexión a PostgreSQL exitosa');
 
@@ -35,23 +53,14 @@ const iniciar = async (): Promise<void> => {
 
     console.log(`📎 ms-contratos: anexos en ${almacenamiento().describir()}`);
 
-    if (hayFuenteDeRevocacion()) {
-      await cache.iniciar();
-      const estado = cache.estado();
-      console.log(
-        `🔑 ms-contratos: caché de invalidación con ${estado.vigentes} tokens revocados y ` +
-          `${estado.sesionesInvalidadas} sesiones caídas, refresco cada ${
-            estado.intervaloMs / 1000
-          }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
-      );
-    } else {
-      // No se aborta el arranque, pero tampoco se calla: sin fuente, un token de
-      // una sesion cerrada entra. Es aceptable en una prueba aislada y no lo es
-      // en ningun despliegue.
-      console.warn(
-        '⚠️  ms-contratos: MS_IDENTIDAD_URL sin definir. NO se comprobará la revocación de tokens.',
-      );
-    }
+    await cache.iniciar();
+    const estado = cache.estado();
+    console.log(
+      `🔑 ms-contratos: caché de invalidación con ${estado.vigentes} tokens revocados y ` +
+        `${estado.sesionesInvalidadas} sesiones caídas, refresco cada ${
+          estado.intervaloMs / 1000
+        }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
+    );
 
     // El publicador del bus. Barre la tabla de salida y entrega lo pendiente.
     await publicador.iniciar();

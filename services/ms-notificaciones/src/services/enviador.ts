@@ -67,6 +67,7 @@ import {
   ENVIO_PENDIENTE,
 } from '../models/constantes';
 import { enviarCorreo as enviarPorSmtp } from '../config/mailer';
+import { enteroOpcionalDeEntorno } from 'arriendos360-shared';
 
 /** Cinco segundos, el mismo intervalo que el publicador del bus. */
 export const INTERVALO_ENVIO_MS = 5000;
@@ -338,7 +339,7 @@ export function crearEnviador(opciones: OpcionesEnviador = {}): Enviador {
  * temporizadores en las suites.
  */
 export const enviador: Enviador = crearEnviador({
-  intervaloMs: Number(process.env['ENVIOS_INTERVALO_MS']) || undefined,
+  intervaloMs: enteroOpcionalDeEntorno('ENVIOS_INTERVALO_MS'),
 });
 
 /**

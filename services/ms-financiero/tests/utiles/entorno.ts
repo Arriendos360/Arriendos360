@@ -20,7 +20,7 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
-import { cabeceraDeServicio, crearSobre, filasDe } from 'arriendos360-shared';
+import { cabeceraDeServicio, crearSobre, filasDe, textoDeEntorno } from 'arriendos360-shared';
 import type { SobreEvento, TipoEvento } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
@@ -116,7 +116,7 @@ export const conToken = (token: string): [string, string] => [
 export const conServicio = (emisor = 'gateway'): [string, string] => {
   const cabecera = cabeceraDeServicio({
     emisor,
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-financiero',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-financiero'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   });
 

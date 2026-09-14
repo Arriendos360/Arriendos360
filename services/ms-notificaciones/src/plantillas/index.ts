@@ -34,7 +34,7 @@ import type {
   CuentaCobroPorVencer,
   RecuperacionSolicitada,
 } from 'arriendos360-shared';
-import { ZONA_NEGOCIO } from 'arriendos360-shared';
+import { ZONA_NEGOCIO, textoDeEntorno } from 'arriendos360-shared';
 
 import type { Destinatario } from '../clientes/identidad';
 
@@ -45,21 +45,13 @@ export interface Mensaje {
 }
 
 /**
- * Una variable de entorno, o el valor por defecto si no hay nada util.
+ * Remitente. Se conserva literal del mailer que este servicio sustituye.
  *
- * `??` NO sirve, y es la trampa que dejo el remitente en `null` la primera vez que este
- * servicio mando un correo: Compose pasa `EMAIL_REMITENTE=` cuando la variable del host
- * esta vacia, y eso es una CADENA VACIA, no `undefined`. Con `??` la cadena vacia pasa.
- * Es la misma razon por la que CLAUDE.md avisa de no usar `??` con
- * `REVOCADOS_INTERVALO_MS`.
+ * Con `??` sobre `process.env`, el `EMAIL_REMITENTE=` vacio que pasa Compose dejo el
+ * remitente en blanco la primera vez que este servicio mando un correo. Aqui habia un
+ * helper local por eso; ahora es `textoDeEntorno`, de `packages/shared`.
  */
-const configurado = (nombre: string, porDefecto: string): string => {
-  const valor = process.env[nombre]?.trim();
-  return valor === undefined || valor === '' ? porDefecto : valor;
-};
-
-/** Remitente. Se conserva literal del mailer que este servicio sustituye. */
-export const REMITENTE = configurado(
+export const REMITENTE = textoDeEntorno(
   'EMAIL_REMITENTE',
   '"Arriendos360 🏠" <noreply@arriendos360.com>',
 );
@@ -71,7 +63,7 @@ export const REMITENTE = configurado(
  * apuntarla a otro sitio, igual que hace la costura del gateway con `MS_*_URL`.
  */
 const urlApp = (): string =>
-  configurado('URL_APP', 'http://localhost:3000').replace(/\/+$/, '');
+  textoDeEntorno('URL_APP', 'http://localhost:3000').replace(/\/+$/, '');
 
 /**
  * Pesos colombianos. El mismo formateador que imprimen los comprobantes.
