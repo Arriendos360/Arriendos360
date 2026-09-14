@@ -6,6 +6,8 @@ import bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
 
+import { sequelize } from '../config/database';
+import { registrarContrasenaTemporalEmitida } from '../eventos';
 import { ConsultaDocumento } from '../models/ConsultaDocumento';
 import { ROL_INQUILINO } from '../models/constantes';
 import { Rol } from '../models/Rol';
@@ -217,21 +219,38 @@ export const reemitirContrasenaTemporal = async (
 
     const temporal = generarContrasenaTemporal();
 
-    await usuario.update(
-      {
-        contrasena: await bcrypt.hash(temporal, 10),
-        // Vuelve a quedar obligado a elegir una propia.
-        debe_cambiar_contrasena: true,
-        // Y caen sus sesiones abiertas: si la temporal se reemite es porque la
-        // anterior se perdio o se filtro.
-        contrasena_cambiada_en: marcaDeCambio(),
-      },
-      // Quien lo PIDIO, no quien lo transmitio: el gateway manda el `sub` del
-      // propietario. `iss` seria el nombre del servicio, que no es un UUID y
-      // ademas perderia el dato que importa auditar en una reemision de
-      // credencial: que persona la provoco.
-      { usuarioAuditor: solicitadoPor ?? usuario.id_usuario } as never,
-    );
+    // La transaccion es nueva en el paso 7, y lo que mete dentro es el aviso: el
+    // cambio de credencial y el evento que lo anuncia tienen que quedar los dos o
+    // ninguno. Un correo que dice «se regeneró tu contraseña temporal» sobre una
+    // contrasena que sigue siendo la vieja dejaria a la persona esperando una que
+    // nadie le va a dar.
+    await sequelize.transaction(async (transaccion) => {
+      await usuario.update(
+        {
+          contrasena: await bcrypt.hash(temporal, 10),
+          // Vuelve a quedar obligado a elegir una propia.
+          debe_cambiar_contrasena: true,
+          // Y caen sus sesiones abiertas: si la temporal se reemite es porque la
+          // anterior se perdio o se filtro.
+          contrasena_cambiada_en: marcaDeCambio(),
+        },
+        // Quien lo PIDIO, no quien lo transmitio: el gateway manda el `sub` del
+        // propietario. `iss` seria el nombre del servicio, que no es un UUID y
+        // ademas perderia el dato que importa auditar en una reemision de
+        // credencial: que persona la provoco.
+        {
+          transaction: transaccion,
+          usuarioAuditor: solicitadoPor ?? usuario.id_usuario,
+        } as never,
+      );
+
+      // El sobre NO lleva la contrasena nueva. Ver el ADR 0007: la temporal se
+      // entrega en mano, y este aviso solo dice que la anterior dejo de valer.
+      await registrarContrasenaTemporalEmitida(
+        { idUsuario: usuario.id_usuario, motivo: 'REEMISION' },
+        transaccion,
+      );
+    });
 
     return res.json({
       mensaje: 'Contraseña temporal regenerada',

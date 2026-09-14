@@ -26,6 +26,35 @@ import crypto from 'crypto';
 export const TIPO_CONTRATO_FORMALIZADO = 'ContratoFormalizado';
 export const TIPO_CONTRATO_FINALIZADO = 'ContratoFinalizado';
 
+// Los cinco del paso 7. Los dos primeros los emite ms-identidad; los tres
+// ultimos, ms-financiero. Los cinco tienen UN consumidor: ms-notificaciones.
+export const TIPO_RECUPERACION_SOLICITADA = 'RecuperacionSolicitada';
+export const TIPO_CONTRASENA_TEMPORAL_EMITIDA = 'ContrasenaTemporalEmitida';
+export const TIPO_CUENTA_COBRO_GENERADA = 'CuentaCobroGenerada';
+export const TIPO_CUENTA_COBRO_POR_VENCER = 'CuentaCobroPorVencer';
+export const TIPO_CUENTA_COBRO_EN_MORA = 'CuentaCobroEnMora';
+
+/**
+ * NINGUN EVENTO LLEVA UNA DIRECCION DE CORREO, Y ESO ES REGLA, NO OLVIDO.
+ *
+ * Los cinco tipos del paso 7 existen para avisar a una persona, asi que la
+ * tentacion evidente es meter su correo en el sobre y ahorrarle una consulta al
+ * consumidor. No se hace. Un correo es un dato de contacto que pertenece a
+ * `identidad.usuarios` y a nadie mas; copiarlo en un evento convierte a cada
+ * emisor en responsable de mantenerlo al dia, y deja copias viejas en la tabla
+ * de salida de dos servicios que no tienen forma de enterarse de que cambio.
+ *
+ * Lo que viaja es el `id_usuario`. `ms-notificaciones` resuelve el destinatario
+ * preguntandoselo a ms-identidad al manejar el evento, que es el unico momento
+ * en el que la respuesta es actual.
+ *
+ * LO QUE SI VIAJA ES EL ASUNTO DEL MENSAJE: la direccion del inmueble, el valor,
+ * el periodo. No son datos de contacto sino el hecho que se anuncia, el emisor
+ * los tiene en la mano, y son ciertos en el instante de `ocurrido_en` — que es
+ * justo lo que un aviso tiene que contar. Es el mismo criterio que puso `canon`
+ * en `ContratoFormalizado`.
+ */
+
 /**
  * `ContratoFormalizado` — se firmo un contrato sobre un inmueble.
  *
@@ -37,6 +66,26 @@ export const TIPO_CONTRATO_FINALIZADO = 'ContratoFinalizado';
  * exactamente lo que MS-Financiero necesitara en el paso 6, y el emisor es el
  * unico que los tiene a mano en el momento de emitir. Pedirlos despues por HTTP
  * convertiria la coreografia en una orquestacion disfrazada.
+ *
+ * ── VERSION 2 DESDE EL PASO 7: VIAJA TAMBIEN `id_inquilino` ────────────────
+ *
+ * El mismo argumento, una vuelta mas. MS-Financiero crea la primera cuenta de
+ * cobro al recibir este evento y, desde el paso 7, anuncia esa creacion con
+ * `CuentaCobroGenerada` — que necesita saber a quien se le factura. Dentro de la
+ * transaccion del consumidor ese dato no esta en ninguna parte: la cuenta de
+ * cobro no guarda el inquilino, lo guarda el contrato, que es de otro servicio.
+ *
+ * Pedirlo por HTTP ahi seria exactamente la orquestacion disfrazada que el
+ * parrafo anterior descarta, y ademas con una transaccion abierta. Lo tiene el
+ * emisor, asi que viaja.
+ *
+ * COMPATIBILIDAD. La version sube a 2, pero el campo se declara OPCIONAL a
+ * proposito: en el despliegue del paso 7 puede haber sobres version 1 esperando
+ * en `contratos.eventos_salida`, y esos tienen que seguir creando su cuenta de
+ * cobro. El consumidor los acepta y se limita a no notificar — ver
+ * `services/ms-financiero/src/eventos/index.ts`. Un evento viejo que factura y
+ * no avisa es una degradacion aceptable; uno que acaba apartado y deja un
+ * contrato sin facturar, no.
  */
 export interface ContratoFormalizado {
   id_contrato: string;
@@ -45,6 +94,8 @@ export interface ContratoFormalizado {
   canon: number;
   /** `YYYY-MM-DD`. Primera fecha de corte del ciclo de facturacion. */
   fecha_inicio_corte: string;
+  /** Version 2. Opcional por compatibilidad: ver la cabecera. */
+  id_inquilino?: string;
 }
 
 /**
@@ -65,10 +116,170 @@ export interface ContratoFinalizado {
   id_inmueble: string;
 }
 
+// ── Los cinco del paso 7: lo que hoy es un correo enviado a mano ────────────
+//
+// Los cinco sustituyen un `sendMail` directo desde un servicio que no deberia
+// saber que existe SMTP. Ver `docs/adr/0019`.
+
+/**
+ * `RecuperacionSolicitada` — alguien pidio restablecer su contrasena.
+ *
+ * ── EL TOKEN VIAJA EN CLARO, Y ESO TIENE UN PRECIO QUE HAY QUE CONOCER ─────
+ *
+ * `identidad.tokens_recuperacion` guarda solo el SHA-256 del token: quien lea
+ * esa tabla no puede restablecer la contrasena de nadie. Este evento rompe a
+ * medias esa propiedad, porque el token en claro se escribe en
+ * `identidad.eventos_salida.payload` hasta que se entrega.
+ *
+ * No hay forma de evitarlo sin algo peor: la alternativa era que Notificaciones
+ * acuñara el token llamando a ms-identidad al enviar, y eso convierte a un
+ * servicio Generico en causa de un cambio de estado de Soporte, y deja
+ * «pedir recuperacion invalida el enlace anterior» dependiendo del orden de
+ * entrega.
+ *
+ * Lo que si se hace es ACOTAR la ventana: el `payload` se borra EN LA MISMA
+ * SENTENCIA que marca la fila como entregada, no en una segunda operacion. Ver
+ * `tiposRedactados` en `salida.ts`.
+ *
+ * NO LLEVA EL ENLACE, SOLO EL TOKEN. Construirlo es cosa del canal, y el canal
+ * es Notificaciones: `URL_APP` vive alli. Un evento que llevara la URL ya armada
+ * estaria decidiendo por el consumidor como se presenta el aviso.
+ *
+ * `expira_en` VIAJA Y NO SE RECALCULA. Los 30 minutos empiezan cuando el token
+ * se crea, no cuando el correo sale: si la entrega se reintenta, el enlace llega
+ * con menos vida de la que tenia. Que la fecha viaje es lo que permite que el
+ * correo diga la verdad en vez de prometer media hora que ya no existe.
+ */
+export interface RecuperacionSolicitada {
+  id_usuario: string;
+  /** El token EN CLARO. Ver la cabecera. */
+  token: string;
+  /** ISO 8601 en UTC. Cuando deja de valer el enlace. */
+  expira_en: string;
+}
+
+/**
+ * `ContrasenaTemporalEmitida` — se le creo o reemitio un acceso a alguien.
+ *
+ * ── NO LLEVA LA CONTRASEÑA, Y ESE ES EL PUNTO ──────────────────────────────
+ *
+ * El ADR 0007 decide que la temporal se entrega EN MANO y no por correo, y ese
+ * ADR no se toca: meterla aqui la escribiria en dos tablas y la mandaria por un
+ * canal que aquel declaro inadecuado para una credencial.
+ *
+ * Entonces, ¿para que existe el evento? Para que la persona se entere de que
+ * existe una cuenta a su nombre. Un inquilino dado de alta por su arrendador no
+ * pidio nada y hoy no recibe ningun aviso; el correo le dice que la cuenta
+ * existe y que la contrasena se la dara quien lo dio de alta. Es un aviso, no un
+ * canal de entrega de credenciales.
+ */
+export interface ContrasenaTemporalEmitida {
+  id_usuario: string;
+  /** `ALTA` la creo; `REEMISION` la regenero. Cambia el texto, no el canal. */
+  motivo: 'ALTA' | 'REEMISION';
+}
+
+/**
+ * `CuentaCobroGenerada` — se emitio una factura contra un contrato.
+ *
+ * La emiten los TRES caminos que crean una cuenta de cobro: el consumidor de
+ * `ContratoFormalizado` (la primera), el barrido del motor (las siguientes) y el
+ * alta manual del propietario. El hecho es el mismo en los tres, asi que el
+ * evento es el mismo — y eso hace que el alta manual pase a avisar al inquilino,
+ * que es comportamiento nuevo. Ver `docs/adr/0019`.
+ *
+ * NO LLEVA la direccion del inmueble, a diferencia de los dos siguientes, y no
+ * es un descuido: la primera cuenta nace dentro de la transaccion del consumidor
+ * de `ContratoFormalizado`, que no trae la direccion. Un campo que dos de los
+ * tres emisores pueden llenar y el tercero no es peor que no tenerlo.
+ *
+ * Un hecho IRREVERSIBLE: una cuenta de cobro no se anula ni se borra —lo
+ * anulable es la transaccion, ADR 0016— asi que no hay ningun evento de
+ * retractacion que lo acompañe.
+ */
+export interface CuentaCobroGenerada {
+  id_cuenta_cobro: string;
+  id_contrato: string;
+  /** A quien se le factura. El destinatario del aviso. */
+  id_inquilino: string;
+  /** Pesos colombianos, como numero. */
+  valor: number;
+  /** El periodo facturado, `YYYY-MM-DD`. Ver `periodoDeCorte()`. */
+  inicio: string;
+  fin: string;
+}
+
+/**
+ * `CuentaCobroPorVencer` — a una cuenta pendiente se le acaba el plazo.
+ *
+ * ── EL NOMBRE NO ES UN PARTICIPIO PASADO, Y ES DELIBERADO ──────────────────
+ *
+ * Los dos eventos del paso 5 son `ContratoFormalizado` y `ContratoFinalizado`.
+ * La alternativa que respetaba el patron era `VencimientoProximoDetectado`, que
+ * describe el barrido que lo encontro en vez del hecho que se anuncia. La
+ * convencion existe para que el nombre describa el hecho, no al contrario.
+ *
+ * DOS DESTINATARIOS, UN EVENTO. Avisa al inquilino y al propietario, y decidir
+ * eso es de Notificaciones: el emisor anuncia un hecho, no una lista de correos.
+ * De ahi que viajen los dos identificadores.
+ *
+ * `entra_en_mora_el` ES UNA FECHA Y NO «MAÑANA». El correo que esto sustituye
+ * decia «tienes hasta mañana», que era cierto en el instante del `sendMail`
+ * porque el envio iba dentro del barrido. Con el bus hay una ventana entre el
+ * hecho y el correo, y los reintentos la estiran: una frase relativa se vuelve
+ * falsa sola. Una fecha sigue siendo cierta cuando llega.
+ *
+ * `valor` Y NO `saldo_pendiente`: este evento solo se emite sobre cuentas
+ * `PENDIENTE` —el barrido excluye `PARCIAL`— asi que ahi los dos numeros son el
+ * mismo. Derivar el saldo costaria una consulta por fila dentro del bucle, y la
+ * garantia del motor es que su numero de viajes no dependa de cuantos contratos
+ * haya.
+ */
+export interface CuentaCobroPorVencer {
+  id_cuenta_cobro: string;
+  id_contrato: string;
+  id_inquilino: string;
+  /** Dueño del inmueble EN EL MOMENTO DEL HECHO. Ver `docs/adr/0019`. */
+  id_propietario: string;
+  valor: number;
+  inicio: string;
+  fin: string;
+  /** `YYYY-MM-DD`. El dia en que la cuenta pasaria a EN_MORA. */
+  entra_en_mora_el: string;
+  /** El asunto del mensaje, no un dato de contacto. Ver la cabecera del modulo. */
+  direccion_inmueble: string;
+}
+
+/**
+ * `CuentaCobroEnMora` — una cuenta paso el periodo de gracia sin pagarse.
+ *
+ * Mismo reparto que el anterior: un evento, dos destinatarios. La diferencia es
+ * que este acompaña un cambio de estado real en la base —`PENDIENTE` a
+ * `EN_MORA`— asi que se registra en la misma transaccion que ese cambio: no
+ * puede haber un aviso de mora sin mora, ni una mora sin aviso.
+ */
+export interface CuentaCobroEnMora {
+  id_cuenta_cobro: string;
+  id_contrato: string;
+  id_inquilino: string;
+  id_propietario: string;
+  valor: number;
+  inicio: string;
+  fin: string;
+  /** Dias de calendario en `America/Bogota` desde el corte. */
+  dias_de_mora: number;
+  direccion_inmueble: string;
+}
+
 /** Carga que corresponde a cada tipo. Es lo que ata el nombre con su forma. */
 export interface CargaPorTipo {
   [TIPO_CONTRATO_FORMALIZADO]: ContratoFormalizado;
   [TIPO_CONTRATO_FINALIZADO]: ContratoFinalizado;
+  [TIPO_RECUPERACION_SOLICITADA]: RecuperacionSolicitada;
+  [TIPO_CONTRASENA_TEMPORAL_EMITIDA]: ContrasenaTemporalEmitida;
+  [TIPO_CUENTA_COBRO_GENERADA]: CuentaCobroGenerada;
+  [TIPO_CUENTA_COBRO_POR_VENCER]: CuentaCobroPorVencer;
+  [TIPO_CUENTA_COBRO_EN_MORA]: CuentaCobroEnMora;
 }
 
 export type TipoEvento = keyof CargaPorTipo;
@@ -110,10 +321,23 @@ export interface SobreOpaco {
 /** Alias historico de {@link SobreOpaco}. */
 export type SobreDesconocido = SobreOpaco;
 
-/** Version vigente de cada tipo. Sube cuando cambia la forma de su carga. */
+/**
+ * Version vigente de cada tipo. Sube cuando cambia la forma de su carga.
+ *
+ * `ContratoFormalizado` va por la 2 desde el paso 7, cuando gano
+ * `id_inquilino`. Es la primera vez que este numero sirve para algo, y lo que
+ * demuestra es lo que decia la cabecera del modulo: ponerlo desde el primer
+ * evento costo un campo, y no haberlo puesto habria costado distinguir un sobre
+ * viejo de uno roto.
+ */
 export const VERSION_EVENTO: Record<TipoEvento, number> = {
-  [TIPO_CONTRATO_FORMALIZADO]: 1,
+  [TIPO_CONTRATO_FORMALIZADO]: 2,
   [TIPO_CONTRATO_FINALIZADO]: 1,
+  [TIPO_RECUPERACION_SOLICITADA]: 1,
+  [TIPO_CONTRASENA_TEMPORAL_EMITIDA]: 1,
+  [TIPO_CUENTA_COBRO_GENERADA]: 1,
+  [TIPO_CUENTA_COBRO_POR_VENCER]: 1,
+  [TIPO_CUENTA_COBRO_EN_MORA]: 1,
 };
 
 /**

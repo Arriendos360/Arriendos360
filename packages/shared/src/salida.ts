@@ -27,6 +27,10 @@
  * mitad del trato esta en `entrada.ts`: el consumidor descarta repetidos.
  *
  * ORDEN Y BLOQUEO: ver la nota de `crearPublicador`.
+ *
+ * PAYLOAD REDACTADO AL ENTREGAR: ver `tiposRedactados`. Lo agrega el paso 7,
+ * porque el token de recuperacion de contrasena viaja dentro de un sobre y no
+ * puede quedarse en esta tabla despues de haberse entregado.
  */
 
 import type { SobreDesconocido } from './eventos';
@@ -83,14 +87,74 @@ export interface AlmacenSalida {
   contar(): Promise<{ pendientes: number; apartados: number }>;
 }
 
+/**
+ * Valida un nombre de tipo de evento para poder interpolarlo en SQL.
+ *
+ * Los tipos son constantes del codigo —`'RecuperacionSolicitada'`— nunca un dato
+ * de entrada, igual que el nombre de la tabla. Se valida por la misma razon que
+ * aquel: que hoy sea una constante no impide que mañana alguien la pase desde
+ * una variable de entorno, y entonces el error seria una inyeccion.
+ */
+export const validarTipoDeEvento = (tipo: string): string => {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(tipo)) {
+    throw new Error(`Tipo de evento no valido para SQL: ${tipo}`);
+  }
+  return tipo;
+};
+
 /** Implementacion SQL del almacen. Vale para cualquier productor. */
 export function crearAlmacenSalidaSql(opciones: {
   conexion: ConexionSql;
   /** `esquema.tabla`. Constante del servicio, jamas un dato de entrada. */
   tabla: string;
+  /**
+   * Tipos cuyo `payload` se BORRA al marcar la fila como entregada.
+   *
+   * ── POR QUE EXISTE ESTO ────────────────────────────────────────────────────
+   *
+   * Un sobre puede llevar un secreto. `RecuperacionSolicitada` lleva el token de
+   * restablecimiento EN CLARO, porque el consumidor necesita construir con el el
+   * enlace del correo — mientras `identidad.tokens_recuperacion` guarda solo su
+   * SHA-256 justamente para que leer la tabla no permita restablecer la
+   * contrasena de nadie. Dejar el token en esta tabla despues de entregarlo
+   * anularia esa precaucion por la puerta de atras, y para siempre: las filas
+   * entregadas no se borran.
+   *
+   * ── Y POR QUE VA DENTRO DEL MISMO UPDATE ───────────────────────────────────
+   *
+   * Esto es lo que importa, y es la razon de que no sea una segunda llamada. Si
+   * borrar el payload fuera una operacion aparte, una caida entre las dos —o un
+   * fallo de la segunda— dejaria la fila marcada como entregada y el token en
+   * claro ahi indefinidamente, que es exactamente el estado que se quiere
+   * evitar. Una sola sentencia no tiene ese hueco: o marca y borra, o no hace
+   * ninguna de las dos cosas.
+   *
+   * Se pierde la carga de los eventos entregados de esos tipos, y se acepta: la
+   * constancia de que el hecho ocurrio esta en la fila —`id_evento`, `tipo`,
+   * `ocurrido_en`, `entregado_en`— y el dato de dominio, en el agregado del
+   * emisor. Lo unico que desaparece es el secreto.
+   *
+   * Los tipos NO redactados conservan su payload intacto, que es lo que permite
+   * mirar un evento entregado cuando algo no cuadra.
+   */
+  tiposRedactados?: readonly string[];
 }): AlmacenSalida {
   const tabla = validarNombreDeTabla(opciones.tabla);
   const { conexion } = opciones;
+
+  // El fragmento se arma UNA vez, al crear el almacen, con los tipos validados.
+  // Sin tipos que redactar queda vacio y el UPDATE es exactamente el de antes
+  // del paso 7, que es lo que se quiere para los productores que no llevan
+  // secretos en el sobre.
+  const tiposRedactados = (opciones.tiposRedactados ?? []).map(validarTipoDeEvento);
+  const redaccion =
+    tiposRedactados.length === 0
+      ? ''
+      : `,
+                payload = CASE WHEN tipo IN (${tiposRedactados
+                  .map((tipo) => `'${tipo}'`)
+                  .join(', ')})
+                               THEN '{}'::JSONB ELSE payload END`;
 
   return {
     async registrar(sobre, opcionesRegistro = {}) {
@@ -134,12 +198,14 @@ export function crearAlmacenSalidaSql(opciones: {
     },
 
     async marcarEntregado(idEvento) {
+      // El borrado del payload va DENTRO de este UPDATE, no en una segunda
+      // sentencia. Ver `tiposRedactados`.
       await conexion.query(
         `UPDATE ${tabla}
             SET estado = '${SALIDA_ENTREGADO}',
                 entregado_en = NOW(),
                 intentos = intentos + 1,
-                ultimo_error = NULL
+                ultimo_error = NULL${redaccion}
           WHERE id_evento = :id_evento`,
         { replacements: { id_evento: idEvento } },
       );

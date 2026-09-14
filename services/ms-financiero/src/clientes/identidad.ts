@@ -9,26 +9,25 @@
  *    confundirlas dejaria entrar tokens de sesiones cerradas.
  *
  * 2. **`usuariosPorIds`** — el nombre del arrendatario que imprime un
- *    comprobante y el correo al que el motor avisa. El fallo DEGRADA a un mapa
- *    vacio: un recibo con «No disponible» donde va el nombre sigue sirviendo;
- *    un 500 al pedir el recibo, no. Y un barrido que no manda un correo es un
- *    incidente menor comparado con uno que no genera las cuentas del mes.
+ *    comprobante. El fallo DEGRADA a un mapa vacio: un recibo con «No disponible»
+ *    donde va el nombre sigue sirviendo; un 500 al pedir el recibo, no.
  *
  * EN LOTE, SIEMPRE. Un listado de veinte comprobantes pediria veinte veces lo
  * mismo si la consulta fuera de una en una: el N+1 de siempre, pero con latencia
  * de red. Los llamantes recogen todos los identificadores y hacen UNA peticion.
  *
- * ── ESTE CLIENTE TIENE FECHA DE CADUCIDAD PARCIAL ───────────────────────────
+ * ── LA DEUDA QUE ESTA CABECERA ANUNCIABA YA ESTA PAGADA ─────────────────────
  *
- * Los correos del motor —el aviso de vencimiento proximo y el de mora— se
- * componen aqui HOY porque ms-notificaciones no existe todavia. En el paso 7 eso
- * cambia de forma: el motor pasara a publicar eventos («cuenta proxima a
- * vencer», «cuenta en mora») y sera Notificaciones quien resuelva a quien avisar
- * y por que canal. Entonces `usuariosPorIds` seguira haciendo falta para los
- * PDF, que no son una notificacion, pero el motor dejara de llamarlo.
+ * Decia: «los correos del motor se componen aqui HOY porque ms-notificaciones no
+ * existe todavia; en el paso 7 el motor pasara a publicar eventos y `usuariosPorIds`
+ * seguira haciendo falta para los PDF, pero el motor dejara de llamarlo».
  *
- * Se deja escrito aqui y en `services/motor.ts` para que la deuda tenga dueño y
- * no se descubra leyendo el codigo.
+ * Eso es exactamente lo que paso. El motor no llama a este cliente para nada, y
+ * `usuariosPorIds` solo la usan los comprobantes. Se nota en una garantia concreta:
+ * los dos barridos del motor hacen UNA peticion cada uno en vez de dos.
+ *
+ * Lo que queda aqui es de un tipo distinto y no tiene fecha de caducidad: la lista de
+ * revocados es confianza cero, y el nombre del arrendatario lo imprime un PDF.
  */
 
 import { cabeceraDeServicio } from 'arriendos360-shared';

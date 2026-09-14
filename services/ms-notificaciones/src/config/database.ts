@@ -1,0 +1,51 @@
+/**
+ * Conexion de MS-Notificaciones a PostgreSQL.
+ *
+ * Comparte instancia con el resto del sistema, pero NO esquema: las dos tablas de
+ * este servicio viven en `notificaciones`, y el `searchPath` lo fija aqui para
+ * que ninguna consulta pueda alcanzar `public` ni el esquema de otro servicio por
+ * descuido. Esa es la regla dura 3 hecha configuracion en vez de disciplina.
+ *
+ * ── ESTE SERVICIO TIENE BASE AUNQUE NO TENGA DOMINIO ────────────────────────
+ *
+ * El catalogo de microservicios le asigna «ninguna» tabla, y es cierto en lo que
+ * importa: no es dueño de ningun concepto del negocio. Pero necesita dos tablas
+ * operativas y las necesita de verdad — sin la bitacora de eventos procesados
+ * mandaria correos repetidos, y sin la de envios no habria forma de saber si un
+ * aviso salio. Es la misma categoria de `identidad.tokens_revocados`: un mecanismo
+ * que requiere estado, no un agregado.
+ *
+ * Que las dos vivan en la MISMA base que la bandeja de salida de nadie es lo que
+ * hace posible la idempotencia: el consumidor anota el evento y redacta los
+ * envios en una sola transaccion. Contra dos bases eso no existiria.
+ */
+
+import { Sequelize } from 'sequelize';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+/** Esquema propio del servicio. */
+export const ESQUEMA = 'notificaciones';
+
+const nombreBase =
+  process.env['NODE_ENV'] === 'test'
+    ? process.env['DB_NAME_TEST'] ?? 'arriendos360_test'
+    : process.env['DB_NAME'] ?? 'arriendos360_db';
+
+export const sequelize = new Sequelize(
+  nombreBase,
+  process.env['DB_USER'] ?? 'postgres',
+  process.env['DB_PASSWORD'],
+  {
+    host: process.env['DB_HOST'] ?? 'localhost',
+    port: Number(process.env['DB_PORT'] ?? 5432),
+    dialect: 'postgres',
+    logging: false,
+    schema: ESQUEMA,
+    dialectOptions: {
+      options: `-c search_path=${ESQUEMA}`,
+    },
+    pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
+  },
+);

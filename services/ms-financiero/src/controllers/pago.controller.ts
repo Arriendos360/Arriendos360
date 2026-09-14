@@ -68,6 +68,7 @@ import {
   TIPO_TRANSACCION_INGRESO,
 } from '../models/constantes';
 import { esUuid } from '../models/uuid';
+import { emitirCuentaCobro } from '../services/cuentas';
 import { adjuntarContratoACuentas, adjuntarContratoATransacciones, adjuntarInquilino } from '../services/composicion';
 import { DIAS_PARA_MORA, periodoAFacturar } from '../services/motor';
 import { generarPDFComprobante } from '../services/pdfService';
@@ -253,6 +254,18 @@ export const obtenerTransacciones = async (
  * el periodo se puede omitir: se deriva del ciclo de facturacion del contrato
  * con la MISMA funcion que usa el motor, y no con una segunda cuenta que podria
  * separarse.
+ *
+ * ── DESDE EL PASO 7 ESTO TAMBIEN AVISA AL INQUILINO, Y ES NUEVO ────────────
+ *
+ * Antes creaba la cuenta en silencio: el correo de «recibo generado» solo lo mandaba
+ * el motor. Ahora los tres caminos que crean una cuenta pasan por
+ * `emitirCuentaCobro`, que anota `CuentaCobroGenerada`, asi que este tambien avisa.
+ *
+ * Es deliberado. El hecho es el mismo —se le emitio una factura a alguien— y quien la
+ * recibe tiene el mismo derecho a enterarse la haya generado un barrido o una
+ * persona. La alternativa era un `avisar: false` para este camino, es decir,
+ * exactamente los tres-sitios-que-hacen-cosas-distintas que `services/cuentas.ts`
+ * existe para cerrar. Anotado como comportamiento nuevo en `docs/adr/0019`.
  */
 export const crearCuentaCobro = async (req: Request, res: Response): Promise<Response | void> => {
   try {
@@ -289,17 +302,19 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
 
     const fin = soloFecha(req.body.fin) ?? periodo.fin;
 
-    const cuenta = await CuentaCobro.create(
-      {
-        id_contrato,
-        valor,
-        inicio: periodo.inicio,
-        fin,
-        detalle: detalle ?? `Canon de arrendamiento del ${periodo.inicio} al ${fin}`,
-        estado: ESTADO_CUENTA_PENDIENTE,
-      },
-      { usuarioAuditor: sub },
-    );
+    // El inquilino sale del contrato que ya se pidio para comprobar la pertenencia:
+    // no cuesta un viaje mas. Lo necesita el evento, no la fila.
+    const { cuenta } = await emitirCuentaCobro({
+      id_contrato: id_contrato as string,
+      id_inquilino: contrato.id_inquilino,
+      valor: valor as number,
+      inicio: periodo.inicio,
+      fin,
+      detalle: detalle ?? `Canon de arrendamiento del ${periodo.inicio} al ${fin}`,
+      // Aqui SI hay una persona detras, al contrario que en el motor y en el
+      // consumidor del evento: la cuenta queda a su nombre en la auditoria.
+      auditor: sub,
+    });
 
     return res.status(201).json({
       mensaje: 'Cuenta de cobro registrada exitosamente',

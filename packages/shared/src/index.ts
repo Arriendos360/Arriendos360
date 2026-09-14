@@ -26,7 +26,12 @@
  * que ms-contratos y Financiero comparten desde que dejaron de vivir en el mismo
  * proceso.
  *
- * Lo consumen el gateway, ms-identidad, ms-inmuebles y ms-contratos.
+ * Lo consumen el gateway y los cinco servicios. Desde el paso 7 los cinco:
+ * ms-notificaciones hereda el consumidor tal cual, y ms-identidad y
+ * ms-financiero heredan el productor — la tercera y la cuarta tabla de salida
+ * del sistema, sin una linea de mecanismo nuevo. Que eso costara una llamada a
+ * `crearAlmacenSalidaSql` y otra a `crearPublicador` es el argumento a favor de
+ * que el bus viviera aqui desde el paso 5.
  */
 
 export {
@@ -111,16 +116,26 @@ export type {
 // ── Bus de eventos ───────────────────────────────────────────────────────────
 
 export {
+  TIPO_CONTRASENA_TEMPORAL_EMITIDA,
   TIPO_CONTRATO_FINALIZADO,
   TIPO_CONTRATO_FORMALIZADO,
+  TIPO_CUENTA_COBRO_EN_MORA,
+  TIPO_CUENTA_COBRO_GENERADA,
+  TIPO_CUENTA_COBRO_POR_VENCER,
+  TIPO_RECUPERACION_SOLICITADA,
   VERSION_EVENTO,
   crearSobre,
   esSobreEvento,
 } from './eventos';
 export type {
   CargaPorTipo,
+  ContrasenaTemporalEmitida,
   ContratoFinalizado,
   ContratoFormalizado,
+  CuentaCobroEnMora,
+  CuentaCobroGenerada,
+  CuentaCobroPorVencer,
+  RecuperacionSolicitada,
   SobreDesconocido,
   SobreEvento,
   SobreOpaco,
@@ -141,6 +156,7 @@ export {
   TAMANO_LOTE_POR_DEFECTO,
   crearAlmacenSalidaSql,
   crearPublicador,
+  validarTipoDeEvento,
 } from './salida';
 export type {
   AlmacenSalida,
@@ -191,6 +207,7 @@ export {
   periodoDeCorte,
   periodoQueEmpiezaEn,
   soloFecha,
+  sumarDias,
   ultimoDiaDelMes,
 } from './fechas';
 export type { FechaISO as FechaCalendario, Periodo } from './fechas';

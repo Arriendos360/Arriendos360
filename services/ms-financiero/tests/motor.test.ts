@@ -24,10 +24,22 @@
  *   - la mora entra al sexto dia del corte,
  *   - el barrido compone las partes en un numero fijo de viajes.
  *
- * La tercera cambia de numero: eran TRES peticiones cuando esto vivia en el
- * gateway (contratos, inmuebles, identidad) y ahora son DOS, porque el inmueble
- * viaja dentro del contrato. Lo que no cambia es lo que la prueba defiende: que
- * el numero NO crece con el numero de contratos.
+ * La tercera cambia de numero por tercera vez: eran TRES peticiones cuando esto
+ * vivia en el gateway (contratos, inmuebles, identidad), pasaron a DOS en el 6e
+ * porque el inmueble viaja dentro del contrato, y desde el paso 7 es UNA. La que
+ * sobraba era la de ms-identidad, a por las direcciones de correo: el motor ya no
+ * manda correos, anota eventos que llevan el `id_usuario`, y quien resuelve el
+ * destinatario es ms-notificaciones.
+ *
+ * Lo que no cambia en ninguna de las tres versiones es lo que la prueba defiende:
+ * que el numero NO crece con el numero de contratos.
+ *
+ * ── LO QUE CAMBIA EN EL PASO 7 ─────────────────────────────────────────────
+ *
+ * El motor no manda correos: emite `CuentaCobroGenerada`, `CuentaCobroPorVencer` y
+ * `CuentaCobroEnMora` en su tabla de salida. Asi que donde antes no habia nada que
+ * comprobar —los correos se perdian en un mailer que se tragaba los fallos— ahora
+ * hay filas que mirar, y esta suite las mira.
  *
  * ── Y LAS FECHAS SON DETERMINISTAS ─────────────────────────────────────────
  *
@@ -47,13 +59,19 @@ import {
   ESTADO_CUENTA_PENDIENTE,
   USUARIO_SISTEMA,
 } from '../src/models/constantes';
-import { procesarContratos, procesarPagos } from '../src/services/motor';
+import {
+  DIAS_AVISO_PREVIO,
+  DIAS_PARA_MORA,
+  procesarContratos,
+  procesarPagos,
+} from '../src/services/motor';
 import {
   cerrarEntorno,
   contratoEnElDoble,
   contratosFalso,
   entregarEvento,
   escenario,
+  eventosDeSalida,
   identidadFalsa,
   inmuebleDe,
   prepararEntorno,
@@ -162,13 +180,18 @@ describe('El primer periodo es del evento, no del barrido', () => {
     // evento, despues corre el motor, y en el primer periodo tiene que haber
     // UNA cuenta.
     const pasadoManana = sumarDias(hoyEnZonaNegocio(), 2);
-    const { idContrato, idInmueble } = escenario({ fecha_inicio_corte: pasadoManana });
+    const { idContrato, idInmueble, inquilino } = escenario({
+      fecha_inicio_corte: pasadoManana,
+    });
 
     await entregarEvento(TIPO_CONTRATO_FORMALIZADO, {
       id_contrato: idContrato,
       id_inmueble: idInmueble,
       canon: 1000,
       fecha_inicio_corte: pasadoManana,
+      // Version 2: el sobre trae el inquilino, para que la cuenta que nace del evento
+      // pueda anunciarse. Ver la cabecera del tipo en packages/shared.
+      id_inquilino: inquilino.sub,
     });
 
     expect(await cuentasDe(idContrato)).toHaveLength(1);
@@ -294,20 +317,25 @@ describe('Un numero fijo de viajes por barrido', () => {
   const consultasAIdentidad = () =>
     identidadFalsa().llamadas.filter((l) => l.ruta.startsWith('/interno/usuarios'));
 
-  test('procesarContratos: DOS peticiones, y el inmueble viene dentro', async () => {
-    // DOS y no tres. Antes de la extraccion eran contratos + inmuebles +
-    // identidad; ahora el inmueble viaja dentro del contrato porque se pide con
-    // `incluir=inmueble`, y ese salto encadenado lo da ms-contratos.
+  test('procesarContratos: UNA petición, y el inmueble viene dentro', async () => {
+    // UNA, y no dos. Eran contratos + inmuebles + identidad en el gateway, contratos +
+    // identidad en el 6e, y desde el paso 7 sólo contratos: la que sobraba era la de
+    // ms-identidad, a por las direcciones de correo. Los eventos llevan el `id_usuario`
+    // y quien resuelve el destinatario es ms-notificaciones, así que el barrido no tiene
+    // nada que preguntarle a identidad.
+    //
+    // Una regla que existía por propiedad del dato resulta que también le quita un salto
+    // de red al proceso más pesado del sistema.
     contratosFalso().limpiarLlamadas();
     identidadFalsa().limpiarLlamadas();
 
     await procesarContratos();
 
     expect(consultasAContratos()).toHaveLength(1);
-    expect(consultasAIdentidad()).toHaveLength(1);
+    expect(consultasAIdentidad()).toHaveLength(0);
 
-    // Y la peticion pide el inmueble: si no lo hiciera, el motor no sabria a que
-    // propietario avisar y la degradacion pasaria inadvertida.
+    // Y la petición pide el inmueble: si no lo hiciera, los avisos no podrían llevar la
+    // dirección ni el propietario, y eso se vería en un correo sin asunto claro.
     expect(consultasAContratos()[0]!.ruta).toContain('incluir=inmueble');
   });
 
@@ -332,7 +360,7 @@ describe('Un numero fijo de viajes por barrido', () => {
     await procesarContratos();
 
     expect(consultasAContratos()).toHaveLength(1);
-    expect(consultasAIdentidad()).toHaveLength(1);
+    expect(consultasAIdentidad()).toHaveLength(0);
   });
 
   test('procesarPagos tambien pide los contratos en lote', async () => {
@@ -344,7 +372,21 @@ describe('Un numero fijo de viajes por barrido', () => {
     await procesarPagos();
 
     expect(consultasAContratos().length).toBeLessThanOrEqual(1);
-    expect(consultasAIdentidad().length).toBeLessThanOrEqual(1);
+    expect(consultasAIdentidad()).toHaveLength(0);
+  });
+
+  test('el motor NO habla con ms-identidad en ningún barrido', async () => {
+    // La afirmación en su forma más fuerte, y es una garantía nueva del paso 7. Hasta
+    // aquí el barrido dependía de ms-identidad para conseguir direcciones de correo, y
+    // esa dependencia había que documentarla como «degrada si no responde». Ya no
+    // existe: los eventos llevan identificadores y el destinatario lo resuelve otro.
+    contratosFalso().limpiarLlamadas();
+    identidadFalsa().limpiarLlamadas();
+
+    await procesarContratos();
+    await procesarPagos();
+
+    expect(identidadFalsa().llamadas).toHaveLength(0);
   });
 });
 
@@ -365,9 +407,17 @@ describe('Politica de fallo del motor', () => {
     contratosFalso().levantar();
   });
 
-  test('si ms-identidad no responde, el motor sigue haciendo su trabajo', async () => {
-    // Generar cuentas de cobro y marcar mora es lo principal; avisar por correo
-    // es lo accesorio. Un fallo de identidad no puede parar lo uno por lo otro.
+  test('si ms-identidad no responde, al motor le da igual', async () => {
+    // ── ESTA PRUEBA CAMBIA DE SENTIDO EN EL PASO 7 ─────────────────────────
+    //
+    // Decía «el motor sigue haciendo su trabajo»: generar cuentas y marcar mora era lo
+    // principal y avisar lo accesorio, así que un fallo de identidad no podía parar lo
+    // uno por lo otro. Era una prueba sobre una DEGRADACIÓN.
+    //
+    // Ahora no hay nada que degradar, porque el motor no llama a ms-identidad. La
+    // prueba se queda porque la afirmación sigue valiendo —y de hecho es más fuerte—
+    // pero lo que comprueba es que la dependencia ya no existe: el barrido funciona con
+    // identidad caída no porque lo tolere, sino porque no la necesita.
     const { idContrato } = escenario();
     const haceSieteDias = sumarDias(hoyEnZonaNegocio(), -7);
 
@@ -389,5 +439,172 @@ describe('Politica de fallo del motor', () => {
     expect(actualizada!.estado).toBe(ESTADO_CUENTA_EN_MORA);
 
     identidadFalsa().levantar();
+  });
+});
+
+describe('El motor AVISA con eventos, no con correos', () => {
+  jest.setTimeout(20000);
+
+  /**
+   * ── QUE SE COMPRUEBA AQUI, Y POR QUE NO SE PODIA COMPROBAR ANTES ──────────
+   *
+   * Hasta el paso 7 los cuatro avisos del motor eran llamadas a `enviarCorreo`, que
+   * se tragaba los fallos con un `console.error`. No habia nada que afirmar: ni que
+   * el aviso hubiera salido, ni a quien, ni con que datos. Una suite verde era
+   * compatible con un motor que no avisaba a nadie.
+   *
+   * Ahora cada aviso es una fila en `financiero.eventos_salida`, con su carga. Eso es
+   * lo que hace estas pruebas posibles, y es un argumento a favor del cambio que no
+   * estaba en la lista: un aviso que se puede comprobar es un aviso que se puede
+   * mantener.
+   */
+
+  test('generar una cuenta de cobro emite CuentaCobroGenerada con su destinatario', async () => {
+    // El mismo patrón que el resto de la suite: el corte cae dentro de la ventana de dos
+    // días, y se pone un año atrás para que el periodo que toca facturar NO sea el
+    // primero — el primero es del consumidor del evento y el barrido lo salta siempre.
+    const pasadoManana = sumarDias(hoyEnZonaNegocio(), 2);
+    const { idContrato, inquilino: arrendatario } = escenario({
+      fecha_inicio_corte: sumarDias(pasadoManana, -365),
+      canon: 1234000,
+    });
+
+    await procesarContratos();
+
+    const cuenta = await CuentaCobro.findOne({
+      where: { id_contrato: idContrato },
+      order: [['inicio', 'DESC']],
+    });
+    expect(cuenta).not.toBeNull();
+
+    const eventos = await eventosDeSalida('CuentaCobroGenerada');
+    const suyo = eventos.find((e) => e.payload['id_cuenta_cobro'] === cuenta!.id_cuenta_cobro);
+
+    expect(suyo).toBeDefined();
+    // El destinatario va como IDENTIFICADOR, no como correo: un correo pertenece a
+    // identidad.usuarios y a nadie mas.
+    expect(suyo!.payload['id_inquilino']).toBe(arrendatario.sub);
+    expect(JSON.stringify(suyo!.payload)).not.toContain('@');
+    // Y el periodo completo, no un dia del mes suelto como decia el correo anterior.
+    expect(suyo!.payload['inicio']).toBe(cuenta!.inicio);
+    expect(suyo!.payload['fin']).toBe(cuenta!.fin);
+    expect(Number(suyo!.payload['valor'])).toBe(1234000);
+    // Ordena por cuenta de cobro: los avisos de UNA cuenta cuentan una historia.
+    expect(suyo!.clave_orden).toBe(cuenta!.id_cuenta_cobro);
+  });
+
+  test('no hay aviso sin su cuenta de cobro: van en la misma transacción', async () => {
+    // La correspondencia comprobable sin inyectar un fallo, y en la dirección que
+    // importa: si la transacción no fuera una, podría quedar un evento anunciando una
+    // cuenta que el ROLLBACK se llevó — es decir, un correo que le dice a alguien que
+    // tiene una factura que no existe.
+    //
+    // La dirección contraria no se comprueba aquí sobre TODAS las filas a propósito:
+    // varias pruebas de esta suite crean cuentas con `CuentaCobro.create` directamente,
+    // sin pasar por `emitirCuentaCobro`, para montar escenarios de mora. Ésas no tienen
+    // aviso y no deben tenerlo.
+    const eventos = await eventosDeSalida('CuentaCobroGenerada');
+    expect(eventos.length).toBeGreaterThan(0);
+
+    for (const evento of eventos) {
+      const id = evento.payload['id_cuenta_cobro'] as string;
+      expect(await CuentaCobro.findByPk(id)).not.toBeNull();
+    }
+  });
+
+  test('la mora emite CuentaCobroEnMora a las DOS partes, con la dirección', async () => {
+    const { idContrato, inquilino: arrendatario, propietario: duenio } = escenario();
+    const haceSieteDias = sumarDias(hoyEnZonaNegocio(), -7);
+
+    const cuenta = await CuentaCobro.create({
+      id_contrato: idContrato,
+      detalle: 'Canon con mora anunciada',
+      valor: 800000,
+      inicio: haceSieteDias,
+      fin: sumarDias(haceSieteDias, 29),
+      estado: ESTADO_CUENTA_PENDIENTE,
+    });
+
+    await procesarPagos();
+
+    // El cambio de estado ocurrio...
+    const actualizada = await CuentaCobro.findByPk(cuenta.id_cuenta_cobro);
+    expect(actualizada!.estado).toBe(ESTADO_CUENTA_EN_MORA);
+
+    // ...y su aviso tambien, en la misma transaccion. No puede haber una mora sin aviso
+    // ni un aviso sin mora.
+    const eventos = await eventosDeSalida('CuentaCobroEnMora');
+    const suyo = eventos.find((e) => e.payload['id_cuenta_cobro'] === cuenta.id_cuenta_cobro);
+
+    expect(suyo).toBeDefined();
+    // UN evento para las DOS partes: decidir que al inquilino se le habla de «tu pago» y
+    // al propietario de «el pago del inmueble X» es de ms-notificaciones.
+    expect(suyo!.payload['id_inquilino']).toBe(arrendatario.sub);
+    expect(suyo!.payload['id_propietario']).toBe(duenio.sub);
+    // La direccion SI viaja: es el ASUNTO del mensaje, no un dato de contacto.
+    expect(suyo!.payload['direccion_inmueble']).toBe('Calle 123 #45-67');
+    expect(suyo!.payload['dias_de_mora']).toBe(7);
+  });
+
+  test('un segundo barrido no vuelve a anunciar la misma mora', async () => {
+    // El estado de la cuenta hace de bitacora: la condicion exige que venga de
+    // PENDIENTE, asi que una segunda pasada no cambia el estado y no anota el evento.
+    // Sin eso, un barrido repetido mandaria el mismo correo de mora otra vez — y un
+    // correo no se puede recoger.
+    const antes = (await eventosDeSalida('CuentaCobroEnMora')).length;
+
+    await procesarPagos();
+
+    expect((await eventosDeSalida('CuentaCobroEnMora')).length).toBe(antes);
+  });
+
+  test('el aviso previo emite CuentaCobroPorVencer con la FECHA de la mora', async () => {
+    const { idContrato } = escenario();
+    // DIAS_AVISO_PREVIO es 4: el aviso sale el cuarto dia desde el corte.
+    const corte = sumarDias(hoyEnZonaNegocio(), -DIAS_AVISO_PREVIO);
+
+    const cuenta = await CuentaCobro.create({
+      id_contrato: idContrato,
+      detalle: 'Canon por vencer',
+      valor: 500000,
+      inicio: corte,
+      fin: sumarDias(corte, 29),
+      estado: ESTADO_CUENTA_PENDIENTE,
+    });
+
+    await procesarPagos();
+
+    const eventos = await eventosDeSalida('CuentaCobroPorVencer');
+    const suyo = eventos.find((e) => e.payload['id_cuenta_cobro'] === cuenta.id_cuenta_cobro);
+
+    expect(suyo).toBeDefined();
+    // Una FECHA y no «mañana»: el correo anterior decia «tienes hasta mañana», que era
+    // cierto en el instante del sendMail porque el envio iba dentro del barrido. Con el
+    // bus hay una ventana que los reintentos estiran, y una frase relativa se vuelve
+    // falsa sola.
+    expect(suyo!.payload['entra_en_mora_el']).toBe(sumarDias(corte, DIAS_PARA_MORA));
+
+    // Y esta cuenta NO se marco en mora: el aviso previo no cambia nada en la base.
+    const actualizada = await CuentaCobro.findByPk(cuenta.id_cuenta_cobro);
+    expect(actualizada!.estado).toBe(ESTADO_CUENTA_PENDIENTE);
+  });
+
+  test('ningún evento del motor lleva una dirección de correo', async () => {
+    // La regla, comprobada sobre TODO lo que el motor ha emitido en esta suite. Es la
+    // forma de atrapar a quien añada `email` a una carga «porque ya lo tenia a mano».
+    const todos = [
+      ...(await eventosDeSalida('CuentaCobroGenerada')),
+      ...(await eventosDeSalida('CuentaCobroPorVencer')),
+      ...(await eventosDeSalida('CuentaCobroEnMora')),
+    ];
+
+    expect(todos.length).toBeGreaterThan(0);
+
+    for (const evento of todos) {
+      const texto = JSON.stringify(evento.payload);
+      expect(texto).not.toContain('@');
+      expect(evento.payload['email']).toBeUndefined();
+      expect(evento.payload['destinatario']).toBeUndefined();
+    }
   });
 });

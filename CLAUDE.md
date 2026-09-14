@@ -31,12 +31,14 @@ sus nombres**, no los valores de muestra.
 
 ## Estado actual
 
-Pasos 1 a 5 completados, y el paso 6 **entero**: 6a, 6b, 6c, 6d y 6e. **El gateway
-dejó de ser un monolito**: no le queda ninguna tabla, ni modelos, ni conexión a
-PostgreSQL. Las ocho tablas de dominio del Capítulo 2 están completas y repartidas
-entre **los cuatro microservicios de dominio**, con el bus de eventos en pie y con
-`ContratoFormalizado` alimentando por fin la creación en cadena que el Capítulo 2
-especifica.
+**Pasos 1 a 7 completados. Los CINCO servicios del catálogo están extraídos** y no
+queda ninguno por crear: el paso 8 es despliegue.
+
+El gateway dejó de ser un monolito en el 6e —no le queda ninguna tabla, ni modelos, ni
+conexión a PostgreSQL— y las ocho tablas de dominio del Capítulo 2 están repartidas
+entre los cuatro microservicios de dominio. El paso 7 añade el quinto, que no tiene
+ninguna: **ningún servicio de dominio sabe ya que existe SMTP**, y los dos mailers que
+vivían en Identidad y en Financiero se borraron. El correo tiene un solo sitio.
 
 - `apps/gateway/` — el antiguo `backend/`. Express en JavaScript (CommonJS), y desde
   el paso 6e **sin Sequelize, sin modelos y sin base de datos**. Le quedan cuatro
@@ -51,7 +53,8 @@ especifica.
 - `packages/contracts/` — DTOs en TypeScript de los endpoints documentados. Casi
   todo son tipos, salvo los **catálogos cerrados** de `inmuebles.ts` (`tipo`,
   `estado`), que emiten JavaScript porque los comparten el servicio, el frontend
-  y el `CHECK` de la migración.
+  y el `CHECK` de la migración. **ms-notificaciones no lo consume**: no tiene API
+  pública, así que no comparte ningún DTO con el frontend.
 - `packages/shared/` — verificación local del JWT y de revocados, autenticación
   entre servicios, caché de invalidación, error estándar, cliente HTTP, **el bus
   de eventos completo** —tipos (`eventos.ts`), tabla de salida y publicador
@@ -62,9 +65,9 @@ especifica.
   Financiero, que construye el periodo de cada cuenta de cobro; duplicarla habría
   sido tener dos calendarios que nada sincroniza.
 - `database/` — migraciones SQL versionadas, una carpeta por esquema
-  (`identidad/`, `inmuebles/`, `contratos/`, `financiero/`). Reemplazan a
-  `sequelize.sync()`; ver `docs/adr/0003`. **`dominio/` ya no existe**: se vació con
-  el paso 6e y se fue con el aplicador de migraciones del gateway.
+  (`identidad/`, `inmuebles/`, `contratos/`, `financiero/`, `notificaciones/`).
+  Reemplazan a `sequelize.sync()`; ver `docs/adr/0003`. **`dominio/` ya no existe**:
+  se vació con el paso 6e y se fue con el aplicador de migraciones del gateway.
 - `services/ms-identidad/` — primer microservicio real y **ya en producción de la
   demo**. TypeScript `strict`, puerto 3011, esquema PostgreSQL propio (`identidad`).
   Sirve `/api/auth` y `/api/usuarios`; el gateway se los reenvía por la costura.
@@ -87,8 +90,17 @@ especifica.
   `Transacciones` y su bitácora de eventos procesados. Sirve `/api/pagos` —incluidos
   los dos comprobantes en PDF y la anulación— y se lleva el **motor** completo
   (`procesarContratos`, `procesarPagos`, `npm run motor`). Es el **segundo consumidor
-  del bus**: crea la primera cuenta de cobro al recibir `ContratoFormalizado`. Con él,
-  el gateway se queda sin tablas.
+  del bus** —crea la primera cuenta de cobro al recibir `ContratoFormalizado`— y desde
+  el paso 7 también **productor**, con su propia tabla de salida: es el primer servicio
+  del sistema que hace las dos cosas, y las dos mitades caben en la misma transacción.
+  Con él, el gateway se quedó sin tablas.
+- `services/ms-notificaciones/` — quinto y último servicio, subdominio **Genérico**.
+  TypeScript `strict`, puerto 3015, esquema propio (`notificaciones`) con **ninguna
+  tabla de dominio**: sólo su bitácora de eventos procesados y la de envíos.
+  **No tiene API pública** —no aparece en la costura ni en la matriz RBAC— y su única
+  entrada es `POST /interno/eventos`. Es el **único sitio del sistema que habla SMTP**,
+  y se llevó las cinco plantillas de correo que estaban incrustadas en el código de
+  otros dos servicios. Ver `docs/adr/0019`.
 - `docs/erd/schema-legacy.sql` — modelo viejo, histórico. **No usar como referencia.**
 
 **El gateway no tiene NINGUNA tabla.** Todo lo que necesita lo pide por HTTP y lo
@@ -100,6 +112,21 @@ cada 15 s; ver `docs/adr/0008`.
 el paso 6d la tabla de salida y el publicador se mudaron a `ms-contratos`, que es quien
 escribe el contrato. `public.eventos_salida` se retiró con la migración que retiraba los
 contratos, y con ella el último cambio de dominio que el gateway anunciaba.
+
+**Y desde el paso 7 hay TRES productores**: `ms-contratos`, `ms-identidad` y
+`ms-financiero`, cada uno con su tabla de salida en su esquema. Las dos últimas no
+trajeron ni una línea de mecanismo nuevo —el bus vive en `packages/shared` y se hereda
+con dos llamadas a función— que es el argumento a favor de haberlo puesto allí en el
+paso 5, cobrado.
+
+**Sólo una de las tres guarda un secreto, y por poco tiempo.** El sobre de
+`RecuperacionSolicitada` lleva el token de restablecimiento EN CLARO, porque el consumidor
+construye con él el enlace del correo — mientras `identidad.tokens_recuperacion` guarda
+sólo su SHA-256 precisamente para que leer esa tabla no permita restablecer la contraseña
+de nadie. Se acota borrando el `payload` **en la misma sentencia** que marca la fila como
+entregada (`tiposRedactados` en `packages/shared/src/salida.ts`): si fueran dos
+operaciones, una caída entre ellas dejaría el token legible indefinidamente. Ver
+`docs/adr/0019`.
 
 **La política de fallo no es la misma en los dos casos, y la distinción importa.**
 Componer datos para *decorar* una respuesta degrada: si el servicio no contesta, la
@@ -140,8 +167,10 @@ Lo que el paso 3a ya dejó hecho: `Usuarios` + `Roles` + `RolesUsuario` (adiós 
 `propietarios` e `inquilinos`), UUID en todas las claves, columnas de auditoría,
 claims nuevos (`sub`/`email`/`roles`/`jti`), `logout` con `TokensRevocados`, token en
 memoria en la SPA y descargas por blob. Después llegaron el build en contexto raíz, la
-matriz RBAC, la extracción de los dos servicios y el bus. Falta el paso 6: separar
-`Pago`/`Abono` en `Cuentas_cobro`/`Transacciones` y extraer Contratos y Financiero.
+matriz RBAC, la extracción de los dos servicios y el bus. Y después el paso 6 entero
+—separar `Pago`/`Abono` en `Cuentas_cobro`/`Transacciones`, y extraer Contratos y
+Financiero— y el paso 7, que saca Notificaciones. **No falta ningún servicio: falta el
+despliegue.**
 
 **Contratos habla el idioma del Capítulo 2** desde el paso 6a, y vive en su servicio
 desde el 6d: `inicio`, `fin`, `canon`, y `estado` como catálogo cerrado
@@ -191,7 +220,7 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0007` | Contraseña temporal para altas por terceros, con una columna nueva en `Usuarios`. |
 | `0008` | Caché de revocados en el gateway, con ventana de 15 s. Resuelve una decisión abierta; no se aparta del documento. |
 | `0009` | Autenticación entre servicios para `/interno`. Resuelve una decisión abierta; el documento no la contempla pero tampoco la contradice. |
-| `0010` | Recuperación de contraseña: endpoints, tabla de tokens, columna `contrasena_cambiada_en` y envío de correo desde `ms-identidad`. Esto último **debe desaparecer** en el paso 7, no documentarse. |
+| `0010` | Recuperación de contraseña: endpoints, tabla de tokens y columna `contrasena_cambiada_en`. El envío de correo desde `ms-identidad` ~~debe desaparecer en el paso 7~~ **desapareció en el paso 7: esa parte queda SALDADA**, no se documenta. El resto sigue pendiente de incorporar. |
 | `0011` | ~~El estado del inmueble deja de moverse dentro de la transacción del contrato.~~ **Reemplazada por `0012` en el paso 5.** La garantía que registraba como perdida está saldada; no hay nada que tramitar. |
 | `0012` | Bus de eventos sobre PostgreSQL con patrón outbox, en vez de Dapr. Resuelve una decisión abierta y **no se aparta del documento**, que ordena el mecanismo pero no la tecnología. Lo que sí conviene incorporar es la **garantía de entrega**: al-menos-una-vez con descarte de repetidos. |
 | `0013` | El evento `ContratoFinalizado`, que el documento no contempla. **Esta sí es desviación**: añade una pieza al diseño de comunicación entre servicios. |
@@ -199,7 +228,8 @@ incorporar al Capítulo 2** por el proceso de la sección 13.3.2 del PMP:
 | `0015` | `Transacciones` conserva `observaciones`, que el modelo canónico no lista. **Es desviación por adición**: la imprime el comprobante en «Referencia trans.». |
 | `0016` | Anulación de transacciones: endpoint, estado `ANULADA` y 409 al repetir. **Es desviación**: el documento no contempla ni el endpoint ni el estado. |
 | `0017` | La pertenencia de un contrato se resuelve preguntando a ms-inmuebles, sin denormalizar. Resuelve una decisión abierta y **no se aparta del documento**; corrige además el emplazamiento que el `0010` daba a la reemisión de la contraseña temporal, que se muda a ms-contratos. |
-| `0018` | Extracción de ms-financiero: la primera cuenta de cobro nace del evento, la mudanza copia y retira en una sola migración, `pdfService.js` se muda intacto con `allowJs`, y `verificar-mora` se unifica con el motor. **No se aparta del documento**: implementa la creación en cadena que el Capítulo 2 especifica y deja al gateway sin tablas, como ahí se describe. Lo que sí deja abierto —y **bloqueante para producción**— es el cron dentro del contenedor. |
+| `0018` | Extracción de ms-financiero: la primera cuenta de cobro nace del evento, la mudanza copia y retira en una sola migración, `pdfService.js` se muda intacto con `allowJs`, y `verificar-mora` se unifica con el motor. **No se aparta del documento**: implementa la creación en cadena que el Capítulo 2 especifica y deja al gateway sin tablas, como ahí se describe. El mailer del motor que dejaba pendiente **quedó SALDADO en el paso 7**. Lo que sigue abierto —y **bloqueante para producción**— es el cron dentro del contenedor. |
+| `0019` | Extracción de ms-notificaciones: cinco eventos que no llevan direcciones de correo, la bitácora de envíos como outbox de correos, el token de recuperación redactado al entregarlo y el mensaje de `/recuperar` en futuro. **No se aparta del documento**: crea el quinto servicio del catálogo y salda las desviaciones de correo del `0010` y del `0018`. **Sí es desviación por adición** una cosa: el alta manual de un cobro (`POST /api/pagos/cuentas-cobro`) pasa a notificar al inquilino, que antes no lo hacía. |
 
 La costura del gateway está en JavaScript por decisión documentada en
 `docs/adr/0002`: meter TypeScript ahí obligaba a montar build, cambiar el Dockerfile y
@@ -348,12 +378,20 @@ de los `jti` vigentes y la refresca periódicamente.
 | `ms-inmuebles` | Soporte | Inmuebles | 3012 |
 | `ms-contratos` | Core | Contratos, Anexos | 3013 |
 | `ms-financiero` | Core | Cuentas_cobro, Transacciones | 3014 |
-| `ms-notificaciones` | Genérico | ninguna | 3015 |
+| `ms-notificaciones` | Genérico | ninguna de dominio | 3015 |
 | `gateway` | — | **ninguna, y ya es literal** | 3001 |
 | `web` | — | — | 3000 |
 
 El gateway conserva el puerto 3001 a propósito: el frontend y la colección de Postman
 siguen funcionando durante toda la migración.
+
+**Los cinco están extraídos desde el paso 7.** `ms-notificaciones` es el único sin
+prefijo en la costura y sin filas en la matriz RBAC, porque no tiene endpoints públicos:
+sólo `POST /interno/eventos`. «Ninguna de dominio» es literal —no es dueño de ningún
+concepto del negocio— pero sí tiene dos tablas operativas en su esquema, de la misma
+familia que `TokensRevocados` o que las tablas de salida: la bitácora de eventos
+procesados, sin la cual mandaría un correo dos veces, y la de envíos, que es un outbox
+de correos. Ver `docs/adr/0019`.
 
 ---
 
@@ -374,7 +412,8 @@ Arriendos360/
 │                              (tipos, tabla de salida, publicador, consumidor)
 │                              y el calendario: regla del dia 31 y del periodo
 ├─ database/                   Migraciones y seeds, una carpeta por esquema:
-│                              identidad, inmuebles, contratos, financiero
+│                              identidad, inmuebles, contratos, financiero,
+│                              notificaciones
 ├─ infra/                      Dockerfiles, docker-compose, Bicep de Azure
 ├─ docs/                       ADRs, ERD, colección Postman
 └─ .github/workflows/
@@ -425,6 +464,12 @@ ruta?) y ABAC en el controlador (¿este recurso es suyo?). Ninguno reemplaza al 
 
 Coreografía, no orquestación: Contratos no llama a Financiero ni sabe que existe.
 
+**Y para avisar a las personas, desde el paso 7.** Es el segundo uso del bus y el que
+justifica que exista un subdominio Genérico: ms-identidad y ms-financiero anuncian hechos
+de su dominio, y `ms-notificaciones` decide a quién avisar y por qué canal. Ninguno de los
+dos sabe que existe SMTP, y ninguno de los dos llama a Notificaciones — lo entrega el
+publicador, que es transporte y no orquestación (ver la cabecera de `entrega.ts`).
+
 **Esto está implementado desde el paso 6e**, y con ello el bus deja de tener un solo
 consumidor y un solo efecto. La consecuencia que hay que tener presente antes de tocar
 el motor: **`procesarContratos()` ya NO genera la primera cuenta de cobro**. La primera
@@ -465,8 +510,37 @@ agregado del emisor, que es donde corresponde. **El rastro no se pierde, cambia 
 
 | Evento | Emisor | Carga | Consumidores |
 |---|---|---|---|
-| `ContratoFormalizado` | `ms-contratos` | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte` | **DOS:** `ms-inmuebles` → `arrendado`, y `ms-financiero` → primera cuenta de cobro. |
+| `ContratoFormalizado` **v2** | `ms-contratos` | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte`, `id_inquilino` | **DOS:** `ms-inmuebles` → `arrendado`, y `ms-financiero` → primera cuenta de cobro. |
 | `ContratoFinalizado` | ídem | `id_contrato`, `id_inmueble` | `ms-inmuebles` → `disponible`. Ver `docs/adr/0013`. |
+| `RecuperacionSolicitada` | `ms-identidad` | `id_usuario`, `token`, `expira_en` | `ms-notificaciones` → correo con el enlace. |
+| `ContrasenaTemporalEmitida` | ídem | `id_usuario`, `motivo` (`ALTA`\|`REEMISION`) | `ms-notificaciones` → aviso de que la cuenta existe. **No lleva la contraseña.** |
+| `CuentaCobroGenerada` | `ms-financiero` | `id_cuenta_cobro`, `id_contrato`, `id_inquilino`, `valor`, `inicio`, `fin` | `ms-notificaciones` → recibo al inquilino. |
+| `CuentaCobroPorVencer` | ídem | ídem + `id_propietario`, `entra_en_mora_el`, `direccion_inmueble` | `ms-notificaciones` → aviso al inquilino **y** al propietario. |
+| `CuentaCobroEnMora` | ídem | ídem + `dias_de_mora` | `ms-notificaciones` → aviso a los dos. |
+
+**NINGÚN EVENTO LLEVA UNA DIRECCIÓN DE CORREO, y es una regla, no un olvido.** Llevan el
+`id_usuario`, y `ms-notificaciones` resuelve el destinatario preguntando a ms-identidad al
+manejar el evento, que es el único momento en que la respuesta es actual. Un correo
+pertenece a `identidad.usuarios` y a nadie más: copiarlo en un sobre convertiría a cada
+emisor en responsable de mantenerlo al día y dejaría copias viejas en dos tablas de salida
+que no tienen forma de enterarse de que alguien cambió su correo.
+
+Lo que **sí** viaja es el *asunto* del mensaje —la dirección del inmueble, el valor, el
+periodo— porque no son datos de contacto sino el hecho que se anuncia. Mismo criterio que
+puso `canon` aquí. Y `id_propietario` viaja como foto del momento: si el inmueble cambia
+de dueño en la ventana de entrega, el aviso va al anterior, que es quien lo era cuando
+ocurrió. Es distinto de denormalizarlo, que es lo que `docs/adr/0017` prohíbe porque allí
+se usa para **autorizar**.
+
+Efecto lateral que no se buscaba: **el motor perdió una petición HTTP por barrido**. Ya no
+llama a ms-identidad para nada.
+
+**`ContratoFormalizado` subió a la versión 2 en el paso 7** para llevar `id_inquilino`,
+que es lo que necesita el aviso de la primera cuenta de cobro. El campo es **opcional** a
+propósito: un sobre versión 1 que estuviera esperando en la tabla de salida durante el
+despliegue tiene que seguir creando su cuenta, y el consumidor se limita a no notificar.
+Facturar sin avisar es una degradación aceptable; no facturar, no. Es la primera vez que
+`VERSION_EVENTO` sirve para algo.
 
 **`ContratoFormalizado` tiene dos consumidores desde el paso 6e**, y eso cambia algo para
 el que ya estaba: la fila de la tabla de salida se marca entregada cuando aceptan **los
@@ -629,13 +703,19 @@ cada prefijo y la que imprime el listado de arranque.
      a aplicar la misma regla de mora. Ver `docs/adr/0018`.
    - ~~Y en algún punto de los tres: obtener datos del contrato por API en vez de por
      `include`.~~ **Hecho.** No queda ningún `include` que cruce frontera.
-7. **`ms-notificaciones`.** Mailer y recordatorios. **Se lleva dos deudas que ya tienen
-   dueño:** el correo de recuperación de ms-identidad (`docs/adr/0010`) y los avisos del
-   motor de ms-financiero (`docs/adr/0018`). El segundo no es mover un archivo: el motor
-   pasa a **publicar eventos** —«cuenta próxima a vencer», «cuenta en mora»— y
-   Notificaciones decide a quién avisar. Eso convierte a ms-financiero en productor del
-   bus, con su propia tabla de salida.
-8. **Azure Container Apps.** Bicep, pipeline y terminación SSL. Al final.
+7. ~~**`ms-notificaciones`.** Mailer y recordatorios, con las dos deudas de correo que
+   ya tenían dueño.~~ **Hecho.** Cinco eventos, ninguno con direcciones de correo; los
+   dos mailers borrados y `Notificador` retirado **con su interfaz**, no sustituyendo la
+   implementación —sus tres campos eran precisamente los que un evento no lleva—. El
+   motor publica en vez de mandar, así que ms-financiero es ahora el primer servicio que
+   consume Y produce, y de paso perdió una petición HTTP por barrido. Y el paso descubrió
+   algo que llevaba tiempo oculto: el correo de desarrollo **nunca había funcionado**
+   —credenciales inventadas contra Ethereal, y dos mailers que se tragaban el error—; se
+   vio en cuanto el mecanismo nuevo dejó de tragárselo. Ver `docs/adr/0019`.
+8. **Azure Container Apps.** Bicep, pipeline y terminación SSL. Al final. **Es lo único
+   que queda**, y no crea ningún servicio nuevo: los cinco están extraídos. Lo que hay
+   que hacer ahí está en «Decisiones abiertas», y lo primero de la lista es el
+   **trabajo programado del motor**, que es la única deuda marcada como bloqueante.
 
 ---
 
@@ -790,6 +870,18 @@ borde y **no** forma parte de `npm test`; se lanza con `npm run test:integracion
 Al extraer un servicio nuevo: se lleva sus pruebas, el gateway gana un doble suyo, y la
 suite de integración gana un camino sólo si es crítico para la demostración.
 
+**El paso 7 es la excepción a la primera mitad de esa frase, y conviene saber por qué.**
+`ms-notificaciones` no aparece en ningún doble del gateway, porque el gateway no lo llama:
+no está en la costura ni en la matriz. Quien gana un doble suyo es **ms-identidad**, que
+es quien le entrega eventos. Y el servicio nuevo sólo necesita UN doble —ms-identidad—
+porque sólo habla con un servicio y sólo para una cosa: resolver el correo de un
+`id_usuario`.
+
+**Y sí gana un camino de integración**, porque cumple el criterio de sobra: la
+recuperación de contraseña recorre cuatro servicios, el paso 7 la partió por la mitad, y
+el síntoma de que una de las fronteras nuevas esté mal es el peor posible — nadie recibe
+el correo y no hay ningún error en ninguna parte.
+
 **Y el doble consume eventos como el servicio real.** El de ms-inmuebles no sólo aplica el
 efecto: descarta repetidos por `id_evento`. Si sólo hiciera lo primero, un consumidor sin
 idempotencia pasaría las suites en verde y fallaría en producción a la primera reentrega —
@@ -809,8 +901,10 @@ npm test --workspace=services/ms-identidad                # pruebas de un servic
 npm test --workspace=services/ms-inmuebles                # idem
 npm test --workspace=services/ms-contratos                # idem
 npm test --workspace=services/ms-financiero               # idem
+npm test --workspace=services/ms-notificaciones          # idem
 npm test --workspaces --if-present                        # todas, contra dobles
 npm run motor --workspace=services/ms-financiero          # barrido manual del motor
+npm run enviar --workspace=services/ms-notificaciones     # barrido manual de los envios
 npm run test:integracion                                  # caminos criticos, stack arriba
 npm run seed --workspace=services/ms-identidad            # usuarios de prueba
 ```
@@ -832,7 +926,12 @@ Pruebas con `NODE_ENV=test`, apuntando a `arriendos360_test`.
 
 ## Decisiones abiertas
 
-Resuélvelas con un ADR en `docs/adr/` cuando llegue el momento, no antes:
+Resuélvelas con un ADR en `docs/adr/` cuando llegue el momento, no antes.
+
+**Todo lo que queda aquí es del paso 8**, que es el único que falta: los cinco servicios
+están extraídos y ninguna de estas decisiones exige tocar el reparto de tablas ni el bus.
+Las tres del final —clave por servicio, limitación de tasa y el cron del motor— son de
+infraestructura; las otras son de producto.
 
 **El cron del motor no dispara con scale-to-zero. 🔴 BLOQUEANTE PARA PRODUCCIÓN.**
 `node-cron` programa el barrido diario DENTRO del proceso de ms-financiero. Funciona
@@ -863,9 +962,14 @@ Reconsiderar en el paso 8, cuando Container Apps pueda escalar los servicios. Ve
 **Frecuencia de refresco de la caché de revocados.** Ventana entre el logout y su efecto
 real. Son ya CUATRO cachés —el gateway y los tres servicios que verifican tokens— y las
 cuatro con el mismo intervalo de 15 s, así que la ventana observable es la misma en
-todas. Cuidado con dejar `REVOCADOS_INTERVALO_MS=` vacía en un `.env`: `Number('')` es
-`0` y eso convierte el refresco en un bucle. Los servicios caen al defecto con `||`, no
-con `??`, justamente por eso.
+todas. **Siguen siendo CUATRO después del paso 7**: `ms-notificaciones` no verifica
+tokens de usuario porque nunca le llega ninguno, así que no tiene caché ni la necesita.
+
+Cuidado con dejar `REVOCADOS_INTERVALO_MS=` vacía en un `.env`: `Number('')` es `0` y eso
+convierte el refresco en un bucle. Los servicios caen al defecto con `||`, no con `??`,
+justamente por eso. **El paso 7 demostró que el aviso no era paranoia**: la misma trampa
+con `EMAIL_USER=` y `??` mantuvo el correo de desarrollo roto en silencio desde que
+existe. Ver «Trampas conocidas».
 
 **Listados de un usuario con doble rol.** La visibilidad se decide con una disyunción:
 eres el dueño del inmueble **o** el inquilino del contrato. El criterio es correcto —la
@@ -937,18 +1041,58 @@ registra dinero que de verdad salió. Ver `docs/adr/0016`.
 **Comprobantes.** El frontend tiene una pantalla que no aparece entre las cinco del
 documento (UI-01 a UI-05). Decidir si se documenta o se absorbe en Pagos.
 
+**Un usuario sin correo no recibe nada, y sólo se ve en el log.** Abierta desde el paso 7.
+Cuando ms-identidad devuelve un usuario sin correo, el manejador omite el envío y registra
+un aviso alto, pero no hay ningún sitio en el producto donde un propietario vea «a este
+inquilino no se le pudo avisar». No se resolvió en el 7 porque resolverlo bien es pantalla,
+no mecanismo. Ver `docs/adr/0019`.
+
+**Reencolar un envío apartado exige un `UPDATE` a mano.** `notificaciones.envios` deja a la
+vista las filas apartadas y las que quedaron en `enviando` —y el arranque las grita— pero
+devolverlas a la cola no tiene endpoint ni script. Es la misma situación que la tabla de
+salida del bus tiene desde el paso 5 con `reencolar()`, y se acepta por la misma razón: lo
+primero que hacía falta era que el problema se viera. `npm run enviar` sí barre las
+pendientes.
+
+**Un solo canal de notificación.** `envios.canal` es un catálogo abierto con un único
+valor, `EMAIL`, y la tabla está preparada para más. El día que haya SMS o aviso en la app,
+lo que cambia es la plantilla y el transporte, no el mecanismo — ni el reparto de eventos,
+que ya viaja con identificadores y no con direcciones.
+
 ---
 
 ## Trampas conocidas
 
-**El correo no llega a nadie.** Con `EMAIL_USER` sin definir, el mailer apunta a un
-buzón de pruebas (Ethereal). El enlace de recuperación se genera y se envía, pero para
-verlo en desarrollo hay que leerlo del log o de `identidad.tokens_recuperacion`. Es la
-misma razón por la que la contraseña temporal del ADR 0007 se entrega en mano.
+~~**El correo no llega a nadie.** Con `EMAIL_USER` sin definir, el mailer apunta a un
+buzón de pruebas (Ethereal)… Son **dos** mailers desde el paso 6e, y los dos
+provisionales.~~ **Cambiado en el paso 7, y lo que había escrito aquí era falso a
+medias.**
 
-Son **dos** mailers desde el paso 6e, y los dos provisionales: el de ms-identidad, para
-la recuperación, y el de ms-financiero, para los avisos del motor. Los dos se van en el
-paso 7 y el segundo no se muda sin más — se convierte en publicación de eventos.
+Hay **un** mailer, en `ms-notificaciones`, y no es provisional: es el sitio que el
+Capítulo 2 le asigna al canal. Los dos anteriores se borraron.
+
+Y lo que decía esta trampa —«el enlace se genera y se envía»— **no era cierto**. Los dos
+mailers apuntaban a `smtp.ethereal.email` con `test@example.com` / `password`, que no son
+credenciales de Ethereal: cada envío fallaba con «Missing credentials for PLAIN» y los dos
+se tragaban el error con un `console.error`. En desarrollo **nunca salió un correo, ni
+uno**, y el proyecto lo daba por funcionando.
+
+Se descubrió en el paso 7 por la razón exacta que justificaba el cambio: el mecanismo
+nuevo **propaga** el fallo en vez de tragárselo, y las filas se quedaron en la bitácora
+con su `ultimo_error` a la vista. El fallo no era nuevo; lo nuevo es que se vea.
+
+**Cómo funciona ahora.** Sin `EMAIL_USER` se usa el transporte JSON de nodemailer: el
+mensaje se acepta, se registra como `enviado` y **sale entero por el log** —el único sitio
+donde se puede leer el enlace de recuperación en desarrollo— pero **no sale de la
+máquina**. El arranque lo avisa. Con credenciales de verdad, el transporte es SMTP.
+
+Ojo con `??` al leer estas variables: Compose pasa `EMAIL_USER=` cuando la del host está
+vacía, y eso es una **cadena vacía**, no `undefined`. Es la misma trampa que CLAUDE.md ya
+anotaba para `REVOCADOS_INTERVALO_MS`, y es la que mantuvo esto oculto.
+
+Lo que **no** cambia es la razón por la que la contraseña temporal del ADR 0007 se entrega
+en mano: el sistema no puede garantizar que un correo llegue. El evento
+`ContrasenaTemporalEmitida` avisa de que la cuenta existe; no la abre.
 
 ~~**`/uploads/` se sirve sin autenticación.**~~ **Resuelto en el paso 6b.** No queda
 ninguna ruta que sirva archivos sin pasar por la matriz: los anexos salen sólo por

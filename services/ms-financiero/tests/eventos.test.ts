@@ -39,6 +39,7 @@ import {
   conServicio,
   entregarEvento,
   escenario,
+  eventosDeSalida,
   prepararEntorno,
 } from './utiles/entorno';
 
@@ -337,5 +338,128 @@ describe('Confianza cero sobre lo que llega por el bus', () => {
     expect(buena.respuesta.statusCode).toBe(200);
     expect(buena.respuesta.body.repetido).toBe(false);
     expect(await cuentasDe(idContrato)).toHaveLength(1);
+  });
+});
+
+describe('Y desde el paso 7 el consumidor también PRODUCE', () => {
+  /**
+   * ── TRES ESCRITURAS EN UNA TRANSACCION ────────────────────────────────────
+   *
+   * Este servicio es el primero del sistema que consume y produce, y las dos mitades
+   * caben en la misma transaccion: la marca del `id_evento` que pone `crearConsumidor`,
+   * el INSERT de la cuenta de cobro y el registro de `CuentaCobroGenerada` en la tabla
+   * de salida. Mismo esquema, misma base.
+   *
+   * La consecuencia es la que interesa: no puede haber una cuenta sin su aviso, ni un
+   * aviso sin su cuenta, ni ninguna de las dos si el evento resulta ser repetido.
+   */
+
+  test('crear la primera cuenta anuncia CuentaCobroGenerada', async () => {
+    const { idContrato, idInmueble, inquilino } = escenario();
+
+    const { respuesta } = await entregarEvento(TIPO_CONTRATO_FORMALIZADO, {
+      id_contrato: idContrato,
+      id_inmueble: idInmueble,
+      canon: 2000,
+      fecha_inicio_corte: '2026-04-10',
+      id_inquilino: inquilino.sub,
+    });
+    expect(respuesta.statusCode).toBe(200);
+
+    const cuentas = await cuentasDe(idContrato);
+    expect(cuentas).toHaveLength(1);
+
+    const eventos = await eventosDeSalida('CuentaCobroGenerada');
+    const suyo = eventos.find(
+      (e) => e.payload['id_cuenta_cobro'] === cuentas[0]!.id_cuenta_cobro,
+    );
+
+    expect(suyo).toBeDefined();
+    expect(suyo!.payload['id_inquilino']).toBe(inquilino.sub);
+    expect(suyo!.payload['id_contrato']).toBe(idContrato);
+    expect(Number(suyo!.payload['valor'])).toBe(2000);
+    expect(suyo!.estado).toBe('pendiente');
+  });
+
+  test('una reentrega tampoco anuncia dos veces', async () => {
+    // La idempotencia cubre las DOS escrituras, no sólo la cuenta de cobro. Si la marca
+    // del evento protegiera una y no la otra, el inquilino recibiría dos correos por la
+    // misma factura — y un correo no se puede recoger.
+    const { idContrato, idInmueble, inquilino } = escenario();
+
+    const primera = await entregarEvento(TIPO_CONTRATO_FORMALIZADO, {
+      id_contrato: idContrato,
+      id_inmueble: idInmueble,
+      canon: 3000,
+      fecha_inicio_corte: '2026-05-10',
+      id_inquilino: inquilino.sub,
+    });
+
+    const avisosDelContrato = async () =>
+      (await eventosDeSalida('CuentaCobroGenerada')).filter(
+        (e) => e.payload['id_contrato'] === idContrato,
+      );
+
+    expect(await avisosDelContrato()).toHaveLength(1);
+
+    await entregarEvento(TIPO_CONTRATO_FORMALIZADO, primera.sobre.payload, primera.sobre);
+    await entregarEvento(TIPO_CONTRATO_FORMALIZADO, primera.sobre.payload, primera.sobre);
+
+    expect(await cuentasDe(idContrato)).toHaveLength(1);
+    expect(await avisosDelContrato()).toHaveLength(1);
+  });
+
+  test('un sobre VERSION 1, sin id_inquilino, factura igual y no avisa', async () => {
+    // ── EL CASO DEL DESPLIEGUE, Y LA RAZON DE QUE EL CAMPO SEA OPCIONAL ────
+    //
+    // `id_inquilino` llegó con la versión 2 del evento. En el despliegue del paso 7
+    // puede haber sobres versión 1 esperando en `contratos.eventos_salida`, y lanzar ahí
+    // sería apartar el evento tras diez intentos y dejar un contrato SIN FACTURAR por no
+    // poder mandar un correo.
+    //
+    // Así que la cuenta se crea y el aviso se omite. Facturar sin avisar es una
+    // degradación aceptable; no facturar, no.
+    const { idContrato, idInmueble } = escenario();
+
+    const { respuesta } = await entregarEvento(TIPO_CONTRATO_FORMALIZADO, {
+      id_contrato: idContrato,
+      id_inmueble: idInmueble,
+      canon: 4000,
+      fecha_inicio_corte: '2026-06-10',
+    } as never);
+
+    // Ni 400 ni 500: el evento se procesa.
+    expect(respuesta.statusCode).toBe(200);
+
+    // La cuenta está.
+    expect(await cuentasDe(idContrato)).toHaveLength(1);
+
+    // El aviso no.
+    const avisos = (await eventosDeSalida('CuentaCobroGenerada')).filter(
+      (e) => e.payload['id_contrato'] === idContrato,
+    );
+    expect(avisos).toHaveLength(0);
+  });
+
+  test('si el manejador falla, no queda ni cuenta ni aviso', async () => {
+    // La atomicidad por el lado del fallo. Un canon inválido hace fallar la validación
+    // de la carga, y entonces no puede quedar media cosa: ni la cuenta, ni el aviso, ni
+    // la marca del evento — porque si quedara la marca, el reintento del productor se
+    // descartaría como repetido y el contrato no se facturaría nunca.
+    const { idContrato, idInmueble, inquilino } = escenario();
+
+    const avisosAntes = (await eventosDeSalida('CuentaCobroGenerada')).length;
+
+    const { respuesta } = await entregarEvento(TIPO_CONTRATO_FORMALIZADO, {
+      id_contrato: idContrato,
+      id_inmueble: idInmueble,
+      canon: 0,
+      fecha_inicio_corte: '2026-07-10',
+      id_inquilino: inquilino.sub,
+    });
+
+    expect(respuesta.statusCode).toBe(500);
+    expect(await cuentasDe(idContrato)).toHaveLength(0);
+    expect((await eventosDeSalida('CuentaCobroGenerada')).length).toBe(avisosAntes);
   });
 });

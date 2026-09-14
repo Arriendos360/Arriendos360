@@ -20,12 +20,13 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
-import { cabeceraDeServicio, crearSobre } from 'arriendos360-shared';
+import { cabeceraDeServicio, crearSobre, filasDe } from 'arriendos360-shared';
 import type { SobreEvento, TipoEvento } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
 import { sequelize } from '../../src/config/database';
 import { recrearEsquema } from '../../src/database/migraciones';
+import { TABLA_SALIDA } from '../../src/eventos/salida';
 import {
   levantarDobleContratos,
   levantarDobleIdentidad,
@@ -270,4 +271,35 @@ export const entregarEvento = async <T extends TipoEvento>(
     .send(sobre);
 
   return { respuesta, sobre };
+};
+
+// ── La tabla de salida ──────────────────────────────────────────────────────
+//
+// Desde el paso 7 este servicio no sólo consume eventos: emite los tres avisos del
+// motor. Que el sobre no aparezca en ninguna respuesta —viaja por la red interna hacia
+// ms-notificaciones— hace que ésta sea la única forma de comprobar lo que de verdad se
+// emitió, igual que ocurre en la suite de integración con la tabla de ms-contratos.
+
+/** Una fila de `financiero.eventos_salida`, tal como la miran las pruebas. */
+export interface FilaDeSalida {
+  id_evento: string;
+  tipo: string;
+  version: number;
+  payload: Record<string, unknown>;
+  clave_orden: string | null;
+  estado: string;
+}
+
+/** Lo que hay en la tabla de salida, por orden de registro. */
+export const eventosDeSalida = async (tipo?: string): Promise<FilaDeSalida[]> => {
+  const filtro = tipo ? `WHERE tipo = :tipo` : ``;
+
+  const resultado = await sequelize.query(
+    `SELECT id_evento, tipo, version, payload, clave_orden, estado
+       FROM ${TABLA_SALIDA} ${filtro}
+      ORDER BY registrado_en ASC, id_evento ASC`,
+    tipo ? { replacements: { tipo } } : {},
+  );
+
+  return filasDe<FilaDeSalida>(resultado);
 };

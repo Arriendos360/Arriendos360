@@ -7,8 +7,15 @@
  * desvía del servicio real deja las suites en verde y el sistema roto.
  *
  * Por eso es corta y sólo recorre lo que no puede fallar en una demostración:
- * entrar, firmar un contrato y registrar un pago. No duplica cobertura de casos
- * borde; para eso están las suites de cada servicio.
+ * entrar, firmar un contrato, registrar un pago y —desde el paso 7— recuperar una
+ * contraseña. No duplica cobertura de casos borde; para eso están las suites de
+ * cada servicio.
+ *
+ * El último gana su sitio por el mismo criterio que los otros tres, aplicado a un
+ * camino que el paso 7 partió por la mitad: `/recuperar` ya no manda el correo,
+ * anota un evento que recorre ms-identidad → ms-notificaciones → ms-identidad
+ * otra vez. Son tres fronteras nuevas, y el síntoma de que una esté mal es el peor
+ * posible — nadie recibe el correo y no hay ningún error en ninguna parte.
  *
  * Requiere el stack levantado:
  *
@@ -428,7 +435,17 @@ describe('Caminos críticos', () => {
         const sobre = await eventoDe(guardado.id_contrato, 'ContratoFormalizado');
 
         assert.ok(sobre, 'el contrato debería haber dejado su evento en la tabla de salida');
-        assert.equal(sobre.version, 1);
+
+        // VERSION 2 desde el paso 7, cuando el sobre ganó `id_inquilino` para que la
+        // cuenta de cobro que nace del evento pueda anunciarse. Es la primera vez que
+        // este número cambia, y comprobarlo aquí es lo que hace que el campo sirva de
+        // algo: un consumidor que reciba un sobre viejo tiene que poder distinguirlo.
+        assert.equal(sobre.version, 2);
+        assert.equal(
+            sobre.payload.id_inquilino,
+            idInquilino,
+            'la versión 2 lleva el inquilino, que es a quien se le factura'
+        );
 
         // LA aserción del paso 6a: el evento dice lo que dice la fila.
         assert.equal(sobre.payload.fecha_inicio_corte, corte);
@@ -761,5 +778,214 @@ describe('Caminos críticos', () => {
             // base de desarrollo no es un entorno limpio y esta suite no
             // pretende serlo: por eso cada ejecución usa su propio sello.
         }
+    });
+});
+
+/**
+ * Recuperación de contraseña de punta a punta — paso 7.
+ *
+ * ── POR QUE ESTE CAMINO SI ENTRA EN LA SUITE DE INTEGRACION ─────────────────
+ *
+ * La convención dice que aquí sólo entra lo crítico para la demostración y lo que
+ * ningún doble puede tapar. Este camino cumple las dos cosas, y la segunda de forma
+ * especialmente clara: recorre CUATRO servicios —el gateway, ms-identidad,
+ * ms-notificaciones y otra vez ms-identidad— y el paso 7 lo partió justo por la mitad.
+ *
+ * Antes era una petición síncrona: `/recuperar` mandaba el correo y se sabía si había
+ * salido. Ahora ms-identidad anota un evento, su publicador lo entrega,
+ * ms-notificaciones resuelve el destinatario contra ms-identidad, redacta y su enviador
+ * manda. Cada una de esas cuatro fronteras es un contrato que un doble podría estar
+ * representando mal, y el síntoma sería el peor posible: nadie recibe el correo y no hay
+ * ningún error en ninguna parte.
+ *
+ * La prueba mira la BASE y no un buzón, por lo mismo que la suite ya mira
+ * `contratos.eventos_salida`: el correo no llega a nadie en desarrollo —Ethereal— así
+ * que la única constancia comprobable de que salió es la fila de
+ * `notificaciones.envios`. Y eso es, además, exactamente lo que el ADR 0019 prometía
+ * que se podría comprobar.
+ */
+describe('Recuperación de contraseña, de punta a punta', () => {
+    /** Una consulta suelta, con su propia conexión. Igual que `eventoDe`. */
+    const consultar = async (sql, parametros) => {
+        const cliente = new Client({
+            host: process.env.DB_HOST_TEST_INTEGRACION || 'localhost',
+            port: Number(process.env.DB_PORT || 5432),
+            database: process.env.DB_NAME || 'arriendos360_db',
+            user: process.env.DB_USER || 'postgres',
+            password: process.env.DB_PASSWORD
+        });
+
+        await cliente.connect();
+        try {
+            const { rows } = await cliente.query(sql, parametros);
+            return rows;
+        } finally {
+            await cliente.end();
+        }
+    };
+
+    const email = `recupera_${SELLO}@test.com`;
+    let idUsuario;
+    let token;
+
+    before(async () => {
+        const registro = await pedir('POST', '/api/auth/registro', {
+            cuerpo: {
+                nombres: 'Recu',
+                apellidos: 'Pera',
+                email,
+                contrasena: 'Original123',
+                telefono: '3001234567',
+                documento: `REC${SELLO}`
+            }
+        });
+
+        assert.equal(registro.estado, 201, 'el registro del caso de recuperación debería funcionar');
+
+        const login = await pedir('POST', '/api/auth/login', {
+            cuerpo: { email, contrasena: 'Original123' }
+        });
+        idUsuario = login.datos.usuario.id;
+    });
+
+    it('la solicitud responde prometiendo un envío FUTURO, no uno hecho', async () => {
+        const respuesta = await pedir('POST', '/api/auth/recuperar', { cuerpo: { email } });
+
+        assert.equal(respuesta.estado, 200);
+
+        // El cambio de garantía del paso 7, en el texto que ve la persona. Con el envío
+        // dentro de la petición se podía afirmar que el correo había salido; ahora sale
+        // después, así que el mensaje promete el envío y no la entrega.
+        assert.match(
+            respuesta.datos.mensaje,
+            /te enviaremos/i,
+            'el mensaje debería prometer un envío futuro, porque el correo ya no sale en esta petición'
+        );
+    });
+
+    it('ms-identidad anotó el evento con el token, y sin el correo', async () => {
+        const filas = await consultar(
+            `SELECT tipo, version, payload, estado
+               FROM identidad.eventos_salida
+              WHERE payload->>'id_usuario' = $1 AND tipo = 'RecuperacionSolicitada'`,
+            [idUsuario]
+        );
+
+        assert.equal(filas.length, 1, 'debería haber UN RecuperacionSolicitada para este usuario');
+
+        // Que esté en `identidad` y no en otro esquema es parte de lo que se comprueba:
+        // la tabla de salida es del productor, y el productor de este evento es
+        // ms-identidad. Si apareciera en otro sitio, el productor sería otro.
+        const evento = filas[0];
+        assert.ok(evento.payload.token, 'el sobre debería llevar el token');
+
+        // Y NO lleva la dirección de correo: pertenece a identidad.usuarios y a nadie
+        // más. Si el emisor la copiara aquí, se convertiría en responsable de un dato de
+        // contacto que no le pertenece.
+        assert.equal(evento.payload.email, undefined, 'el sobre NO debe llevar el correo');
+        assert.ok(
+            !JSON.stringify(evento.payload).includes(email),
+            'el sobre NO debe llevar la dirección de correo de nadie'
+        );
+
+        token = evento.payload.token;
+    });
+
+    it('ms-notificaciones lo recibió, resolvió el destinatario y lo envió', async () => {
+        // Aquí está la ventana del bus: el publicador barre cada pocos segundos y el
+        // enviador otro tanto, así que se espera a que convergía en vez de afirmarlo. Es
+        // la misma razón por la que el estado del inmueble se comprueba con `esperarA`.
+        const intervalo = Number(process.env.EVENTOS_INTERVALO_MS || 5000);
+        const envios = Number(process.env.ENVIOS_INTERVALO_MS || 5000);
+
+        const filas = await esperarA(
+            () =>
+                consultar(
+                    `SELECT e.estado, e.destinatario, e.id_usuario, e.asunto, e.cuerpo, e.tipo_evento
+                       FROM notificaciones.envios e
+                      WHERE e.id_usuario = $1 AND e.tipo_evento = 'RecuperacionSolicitada'`,
+                    [idUsuario]
+                ),
+            (filas) => filas.length === 1 && filas[0].estado === 'enviado',
+            intervalo * 2 + envios * 2 + 10000
+        );
+
+        assert.equal(filas.length, 1, 'debería haber UN envío para este usuario');
+        const envio = filas[0];
+
+        assert.equal(envio.estado, 'enviado', 'el envío debería haber salido');
+
+        // EL DESTINATARIO SE RESOLVIO CONTRA MS-IDENTIDAD. El sobre no lo llevaba, así
+        // que esta dirección sólo puede venir de haberla preguntado. Es la comprobación
+        // que ningún doble puede dar por buena: si el contrato de `/interno/usuarios`
+        // cambiara, aquí no habría correo y las suites de cada servicio seguirían verdes.
+        assert.equal(envio.destinatario, email);
+
+        // Y EL CUERPO SE BORRO AL ENVIAR. El correo llevaba un enlace con el token en
+        // claro; conservarlo en la bitácora para siempre sería dejar la llave debajo del
+        // felpudo. Lo que queda es a quién, cuándo y con qué asunto.
+        assert.equal(envio.cuerpo, null, 'el cuerpo debería borrarse al marcar el envío');
+        assert.ok(envio.asunto.length > 0);
+    });
+
+    it('y el payload del evento se borró al entregarlo', async () => {
+        // La otra mitad de la misma decisión, en la otra tabla. El token en claro no
+        // puede quedarse en `identidad.eventos_salida` después de entregado, porque
+        // `identidad.tokens_recuperacion` guarda sólo su SHA-256 precisamente para que
+        // leer una tabla no permita restablecer la contraseña de nadie.
+        const filas = await esperarA(
+            () =>
+                consultar(
+                    `SELECT estado, payload
+                       FROM identidad.eventos_salida
+                      WHERE payload->>'id_usuario' = $1 OR (estado = 'entregado' AND tipo = 'RecuperacionSolicitada')`,
+                    [idUsuario]
+                ),
+            (filas) => filas.some((f) => f.estado === 'entregado'),
+            Number(process.env.EVENTOS_INTERVALO_MS || 5000) * 3 + 10000
+        );
+
+        const entregados = filas.filter((f) => f.estado === 'entregado');
+        assert.ok(entregados.length > 0, 'el evento debería estar entregado');
+
+        for (const fila of entregados) {
+            assert.deepEqual(
+                fila.payload,
+                {},
+                'un RecuperacionSolicitada entregado no debe conservar su token'
+            );
+        }
+    });
+
+    it('el enlace del correo restablece la contraseña de verdad', async () => {
+        // El cierre del camino: el token que viajó por el bus sirve para restablecer, y
+        // la contraseña nueva sirve para entrar. Sin esto, todo lo anterior podría estar
+        // moviendo un token que no vale para nada.
+        const restablecer = await pedir('POST', '/api/auth/restablecer', {
+            cuerpo: { token, contrasena_nueva: 'Restablecida456' }
+        });
+
+        assert.equal(restablecer.estado, 200);
+        // No devuelve token: el enlace del correo no es un acceso directo a la cuenta.
+        assert.equal(restablecer.datos.token, undefined);
+
+        const conLaNueva = await pedir('POST', '/api/auth/login', {
+            cuerpo: { email, contrasena: 'Restablecida456' }
+        });
+        assert.equal(conLaNueva.estado, 200);
+
+        // Y la vieja dejó de valer.
+        const conLaVieja = await pedir('POST', '/api/auth/login', {
+            cuerpo: { email, contrasena: 'Original123' }
+        });
+        assert.equal(conLaVieja.estado, 401);
+    });
+
+    it('el enlace es de un solo uso, también después de pasar por el bus', async () => {
+        const segunda = await pedir('POST', '/api/auth/restablecer', {
+            cuerpo: { token, contrasena_nueva: 'OtraVezNo789' }
+        });
+
+        assert.equal(segunda.estado, 400);
     });
 });
