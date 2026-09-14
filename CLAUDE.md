@@ -464,11 +464,77 @@ npm run seed --workspace=services/ms-identidad            # usuarios de prueba
 Pasos 1 a 7 hechos: monorepo, gateway, identidad y seguridad, ms-inmuebles, bus,
 ms-contratos y ms-financiero, ms-notificaciones.
 
-**Paso 8 — Azure Container Apps, lo único que queda.** Bicep, pipeline y terminación
-SSL; no crea servicios ni toca tablas ni bus. El Job del motor ya tiene su módulo
-(`infra/azure/motor-financiero-job.bicep`, `docs/adr/0021`); falta integrarlo con el resto
-del despliegue, las réplicas del publicador y la clave por servicio. Los anexos van a
-Azure Blob, elegido por variable de entorno.
+**Paso 8 — despliegue en Azure: en curso.** No crea servicios ni toca tablas ni bus. El
+plan en firme está en «Despliegue en Azure», justo debajo.
+
+## Despliegue en Azure (paso 8)
+
+Plan acordado. Cada corte es un PR que deja Compose funcionando y termina con algo
+verificable; se marca al cerrarlo. Si un corte obliga a cambiar una decisión, se cambia
+aquí y en el ADR 0022. Ramas: el corte 1 en `feature/despliegue-azure`; los siguientes,
+ramas nuevas desde `main` con ese prefijo.
+
+### Decisiones fijadas
+
+| Tema | Decisión |
+|---|---|
+| Región | `mexicocentral` si Container Apps y sus Jobs están disponibles (corte 0). Si no, `brazilsouth`, donde la cuenta ya despliega App Service, pero ~60 % más cara en cómputo. Todo en la misma región. |
+| Cómputo | Un entorno de Container Apps en plan de consumo. `gateway` con ingreso **externo** y sólo HTTPS; los cinco servicios con ingreso **interno**, llamados por `http://ms-*`. Escala a cero en todos. |
+| TLS | Lo termina el ingreso del gateway, con certificado administrado. `PROXY_SALTOS_CONFIANZA=1`. |
+| SPA | Azure Static Web Apps Free (ubicación global; la cuenta ya tiene uno funcionando). Sólo estáticos, con `navigationFallback` a `index.html`. El CORS del gateway se limita a su origen. |
+| Base | PostgreSQL Flexible Server B1ms, una base con los cinco esquemas, TLS obligatorio, acceso público restringido a servicios de Azure. Riesgo documentado; la red privada queda como decisión abierta. |
+| Archivos | Blob Storage, contenedor privado `anexos`. |
+| Secretos | Key Vault. Apps y Jobs sólo llevan referencias, resueltas con identidad administrada. Ningún valor en el Bicep ni en el repo. |
+| Migraciones | Un Job manual por servicio, lanzado por el pipeline **antes** de publicar revisiones. En Azure `MIGRACIONES_AL_ARRANCAR=no`: con migraciones pendientes el servicio no arranca. Bloqueo consultivo en el runner. |
+| Motor | Job programado `1 5 * * *` UTC (`docs/adr/0021`), con el comando compilado. |
+| Imágenes | GHCR privado. Etapa `produccion` en cada Dockerfile: TypeScript compilado y sin dependencias de desarrollo. |
+| Correo | **Temporal:** Gmail personal por SMTP en el 587, con contraseña de aplicación en Key Vault y `EMAIL_REMITENTE` igual a esa dirección. Revocarla tras la sustentación. |
+| Datos de demostración | Sí, con un Job manual de seed. |
+| Pipeline | GitHub Actions sólo manual (`workflow_dispatch`), con aprobación. OIDC contra una identidad administrada: ningún secreto en GitHub. |
+
+### Cortes
+
+- [ ] **0 — Verificaciones (manual, $0).** En Cloud Shell: Container Apps, Jobs y PostgreSQL
+  B1ms disponibles en `mexicocentral`; proveedores registrados; gasto actual en Cost
+  Management —el App Service y el Static Web App de otros proyectos consumen **el mismo
+  crédito**—; contraseña de aplicación de Gmail; token `read:packages` de GHCR.
+- [ ] **1 — Código para producción (PR, $0).** Dockerfiles multietapa; `DB_SSL` y
+  `DB_POOL_MAX`; `MIGRACIONES_AL_ARRANCAR` y bloqueo consultivo; migrar, motor y seed
+  compilados; tiempo límite del proxy y `CORS_ORIGENES` en el gateway; aviso de
+  «despertando» y reintento en el login de la SPA; borrador del ADR 0022. *Verifica:* todas
+  las suites, las seis imágenes `--target produccion` con su tamaño, Compose igual que hoy.
+- [ ] **2 — Infraestructura base (PR; empieza el gasto).** `infra/azure/bootstrap.sh`
+  (grupo, Key Vault, identidades, credencial federada, roles) y carga manual de secretos.
+  Bicep de Log Analytics con tope diario, PostgreSQL, Storage y el entorno, sin apps.
+  *Verifica:* conexión TLS a la base y secretos presentes.
+- [ ] **3 — Imágenes y migraciones (PR).** Workflow manual de imágenes a GHCR; Jobs
+  `migrar-*` y `seed-identidad`. *Verifica:* ejecuciones en `Succeeded`, relanzar una
+  migración no hace nada, usuario de demostración creado.
+- [ ] **4 — Servicios y motor (PR).** Módulo genérico de app ×6 con referencias a Key Vault
+  y variables de Azure; Job del motor con comando compilado. *Verifica:* gateway por HTTPS,
+  servicios inalcanzables desde internet, login con `curl`, motor en `Succeeded`, correo de
+  recuperación recibido, y **el primer login con todo en cero, medido**.
+- [ ] **5 — SPA (PR).** Static Web Apps Free con `REACT_APP_API_URL` del gateway.
+  *Verifica:* la demostración completa en el navegador, incluida la recarga de una ruta interna.
+- [ ] **6 — Pipeline (PR).** `desplegar.yml`: pruebas → imágenes → Bicep → migraciones →
+  apps → SPA → humo. `calentar.yml` para la sustentación; guía `docs/despliegue.md`.
+  *Verifica:* repetir el despliegue sin cambios es inocuo.
+- [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
+  presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
+
+### Riesgos a vigilar
+
+- **Arranque en frío del login.** El gateway espera 3 s a identidad al arrancar y el proxy
+  10 s: con todo dormido, el primer login del día puede tardar 20–60 s y devolver 502. Se
+  mide en el corte 4. Antes de una sustentación, `calentar.yml` deja gateway e identidad con
+  una réplica.
+- **Crédito compartido.** ~$16/mes de PostgreSQL (~$1 si entra en la oferta gratuita, sin
+  confirmar para Azure for Students) **más lo que gasten los otros proyectos**. Al agotarse
+  el crédito o a los 12 meses la suscripción se deshabilita y todo se detiene: `pg_dump`
+  antes de cada hito. PostgreSQL se puede detener entre sesiones, siete días como máximo.
+- **Correo con cuenta personal:** credencial personal en la nube y tope diario de Gmail.
+- **Key Vault y la credencial del registro:** hubo un fallo conocido con esa referencia. Si
+  persiste, imágenes públicas o ACR Basic, que ya cuesta.
 
 ## Decisiones abiertas
 
