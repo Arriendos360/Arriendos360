@@ -69,6 +69,12 @@ export interface OpcionesRegistro {
    * en que se registraron; los que no la traen, sin restriccion.
    */
   claveOrden?: string | null;
+  /**
+   * `true` para un evento con identificador DETERMINISTA: si ya hay una fila con ese
+   * `id_evento`, no se anota otra y no es un error. Es lo que hace idempotente un
+   * aviso que no acompaña a ningun cambio de dominio. Ver `idDeEventoDeterminista`.
+   */
+  ignorarSiExiste?: boolean;
 }
 
 /**
@@ -161,7 +167,8 @@ export function crearAlmacenSalidaSql(opciones: {
       await conexion.query(
         `INSERT INTO ${tabla}
              (id_evento, tipo, version, ocurrido_en, payload, clave_orden)
-         VALUES (:id_evento, :tipo, :version, :ocurrido_en, CAST(:payload AS JSONB), :clave_orden)`,
+         VALUES (:id_evento, :tipo, :version, :ocurrido_en, CAST(:payload AS JSONB), :clave_orden)
+         ${opcionesRegistro.ignorarSiExiste ? 'ON CONFLICT (id_evento) DO NOTHING' : ''}`,
         {
           replacements: {
             id_evento: sobre.id_evento,

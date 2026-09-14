@@ -244,5 +244,7 @@ la defensa sin desplegar nada.
 - **La conexión SMTP del motor quedó SALDADA en el paso 7**: el motor publica
   `CuentaCobroPorVencer` y `CuentaCobroEnMora` y ms-financiero ganó su tabla de
   salida. Ver `docs/adr/0019`.
-- **El cron sigue abierto y sigue siendo bloqueante para producción.** Es la primera
-  tarea del paso 8.
+- ~~**El cron sigue abierto y sigue siendo bloqueante para producción.**~~ **SALDADO por
+  `docs/adr/0021`**: en Container Apps el motor lo ejecuta un trabajo programado con
+  `npm run motor`, y `MOTOR_PROGRAMACION` deja escrito qué entorno usa `cron` y cuál el
+  trabajo. De paso, el motor pasó a ser idempotente y a no tragarse sus fallos.

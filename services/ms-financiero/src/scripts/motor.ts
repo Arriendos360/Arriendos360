@@ -10,40 +10,44 @@
  * cualquier usuario autenticado podia lanzar el proceso que genera cuentas de
  * cobro y marca morosos.
  *
- * ── Y ES ADEMAS EL CAMINO DE SALIDA DEL PROBLEMA DEL CRON ──────────────────
+ * ── Y ES EL COMANDO DEL TRABAJO PROGRAMADO ─────────────────────────────────
  *
- * `iniciarMotorFinanciero()` programa el barrido con `node-cron`, que es un
- * temporizador dentro del proceso: con scale-to-zero en Container Apps, un
- * contenedor dormido a medianoche no dispara nada. La solucion del paso 8 es un
- * trabajo programado que levante un contenedor, ejecute ESTO y se apague.
+ * En Container Apps el motor no lo programa el servicio: lo ejecuta un Job que
+ * levanta la misma imagen, corre ESTO y se apaga (`docs/adr/0021`). Por eso no
+ * depende de que la API este escuchando, y por eso sale con 1 si hubo cualquier
+ * fallo: un Job se da por fallido leyendo ese codigo, y entonces reintenta.
  *
- * Es decir, este script no es solo una comodidad de demostracion: es el punto de
- * entrada que el despliegue va a usar. Por eso no depende de que la API este
- * escuchando y por eso cierra la conexion y sale con codigo distinto de cero si
- * algo falla — un `Job` de Container Apps se da por fallido leyendo ese codigo.
- * Ver `docs/adr/0018`.
+ * Reintentar es seguro. El motor es idempotente —ver la cabecera de
+ * `services/motor.ts`—, asi que una segunda ejecucion solo hace lo que falto.
  */
 
 import { validarEntorno } from 'arriendos360-shared';
 
 import { sequelize } from '../config/database';
-import { procesarContratos, procesarPagos } from '../services/motor';
+import { ejecutarMotor } from '../services/motor';
 
 const ejecutar = async (): Promise<void> => {
   // Lo que el barrido no puede suplir con un defecto. Sin `MS_CONTRATOS_URL` o sin el
   // secreto de servicio no hay contratos que facturar, y un `Job` que termina en 0 sin
-  // haber facturado nada es exactamente el fallo silencioso del cron. Mejor que salga ≠ 0.
+  // haber facturado nada es exactamente el fallo silencioso que esto tiene que evitar.
   validarEntorno('motor financiero', ['DB_PASSWORD', 'SERVICIO_JWT_SECRET', 'MS_CONTRATOS_URL']);
 
-  console.log('⚡ Motor financiero: ejecución manual');
+  console.log('⚡ Motor financiero: ejecución');
 
   await sequelize.authenticate();
 
-  console.log('   → generando cuentas de cobro de los periodos siguientes...');
-  await procesarContratos();
+  const resultado = await ejecutarMotor();
 
-  console.log('   → revisando vencimientos y mora...');
-  await procesarPagos();
+  console.log(
+    `   → ${resultado.generadas} cuenta(s) de cobro generada(s), ` +
+      `${resultado.moras} cuenta(s) marcada(s) en mora.`,
+  );
+
+  if (resultado.fallos.length > 0) {
+    throw new Error(
+      `el motor terminó con ${resultado.fallos.length} fallo(s): ${resultado.fallos.join('; ')}`,
+    );
+  }
 
   console.log('✅ Motor financiero ejecutado.');
 };

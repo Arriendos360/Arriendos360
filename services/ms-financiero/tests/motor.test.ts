@@ -49,8 +49,9 @@
  * Bogota.
  */
 
+import cron from 'node-cron';
 import request from 'supertest';
-import { TIPO_CONTRATO_FORMALIZADO } from 'arriendos360-shared';
+import { ErrorDeEntorno, TIPO_CONTRATO_FORMALIZADO } from 'arriendos360-shared';
 import { hoyEnZonaNegocio } from 'arriendos360-shared';
 
 import { CuentaCobro } from '../src/models/CuentaCobro';
@@ -64,6 +65,9 @@ import {
 import {
   DIAS_AVISO_PREVIO,
   DIAS_PARA_MORA,
+  ejecutarMotor,
+  iniciarMotorFinanciero,
+  modoDeProgramacion,
   procesarContratos,
   procesarPagos,
 } from '../src/services/motor';
@@ -500,6 +504,141 @@ describe('Un numero fijo de viajes por barrido', () => {
   });
 });
 
+describe('Idempotencia: el trabajo programado puede reintentarse', () => {
+  jest.setTimeout(30000);
+
+  // ── POR QUE ───────────────────────────────────────────────────────────────
+  //
+  // En Container Apps el motor lo ejecuta un trabajo programado que se reintenta si
+  // sale con error y que no garantiza no solaparse con otra ejecucion. Estas pruebas
+  // fijan que correrlo dos veces el mismo dia, seguidas o A LA VEZ, no cobra dos veces
+  // ni avisa dos veces. Ver `docs/adr/0021`.
+
+  /** Un dia con los tres casos: una cuenta por generar, una por vencer y una por entrar en mora. */
+  const prepararDia = async () => {
+    const pasadoManana = sumarDias(hoyEnZonaNegocio(), 2);
+    const porGenerar = escenario({ fecha_inicio_corte: sumarDias(pasadoManana, -365) });
+
+    const crearCuenta = async (idContrato: string, diasDesdeCorte: number) => {
+      const corte = sumarDias(hoyEnZonaNegocio(), -diasDesdeCorte);
+      return CuentaCobro.create({
+        id_contrato: idContrato,
+        detalle: 'Canon',
+        valor: 1000,
+        inicio: corte,
+        fin: sumarDias(corte, 29),
+        estado: ESTADO_CUENTA_PENDIENTE,
+      });
+    };
+
+    const porVencer = await crearCuenta(escenario().idContrato, DIAS_AVISO_PREVIO);
+    const enMora = await crearCuenta(escenario().idContrato, DIAS_PARA_MORA + 1);
+
+    return {
+      idContratoPorGenerar: porGenerar.idContrato,
+      idPorVencer: porVencer.id_cuenta_cobro,
+      idEnMora: enMora.id_cuenta_cobro,
+    };
+  };
+
+  const eventosCon = async (tipo: string, campo: string, valor: string) =>
+    (await eventosDeSalida(tipo)).filter((evento) => evento.payload[campo] === valor);
+
+  /** Exactamente una cuenta y un aviso de cada tipo, pase lo que pase. */
+  const comprobarUnaVez = async (dia: Awaited<ReturnType<typeof prepararDia>>) => {
+    expect(await cuentasDe(dia.idContratoPorGenerar)).toHaveLength(1);
+    expect(await eventosCon('CuentaCobroGenerada', 'id_contrato', dia.idContratoPorGenerar)).toHaveLength(1);
+    expect(await eventosCon('CuentaCobroPorVencer', 'id_cuenta_cobro', dia.idPorVencer)).toHaveLength(1);
+    expect(await eventosCon('CuentaCobroEnMora', 'id_cuenta_cobro', dia.idEnMora)).toHaveLength(1);
+    expect((await CuentaCobro.findByPk(dia.idEnMora))!.estado).toBe(ESTADO_CUENTA_EN_MORA);
+  };
+
+  test('dos ejecuciones seguidas el mismo día: una cuenta y un aviso de cada tipo', async () => {
+    const dia = await prepararDia();
+
+    const primera = await ejecutarMotor();
+    const segunda = await ejecutarMotor();
+
+    expect(primera.fallos).toEqual([]);
+    expect(segunda.fallos).toEqual([]);
+    await comprobarUnaVez(dia);
+  });
+
+  test('dos ejecuciones A LA VEZ: tampoco duplica', async () => {
+    const dia = await prepararDia();
+
+    const resultados = await Promise.all([ejecutarMotor(), ejecutarMotor()]);
+
+    for (const resultado of resultados) {
+      expect(resultado.fallos).toEqual([]);
+    }
+    await comprobarUnaVez(dia);
+  });
+
+  test('un fallo sale en el resultado, y el reintento factura una sola vez', async () => {
+    const pasadoManana = sumarDias(hoyEnZonaNegocio(), 2);
+    const { idContrato } = escenario({ fecha_inicio_corte: sumarDias(pasadoManana, -365) });
+
+    contratosFalso().caer(503);
+    let fallida;
+    try {
+      fallida = await ejecutarMotor();
+    } finally {
+      contratosFalso().levantar();
+    }
+
+    // Con fallos, `npm run motor` sale con 1 y el trabajo programado reintenta.
+    expect(fallida.fallos.length).toBeGreaterThan(0);
+    expect(await cuentasDe(idContrato)).toHaveLength(0);
+
+    const reintento = await ejecutarMotor();
+    await ejecutarMotor();
+
+    expect(reintento.fallos).toEqual([]);
+    expect(await cuentasDe(idContrato)).toHaveLength(1);
+  });
+});
+
+describe('MOTOR_PROGRAMACION: la diferencia entre entornos está escrita', () => {
+  test('«cron» y «trabajo» son los únicos valores', () => {
+    expect(modoDeProgramacion({ MOTOR_PROGRAMACION: 'cron' })).toBe('cron');
+    expect(modoDeProgramacion({ MOTOR_PROGRAMACION: ' trabajo ' })).toBe('trabajo');
+  });
+
+  test('ausente, vacía o con otro valor, lanza', () => {
+    expect(() => modoDeProgramacion({})).toThrow('MOTOR_PROGRAMACION');
+    expect(() => modoDeProgramacion({ MOTOR_PROGRAMACION: '' })).toThrow(ErrorDeEntorno);
+    expect(() => modoDeProgramacion({ MOTOR_PROGRAMACION: 'cronjob' })).toThrow(ErrorDeEntorno);
+  });
+
+  test('con «trabajo» el proceso no programa nada', () => {
+    const programar = jest.spyOn(cron, 'schedule');
+    const registro = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      iniciarMotorFinanciero({ MOTOR_PROGRAMACION: 'trabajo' });
+      expect(programar).not.toHaveBeenCalled();
+    } finally {
+      programar.mockRestore();
+      registro.mockRestore();
+    }
+  });
+
+  test('con «cron» programa las 00:01 en la zona del negocio, sin solaparse', () => {
+    const programar = jest.spyOn(cron, 'schedule').mockReturnValue({} as never);
+    const registro = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      iniciarMotorFinanciero({ MOTOR_PROGRAMACION: 'cron' });
+      expect(programar).toHaveBeenCalledWith('1 0 * * *', expect.any(Function), {
+        timezone: 'America/Bogota',
+        noOverlap: true,
+      });
+    } finally {
+      programar.mockRestore();
+      registro.mockRestore();
+    }
+  });
+});
+
 describe('Politica de fallo del motor', () => {
   jest.setTimeout(20000);
 
@@ -510,11 +649,14 @@ describe('Politica de fallo del motor', () => {
     // `cron`, y una excepcion sin capturar se lleva por delante el barrido de
     // mora que viene detras.
     contratosFalso().caer(503);
-
-    await expect(procesarContratos()).resolves.not.toThrow();
-    await expect(procesarPagos()).resolves.not.toThrow();
-
-    contratosFalso().levantar();
+    try {
+      // Y no se calla: el fallo va en el resultado, que es lo que hace que
+      // `npm run motor` salga con 1 y el trabajo programado reintente.
+      expect((await procesarContratos()).fallos.length).toBeGreaterThan(0);
+      await expect(procesarPagos()).resolves.not.toThrow();
+    } finally {
+      contratosFalso().levantar();
+    }
   });
 
   test('si ms-identidad no responde, al motor le da igual', async () => {

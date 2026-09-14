@@ -243,3 +243,7 @@ export {
   verificarOrigenCliente,
 } from './origen';
 export type { OpcionesFirmaOrigen, OpcionesVerificacionOrigen } from './origen';
+
+// Identificador de evento derivado del hecho, para avisos que no escriben nada en el
+// dominio y tienen que poder anotarse dos veces sin duplicarse. Ver `eventos.ts`.
+export { ESPACIO_EVENTOS, idDeEventoDeterminista } from './eventos';

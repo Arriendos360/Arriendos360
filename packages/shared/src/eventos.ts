@@ -362,6 +362,45 @@ export function crearSobre<T extends TipoEvento>(
 }
 
 /**
+ * Espacio de nombres de los identificadores deterministas. Cambiarlo cambia todos
+ * los que se derivan de el, asi que no se cambia.
+ */
+export const ESPACIO_EVENTOS = '5d0b1f0e-8c1a-4a63-9a8e-3a1e0b6f2c47';
+
+/**
+ * Un `id_evento` que sale siempre igual para el mismo hecho: UUID version 5 de `tipo`
+ * y `partes`.
+ *
+ * ── PARA QUE SIRVE ─────────────────────────────────────────────────────────
+ *
+ * Para los avisos que no acompañan a ningun cambio de dominio. Un evento que va con
+ * un INSERT o un UPDATE es idempotente por su fila: si el cambio ya ocurrio, no se
+ * repite y el evento tampoco. Uno que no escribe nada —`CuentaCobroPorVencer`— no
+ * tiene esa bitacora, y un proceso que se reintenta lo anotaria dos veces con dos
+ * identificadores distintos, que ms-notificaciones veria como dos hechos.
+ *
+ * Con el identificador derivado del hecho, la segunda anotacion choca con la
+ * primera en la clave primaria de la tabla de salida y no se escribe
+ * (`ignorarSiExiste` en `salida.ts`). Y si llegara a salir dos veces, el consumidor
+ * la descartaria por `id_evento`, que es para lo que esta.
+ */
+export function idDeEventoDeterminista(tipo: TipoEvento, ...partes: string[]): string {
+  const espacio = Buffer.from(ESPACIO_EVENTOS.replace(/-/g, ''), 'hex');
+  const hash = crypto
+    .createHash('sha1')
+    .update(espacio)
+    .update([tipo, ...partes].join('|'))
+    .digest();
+
+  // Version 5 y variante RFC 4122, para que sea un UUID valido para la columna.
+  hash[6] = (hash[6]! & 0x0f) | 0x50;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+
+  const hex = hash.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
  * Valida la forma del sobre que llega por la red.
  *
  * Confianza cero tambien aqui: el que entrega es otro servicio, pero eso ya no
