@@ -151,6 +151,17 @@ se mudara a Financiero. La regla es una constante exportada, `DIAS_PARA_MORA`, y
 la usan los dos. `PARCIAL` deja de entrar también en el endpoint, como en el
 motor.
 
+> **Corregido (2026-09-14, `feature/fix-mora-parcial`).** Excluir `PARCIAL` no era
+> una decisión sino un error heredado del `estado IN (1, 3)` del barrido original, y
+> esta unificación lo extendió al endpoint en vez de cerrarlo. Una cuenta que recibía
+> un abono antes del sexto día pasaba a `PARCIAL` y ya no entraba en mora nunca. La
+> regla es la del saldo: **saldo mayor que cero y corte vencido es mora, haya abonos o
+> no.** Motor y endpoint comparten ahora, además de `DIAS_PARA_MORA`,
+> `ESTADOS_QUE_ENTRAN_EN_MORA` (`PENDIENTE` y `PARCIAL`); el aviso previo también
+> llega a las `PARCIAL`, y el dashboard las cuenta en su métrica de mora.
+> `estadoSegunSaldo` no cambia: `EN_MORA` ya ganaba sobre `PARCIAL` cuando el abono
+> llega después de la mora.
+
 Lo que NO se unifica es el alcance: el motor barre el sistema entero y el
 endpoint sólo los contratos de quien llama. Ésa es la diferencia entre un proceso
 y una petición, y tiene que seguir.
