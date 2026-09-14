@@ -190,3 +190,20 @@ abierta— así que no hay desviación que tramitar por la sección 13.3.2 del P
 Lo que sí conviene incorporar al Capítulo 2 en la próxima revisión es la **garantía de
 entrega** que el documento no nombra: al-menos-una-vez con descarte de repetidos, y
 consistencia en el tiempo para el estado del inmueble.
+
+## Anotaciones posteriores (2026-09-14)
+
+- **El productor ya no es el gateway.** Lo fue mientras `contratos` era suya. En el
+  paso 6d la tabla de salida y el publicador se mudaron a ms-contratos
+  (`contratos.eventos_salida`), y `public.eventos_salida` se retiró con la migración
+  que retiraba los contratos del gateway.
+- **Desde el paso 7 hay tres productores**, cada uno con su tabla de salida en su
+  esquema: `ms-contratos`, `ms-identidad` y `ms-financiero`. Las dos últimas no
+  trajeron mecanismo nuevo. Ver `docs/adr/0019`.
+- **«Con varias réplicas del gateway»**, en Consecuencias, léase hoy «con varias
+  réplicas de un productor». El análisis no cambia: la doble entrega está cubierta
+  por el descarte de repetidos —que desde el 6e importa más, porque un consumidor
+  INSERTA (`docs/adr/0018`)— y lo que habría que revisar es el orden por clave si se
+  añade `FOR UPDATE SKIP LOCKED`. Queda para el paso 8.
+- **`ContratoFormalizado` tiene dos consumidores desde el 6e** (`docs/adr/0018`) y
+  subió a versión 2 en el paso 7 (`docs/adr/0019`).

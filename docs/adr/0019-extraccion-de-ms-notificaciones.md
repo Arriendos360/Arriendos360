@@ -288,3 +288,25 @@ es la plantilla y el transporte, no el mecanismo.
 - La ventana de consistencia del paso 5 ahora también aplica a los correos: entre pedir
   recuperación y que el correo salga hay ~5 s del publicador más el barrido del enviador.
   Una prueba no puede afirmar que el correo salió justo después de la petición.
+
+## Anotación posterior (2026-09-14): el correo de desarrollo nunca había funcionado
+
+Lo descubrió este paso y hasta ahora sólo estaba en CLAUDE.md.
+
+Los dos mailers retirados apuntaban a `smtp.ethereal.email` con `test@example.com` /
+`password`, que no son credenciales de Ethereal. Cada envío fallaba con «Missing
+credentials for PLAIN», y los dos se tragaban el error con un `console.error`. **En
+desarrollo no salió nunca un correo**, y el proyecto lo daba por funcionando. Se vio en
+cuanto el mecanismo nuevo dejó de tragárselo: las filas se quedaron en
+`notificaciones.envios` con su `ultimo_error` a la vista. El fallo no era nuevo; lo
+nuevo es que se vea.
+
+Por qué no se había visto: Compose pasa `EMAIL_USER=` cuando la variable del host está
+vacía, y eso es una **cadena vacía**, no `undefined`, así que un `??` no caía al
+defecto. Es la misma trampa que `docs/adr/0008` anota para `REVOCADOS_INTERVALO_MS`.
+
+Cómo queda (`services/ms-notificaciones/src/config/mailer.ts`): sin `EMAIL_USER` se usa
+el transporte JSON de nodemailer; el mensaje se acepta, se registra como `enviado` y
+sale entero por el log —el único sitio donde se lee el enlace de recuperación en
+desarrollo—, pero no sale de la máquina, y el arranque lo avisa. Con credenciales de
+verdad, el transporte es SMTP.
