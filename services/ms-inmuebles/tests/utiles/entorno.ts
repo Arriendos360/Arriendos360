@@ -17,7 +17,7 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, textoDeEntorno } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
 import { sequelize } from '../../src/config/database';
@@ -80,7 +80,7 @@ export const conToken = (token: string): [string, string] => ['Authorization', `
 export const conServicio = (emisor = 'gateway'): [string, string] => {
   const cabecera = cabeceraDeServicio({
     emisor,
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-inmuebles',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-inmuebles'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   });
 

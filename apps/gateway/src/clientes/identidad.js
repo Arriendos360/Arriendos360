@@ -27,9 +27,9 @@
  * la que ya sabían manejar.
  */
 
-const { cabeceraDeServicio } = require('arriendos360-shared');
+const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
 
-const TIEMPO_LIMITE_MS = Number(process.env.MS_IDENTIDAD_TIMEOUT_MS || 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_IDENTIDAD_TIMEOUT_MS', 3000);
 
 /** Nombre del servicio al que apunta este cliente, para el `aud` del token. */
 const DESTINATARIO = 'ms-identidad';
@@ -57,7 +57,7 @@ const pedirJson = async (url, metodo = 'GET', cuerpo = null) => {
         method: metodo,
         headers: {
             ...cabeceraDeServicio({
-                emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+                emisor: textoDeEntorno('SERVICIO_NOMBRE', 'gateway'),
                 destinatario: DESTINATARIO,
                 secreto: process.env.SERVICIO_JWT_SECRET
             }),

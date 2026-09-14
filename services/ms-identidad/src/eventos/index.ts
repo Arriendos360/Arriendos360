@@ -36,15 +36,18 @@
  */
 
 import {
-  TIPO_CONTRASENA_TEMPORAL_EMITIDA,
-  TIPO_RECUPERACION_SOLICITADA,
-  type AlmacenSalida,
-  type Publicador,
   comoConexion,
   crearAlmacenSalidaSql,
   crearEntregaHttp,
   crearPublicador,
   crearSobre,
+  enteroOpcionalDeEntorno,
+  leerEntorno,
+  textoDeEntorno,
+  TIPO_CONTRASENA_TEMPORAL_EMITIDA,
+  TIPO_RECUPERACION_SOLICITADA,
+  type AlmacenSalida,
+  type Publicador,
 } from 'arriendos360-shared';
 
 import { ESQUEMA, sequelize } from '../config/database';
@@ -99,12 +102,12 @@ const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>>
 
 export const suscriptoresDe = (tipo: string): Array<{ nombre: string; url: string }> =>
   (SUSCRIPCIONES[tipo] ?? [])
-    .map(({ nombre, variable }) => ({ nombre, url: (process.env[variable] ?? '').trim() }))
+    .map(({ nombre, variable }) => ({ nombre, url: leerEntorno(variable) ?? '' }))
     .filter((destino) => destino.url !== '');
 
 const entregar = crearEntregaHttp({
   suscriptores: suscriptoresDe,
-  emisor: () => process.env['SERVICIO_NOMBRE'] ?? 'ms-identidad',
+  emisor: () => textoDeEntorno('SERVICIO_NOMBRE', 'ms-identidad'),
   secreto: () => process.env['SERVICIO_JWT_SECRET'],
 });
 
@@ -120,7 +123,7 @@ export const crearPublicadorDeSalida = (opciones: Record<string, unknown> = {}):
   crearPublicador({
     almacen,
     entregar,
-    intervaloMs: Number(process.env['EVENTOS_INTERVALO_MS']) || undefined,
+    intervaloMs: enteroOpcionalDeEntorno('EVENTOS_INTERVALO_MS'),
     ...opciones,
   });
 

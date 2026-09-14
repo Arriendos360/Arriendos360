@@ -26,10 +26,14 @@
  * programarlo igual que el motor, y no habra que escribir nada nuevo.
  */
 
+import { validarEntorno } from 'arriendos360-shared';
+
 import { sequelize } from '../config/database';
 import { enviador } from '../services/enviador';
 
 const ejecutar = async (): Promise<void> => {
+  validarEntorno('barrido de envíos', ['DB_PASSWORD']);
+
   const resultado = await enviador.ciclo();
 
   console.log(

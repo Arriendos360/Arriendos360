@@ -8,12 +8,21 @@
 import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
-import { cache, hayFuenteDeRevocacion } from './seguridad/cache';
+import { cache } from './seguridad/cache';
+import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
 
-const PUERTO = Number(process.env['PORT'] ?? 3012);
+const PUERTO = enteroDeEntorno('PORT', 3012);
+
+/**
+ * Lo que no tiene defecto razonable. Sin `MS_IDENTIDAD_URL` el servicio arrancaba con
+ * un aviso y dejaba entrar tokens de sesiones cerradas.
+ */
+const OBLIGATORIAS = ['DB_PASSWORD', 'JWT_SECRET', 'SERVICIO_JWT_SECRET', 'MS_IDENTIDAD_URL'];
 
 const iniciar = async (): Promise<void> => {
   try {
+    validarEntorno('ms-inmuebles', OBLIGATORIAS);
+
     await sequelize.authenticate();
     console.log('✅ ms-inmuebles: conexión a PostgreSQL exitosa');
 
@@ -24,23 +33,14 @@ const iniciar = async (): Promise<void> => {
         : '✅ ms-inmuebles: esquema al día, sin migraciones pendientes',
     );
 
-    if (hayFuenteDeRevocacion()) {
-      await cache.iniciar();
-      const estado = cache.estado();
-      console.log(
-        `🔑 ms-inmuebles: caché de invalidación con ${estado.vigentes} tokens revocados y ` +
-          `${estado.sesionesInvalidadas} sesiones caídas, refresco cada ${
-            estado.intervaloMs / 1000
-          }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
-      );
-    } else {
-      // No se aborta el arranque, pero tampoco se calla: sin fuente, un token de
-      // una sesion cerrada entra. Es aceptable en una prueba aislada y no lo es
-      // en ningun despliegue.
-      console.warn(
-        '⚠️  ms-inmuebles: MS_IDENTIDAD_URL sin definir. NO se comprobará la revocación de tokens.',
-      );
-    }
+    await cache.iniciar();
+    const estado = cache.estado();
+    console.log(
+      `🔑 ms-inmuebles: caché de invalidación con ${estado.vigentes} tokens revocados y ` +
+        `${estado.sesionesInvalidadas} sesiones caídas, refresco cada ${
+          estado.intervaloMs / 1000
+        }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
+    );
 
     app.listen(PUERTO, () => {
       console.log(`🏠 ms-inmuebles escuchando en http://localhost:${PUERTO}`);

@@ -24,10 +24,17 @@
  * Ver `docs/adr/0018`.
  */
 
+import { validarEntorno } from 'arriendos360-shared';
+
 import { sequelize } from '../config/database';
 import { procesarContratos, procesarPagos } from '../services/motor';
 
 const ejecutar = async (): Promise<void> => {
+  // Lo que el barrido no puede suplir con un defecto. Sin `MS_CONTRATOS_URL` o sin el
+  // secreto de servicio no hay contratos que facturar, y un `Job` que termina en 0 sin
+  // haber facturado nada es exactamente el fallo silencioso del cron. Mejor que salga ≠ 0.
+  validarEntorno('motor financiero', ['DB_PASSWORD', 'SERVICIO_JWT_SECRET', 'MS_CONTRATOS_URL']);
+
   console.log('⚡ Motor financiero: ejecución manual');
 
   await sequelize.authenticate();

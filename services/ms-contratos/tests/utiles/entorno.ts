@@ -18,7 +18,7 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, textoDeEntorno } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
 import { sequelize } from '../../src/config/database';
@@ -54,7 +54,7 @@ export const prepararEntorno = async (): Promise<{
   process.env['MS_IDENTIDAD_URL'] = identidad.url;
 
   usarAlmacenamiento(
-    new AlmacenamientoDisco(`${process.env['TEMP'] ?? '/tmp'}/ms-contratos-pruebas`),
+    new AlmacenamientoDisco(`${textoDeEntorno('TEMP', '/tmp')}/ms-contratos-pruebas`),
   );
 
   await recrearEsquema(sequelize);
@@ -124,7 +124,7 @@ export const conToken = (token: string): [string, string] => [
 export const conServicio = (emisor = 'gateway'): [string, string] => {
   const cabecera = cabeceraDeServicio({
     emisor,
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-contratos',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-contratos'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   });
 

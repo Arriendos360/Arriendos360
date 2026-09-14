@@ -42,9 +42,9 @@
  * abierta el doble de tiempo por nada.
  */
 
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 
-const TIEMPO_LIMITE_MS = Number(process.env['MS_IDENTIDAD_TIMEOUT_MS'] ?? 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_IDENTIDAD_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-identidad';
 
@@ -96,7 +96,7 @@ export const usuariosPorIds = async (
 
   const respuesta = await fetch(url, {
     headers: cabeceraDeServicio({
-      emisor: process.env['SERVICIO_NOMBRE'] ?? 'ms-notificaciones',
+      emisor: textoDeEntorno('SERVICIO_NOMBRE', 'ms-notificaciones'),
       destinatario: DESTINATARIO,
       secreto: process.env['SERVICIO_JWT_SECRET'],
     }),

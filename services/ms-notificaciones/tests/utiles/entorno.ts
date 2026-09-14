@@ -23,7 +23,7 @@
 
 import crypto from 'crypto';
 import request from 'supertest';
-import { cabeceraDeServicio, crearSobre } from 'arriendos360-shared';
+import { cabeceraDeServicio, crearSobre, textoDeEntorno } from 'arriendos360-shared';
 import type { SobreEvento, TipoEvento } from 'arriendos360-shared';
 
 import { app } from '../../src/app';
@@ -66,7 +66,7 @@ export const identidadFalsa = (): DobleIdentidad => identidad as DobleIdentidad;
 export const conServicio = (emisor = 'ms-identidad'): [string, string] => {
   const cabecera = cabeceraDeServicio({
     emisor,
-    destinatario: process.env['SERVICIO_NOMBRE'] ?? 'ms-notificaciones',
+    destinatario: textoDeEntorno('SERVICIO_NOMBRE', 'ms-notificaciones'),
     secreto: process.env['SERVICIO_JWT_SECRET'],
   });
 

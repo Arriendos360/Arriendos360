@@ -34,9 +34,9 @@
  * cabecera de su `interno.controller.ts`.
  */
 
-const { cabeceraDeServicio } = require('arriendos360-shared');
+const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
 
-const TIEMPO_LIMITE_MS = Number(process.env.MS_FINANCIERO_TIMEOUT_MS || 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_FINANCIERO_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-financiero';
 
@@ -55,7 +55,7 @@ const urlBase = (entorno = process.env) => {
 const pedirJson = async (url) => {
     const respuesta = await fetch(url, {
         headers: cabeceraDeServicio({
-            emisor: process.env.SERVICIO_NOMBRE || 'gateway',
+            emisor: textoDeEntorno('SERVICIO_NOMBRE', 'gateway'),
             destinatario: DESTINATARIO,
             secreto: process.env.SERVICIO_JWT_SECRET
         }),

@@ -11,6 +11,7 @@ const {
     describirMatriz
 } = require('./routing');
 const { crearCacheRevocados } = require('./routing/cacheRevocados');
+const { enteroDeEntorno, validarEntorno } = require('arriendos360-shared');
 
 /**
  * El gateway, y desde el paso 6e NADA MÁS que el gateway.
@@ -100,7 +101,21 @@ app.get('/', (req, res) => {
 // demás servicios y no tiene tablas propias (regla dura 5).
 app.use('/api/dashboard', dashboardRoutes);
 
-const PORT = process.env.PORT || 3001;
+const PORT = enteroDeEntorno('PORT', 3001);
+
+/**
+ * Lo que no tiene defecto razonable. Las cuatro URL tambien: desde el paso 6e no queda
+ * ningun prefijo local al que caer, así que un prefijo sin URL no se reenvía y acaba
+ * en 404 sin que nada lo explique.
+ */
+const OBLIGATORIAS = [
+    'JWT_SECRET',
+    'SERVICIO_JWT_SECRET',
+    'MS_IDENTIDAD_URL',
+    'MS_INMUEBLES_URL',
+    'MS_CONTRATOS_URL',
+    'MS_FINANCIERO_URL'
+];
 
 // Exportar app para pruebas
 module.exports = app;
@@ -117,6 +132,8 @@ if (process.env.NODE_ENV !== 'test') {
             // Tampoco arranca el publicador del bus —se fue en el 6d con la
             // tabla de salida— ni el motor financiero, que ahora corre en
             // ms-financiero.
+
+            validarEntorno('gateway', OBLIGATORIAS);
 
             await cacheRevocados.iniciar();
             const estado = cacheRevocados.estado();
@@ -135,6 +152,8 @@ if (process.env.NODE_ENV !== 'test') {
             });
         } catch (error) {
             console.error('❌ Error de arranque:', error);
+            // Mejor no levantar que quedar en pie a medias, como hacen los servicios.
+            process.exit(1);
         }
     };
 

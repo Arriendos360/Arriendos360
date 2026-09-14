@@ -54,9 +54,9 @@
  * cinco contratos o quinientos.
  */
 
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 
-const TIEMPO_LIMITE_MS = Number(process.env['MS_CONTRATOS_TIMEOUT_MS'] ?? 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_CONTRATOS_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-contratos';
 
@@ -99,7 +99,7 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
 const pedirJson = async (url: string): Promise<{ contratos?: ContratoAjeno[]; contrato?: ContratoAjeno } | null> => {
   const respuesta = await fetch(url, {
     headers: cabeceraDeServicio({
-      emisor: process.env['SERVICIO_NOMBRE'] ?? 'ms-financiero',
+      emisor: textoDeEntorno('SERVICIO_NOMBRE', 'ms-financiero'),
       destinatario: DESTINATARIO,
       secreto: process.env['SERVICIO_JWT_SECRET'],
     }),

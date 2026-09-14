@@ -20,10 +20,9 @@
  *
  * 1. `MS_IDENTIDAD_URL`. Sin ella este servicio NO PUEDE NOTIFICAR A NADIE, porque
  *    los eventos no llevan direcciones de correo y el destinatario se resuelve
- *    preguntando. No se aborta el arranque —el servicio sigue aceptando eventos y
- *    devolviendo 500, que es lo correcto: el productor los reintentara y no se
- *    perderan— pero se grita, porque un sistema que acepta eventos y no manda nada
- *    es indistinguible de uno que funciona si nadie mira.
+ *    preguntando. Es OBLIGATORIA y sin ella el servicio no arranca. Antes arrancaba,
+ *    aceptaba eventos, devolvia 500 y lo avisaba en el log — y un sistema que acepta
+ *    eventos y no manda nada es indistinguible de uno que funciona si nadie mira.
  *
  * 2. Cuantos eventos lleva procesados. Es el numero que dice si el bus esta
  *    llegando.
@@ -39,14 +38,22 @@ import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
 import { consumidor } from './eventos';
-import { urlBase as urlIdentidad } from './clientes/identidad';
 import { esSimulado } from './config/mailer';
 import { contarEnvios, enviador } from './services/enviador';
+import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
 
-const PUERTO = Number(process.env['PORT'] ?? 3015);
+const PUERTO = enteroDeEntorno('PORT', 3015);
+
+/**
+ * Lo que no tiene defecto razonable. `EMAIL_USER` NO esta: sin ella los correos se
+ * simulan, que es lo correcto en desarrollo, y el arranque lo avisa mas abajo.
+ */
+const OBLIGATORIAS = ['DB_PASSWORD', 'SERVICIO_JWT_SECRET', 'MS_IDENTIDAD_URL'];
 
 const iniciar = async (): Promise<void> => {
   try {
+    validarEntorno('ms-notificaciones', OBLIGATORIAS);
+
     await sequelize.authenticate();
     console.log('✅ ms-notificaciones: conexión a PostgreSQL exitosa');
 
@@ -56,14 +63,6 @@ const iniciar = async (): Promise<void> => {
         ? `✅ ms-notificaciones: migraciones aplicadas: ${aplicadas.join(', ')}`
         : '✅ ms-notificaciones: esquema al día, sin migraciones pendientes',
     );
-
-    if (urlIdentidad() === null) {
-      console.warn(
-        '⚠️  ms-notificaciones: MS_IDENTIDAD_URL sin definir. NO se puede resolver el ' +
-          'destinatario de ninguna notificación: los eventos entrarán, fallarán con 500 y ' +
-          'el productor los reintentará. Ningún correo va a salir hasta que se configure.',
-      );
-    }
 
     // El consumidor no arranca nada: es un manejador HTTP. Se cuenta lo que lleva
     // procesado porque es el numero que dice si el bus esta llegando.

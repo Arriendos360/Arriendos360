@@ -27,9 +27,9 @@
  * comprobar. Las dos son peores que un error honesto.
  */
 
-import { cabeceraDeServicio } from 'arriendos360-shared';
+import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 
-const TIEMPO_LIMITE_MS = Number(process.env['MS_INMUEBLES_TIMEOUT_MS'] ?? 3000);
+const TIEMPO_LIMITE_MS = enteroDeEntorno('MS_INMUEBLES_TIMEOUT_MS', 3000);
 
 const DESTINATARIO = 'ms-inmuebles';
 
@@ -55,7 +55,7 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
 const pedirJson = async (url: string): Promise<{ inmuebles?: InmuebleAjeno[] }> => {
   const respuesta = await fetch(url, {
     headers: cabeceraDeServicio({
-      emisor: process.env['SERVICIO_NOMBRE'] ?? 'ms-contratos',
+      emisor: textoDeEntorno('SERVICIO_NOMBRE', 'ms-contratos'),
       destinatario: DESTINATARIO,
       secreto: process.env['SERVICIO_JWT_SECRET'],
     }),

@@ -14,6 +14,7 @@
 
 import { Sequelize } from 'sequelize';
 import dotenv from 'dotenv';
+import { enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 
 dotenv.config();
 
@@ -22,16 +23,16 @@ export const ESQUEMA = 'inmuebles';
 
 const nombreBase =
   process.env['NODE_ENV'] === 'test'
-    ? process.env['DB_NAME_TEST'] ?? 'arriendos360_test'
-    : process.env['DB_NAME'] ?? 'arriendos360_db';
+    ? textoDeEntorno('DB_NAME_TEST', 'arriendos360_test')
+    : textoDeEntorno('DB_NAME', 'arriendos360_db');
 
 export const sequelize = new Sequelize(
   nombreBase,
-  process.env['DB_USER'] ?? 'postgres',
+  textoDeEntorno('DB_USER', 'postgres'),
   process.env['DB_PASSWORD'],
   {
-    host: process.env['DB_HOST'] ?? 'localhost',
-    port: Number(process.env['DB_PORT'] ?? 5432),
+    host: textoDeEntorno('DB_HOST', 'localhost'),
+    port: enteroDeEntorno('DB_PORT', 5432),
     dialect: 'postgres',
     logging: false,
     schema: ESQUEMA,

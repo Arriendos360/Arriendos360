@@ -25,21 +25,25 @@
  * `MS_NOTIFICACIONES_URL`, pedir recuperacion de contrasena emite el token, marca el
  * evento como entregado y NO MANDA NINGUN CORREO. No hay error en ninguna parte.
  *
- * De ahi el aviso del arranque. Es el mismo tipo de agujero silencioso que el cron
- * del motor con scale-to-zero (`docs/adr/0018`), y se trata igual: gritarlo en el log
- * es lo unico que impide que pase inadvertido.
+ * Por eso `MS_NOTIFICACIONES_URL` es obligatoria y sin ella el servicio NO ARRANCA.
+ * Antes arrancaba con un aviso en el log, que es exactamente lo que nadie lee.
  */
 
 import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
-import { almacen, publicador, suscriptoresDe } from './eventos';
-import { TIPO_RECUPERACION_SOLICITADA } from 'arriendos360-shared';
+import { almacen, publicador } from './eventos';
+import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
 
-const PUERTO = Number(process.env['PORT'] ?? 3011);
+const PUERTO = enteroDeEntorno('PORT', 3011);
+
+/** Lo que no tiene defecto razonable. Ver la cabecera para la ultima. */
+const OBLIGATORIAS = ['DB_PASSWORD', 'JWT_SECRET', 'SERVICIO_JWT_SECRET', 'MS_NOTIFICACIONES_URL'];
 
 const iniciar = async (): Promise<void> => {
   try {
+    validarEntorno('ms-identidad', OBLIGATORIAS);
+
     await sequelize.authenticate();
     console.log('✅ ms-identidad: conexión a PostgreSQL exitosa');
 
@@ -49,14 +53,6 @@ const iniciar = async (): Promise<void> => {
         ? `✅ ms-identidad: migraciones aplicadas: ${aplicadas.join(', ')}`
         : '✅ ms-identidad: esquema al día, sin migraciones pendientes',
     );
-
-    if (suscriptoresDe(TIPO_RECUPERACION_SOLICITADA).length === 0) {
-      console.warn(
-        '⚠️  ms-identidad: MS_NOTIFICACIONES_URL sin definir. Los eventos se darán por ' +
-          'entregados sin que nadie los reciba, así que NO saldrá ningún correo — ni el ' +
-          'enlace de recuperación de contraseña. Y no habrá ningún error que lo delate.',
-      );
-    }
 
     const pendientes = await almacen.contar();
     await publicador.iniciar();

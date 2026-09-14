@@ -26,6 +26,9 @@
  * que ms-contratos y Financiero comparten desde que dejaron de vivir en el mismo
  * proceso.
  *
+ * Y `entorno`: la lectura de variables de entorno, con la cadena vacia tratada como
+ * ausencia y la validacion de las obligatorias al arrancar.
+ *
  * Lo consumen el gateway y los cinco servicios. Desde el paso 7 los cinco:
  * ms-notificaciones hereda el consumidor tal cual, y ms-identidad y
  * ms-financiero heredan el productor — la tercera y la cuarta tabla de salida
@@ -211,3 +214,19 @@ export {
   ultimoDiaDelMes,
 } from './fechas';
 export type { FechaISO as FechaCalendario, Periodo } from './fechas';
+
+// ── Variables de entorno ─────────────────────────────────────────────────────
+//
+// Compose y `dotenv` dejan `VAR=` como cadena vacia, y `process.env.VAR ?? defecto`
+// la deja pasar. Ningun servicio lee `process.env` con `??` o `||`: lo hace con esto.
+// Ver la cabecera de `entorno.ts`.
+export {
+  ErrorDeEntorno,
+  enteroDeEntorno,
+  enteroOpcionalDeEntorno,
+  faltantesDeEntorno,
+  leerEntorno,
+  textoDeEntorno,
+  validarEntorno,
+} from './entorno';
+export type { Entorno } from './entorno';
