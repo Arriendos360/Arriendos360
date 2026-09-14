@@ -49,12 +49,14 @@
  * Bogota.
  */
 
+import request from 'supertest';
 import { TIPO_CONTRATO_FORMALIZADO } from 'arriendos360-shared';
 import { hoyEnZonaNegocio } from 'arriendos360-shared';
 
 import { CuentaCobro } from '../src/models/CuentaCobro';
 import {
   ESTADO_CUENTA_EN_MORA,
+  ESTADO_CUENTA_PAGADA,
   ESTADO_CUENTA_PARCIAL,
   ESTADO_CUENTA_PENDIENTE,
   USUARIO_SISTEMA,
@@ -66,7 +68,9 @@ import {
   procesarPagos,
 } from '../src/services/motor';
 import {
+  app,
   cerrarEntorno,
+  conToken,
   contratoEnElDoble,
   contratosFalso,
   entregarEvento,
@@ -283,26 +287,132 @@ describe('RF-12: mora', () => {
     expect(actualizada!.estado).toBe(ESTADO_CUENTA_PENDIENTE);
   });
 
-  test('una cuenta PARCIAL no entra en mora por este camino', async () => {
-    // Es lo que hacia el motor antes de la extraccion y lo que sigue haciendo:
-    // barre PENDIENTE y EN_MORA, no PARCIAL. Una cuenta con algo abonado no se
-    // marca en mora aqui.
-    const { idContrato } = escenario();
-    const haceDiezDias = sumarDias(hoyEnZonaNegocio(), -10);
+});
 
-    const cuenta = await CuentaCobro.create({
+describe('RF-12: un abono parcial no evita la mora', () => {
+  jest.setTimeout(20000);
+
+  // ── EL AGUJERO QUE CIERRAN ESTAS PRUEBAS ───────────────────────────────────
+  //
+  // Aqui habia una prueba que afirmaba lo contrario: «una cuenta PARCIAL no entra en
+  // mora por este camino». Documentaba el filtro `estado IN (1, 3)` del barrido
+  // original, que sobrevivio a siete tramos: una cuenta que recibia un abono antes
+  // del sexto dia pasaba a PARCIAL y salia del motor para siempre. La regla es la del
+  // saldo: con saldo y el corte vencido, mora, haya abonos o no.
+  //
+  // Los abonos se registran por la API y no con `CuentaCobro.update`, porque el
+  // estado que deja un abono lo decide `estadoSegunSaldo`, y eso es parte de lo que
+  // se comprueba. El paso del tiempo se simula corriendo el corte hacia atras.
+
+  /** Registra un abono por la API. */
+  const abonar = (token: string, idCuenta: string, monto: number) =>
+    request(app)
+      .post('/api/pagos')
+      .set(...conToken(token))
+      .send({ id_cuenta_cobro: idCuenta, monto, tipo: 'INGRESO', medio_pago: 'Transferencia' });
+
+  /** Los avisos de mora anotados para UNA cuenta. */
+  const morasDe = async (idCuenta: string) =>
+    (await eventosDeSalida('CuentaCobroEnMora')).filter(
+      (evento) => evento.payload['id_cuenta_cobro'] === idCuenta,
+    );
+
+  /** Una cuenta de 1000 cuyo corte fue hace `dias` dias. */
+  const cuentaConCorteHace = (idContrato: string, dias: number) => {
+    const corte = sumarDias(hoyEnZonaNegocio(), -dias);
+    return CuentaCobro.create({
       id_contrato: idContrato,
-      detalle: 'Canon abonado a medias',
+      detalle: 'Canon',
       valor: 1000,
-      inicio: haceDiezDias,
-      fin: sumarDias(haceDiezDias, 29),
-      estado: ESTADO_CUENTA_PARCIAL,
+      inicio: corte,
+      fin: sumarDias(corte, 29),
+      estado: ESTADO_CUENTA_PENDIENTE,
     });
+  };
 
+  test('abono parcial ANTES del sexto dia: la cuenta entra en mora igual', async () => {
+    const { propietario: duenio, idContrato } = escenario();
+    const cuenta = await cuentaConCorteHace(idContrato, 3);
+
+    const abono = await abonar(duenio.token, cuenta.id_cuenta_cobro, 400);
+    expect(abono.statusCode).toBe(201);
+    expect(abono.body.cuenta_cobro.estado).toBe(ESTADO_CUENTA_PARCIAL);
+
+    // Al tercer dia todavia no hay mora, abonada o no.
+    await procesarPagos();
+    expect((await CuentaCobro.findByPk(cuenta.id_cuenta_cobro))!.estado).toBe(
+      ESTADO_CUENTA_PARCIAL,
+    );
+
+    // Pasan cuatro dias: el corte queda a siete.
+    await cuenta.update({ inicio: sumarDias(hoyEnZonaNegocio(), -7) });
     await procesarPagos();
 
-    const actualizada = await CuentaCobro.findByPk(cuenta.id_cuenta_cobro);
-    expect(actualizada!.estado).toBe(ESTADO_CUENTA_PARCIAL);
+    expect((await CuentaCobro.findByPk(cuenta.id_cuenta_cobro))!.estado).toBe(
+      ESTADO_CUENTA_EN_MORA,
+    );
+
+    // Con su aviso, y uno solo aunque el barrido se repita: la cuenta ya no esta en
+    // un estado que pueda entrar en mora.
+    await procesarPagos();
+    expect(await morasDe(cuenta.id_cuenta_cobro)).toHaveLength(1);
+  });
+
+  test('abono parcial DESPUES de la mora: sigue en mora', async () => {
+    const { propietario: duenio, idContrato } = escenario();
+    const cuenta = await cuentaConCorteHace(idContrato, 10);
+
+    await procesarPagos();
+    expect((await CuentaCobro.findByPk(cuenta.id_cuenta_cobro))!.estado).toBe(
+      ESTADO_CUENTA_EN_MORA,
+    );
+
+    // `estadoSegunSaldo` hace ganar EN_MORA sobre PARCIAL: abonar la mitad de una
+    // cuenta vencida no la pone al dia.
+    const abono = await abonar(duenio.token, cuenta.id_cuenta_cobro, 400);
+    expect(abono.statusCode).toBe(201);
+    expect(abono.body.cuenta_cobro.estado).toBe(ESTADO_CUENTA_EN_MORA);
+    expect(parseFloat(abono.body.cuenta_cobro.saldo_pendiente)).toBe(600);
+
+    await procesarPagos();
+    expect((await CuentaCobro.findByPk(cuenta.id_cuenta_cobro))!.estado).toBe(
+      ESTADO_CUENTA_EN_MORA,
+    );
+    expect(await morasDe(cuenta.id_cuenta_cobro)).toHaveLength(1);
+  });
+
+  test('una cuenta saldada por completo no entra en mora nunca', async () => {
+    const { propietario: duenio, idContrato } = escenario();
+    const cuenta = await cuentaConCorteHace(idContrato, 3);
+
+    expect((await abonar(duenio.token, cuenta.id_cuenta_cobro, 400)).statusCode).toBe(201);
+    const saldo = await abonar(duenio.token, cuenta.id_cuenta_cobro, 600);
+    expect(saldo.body.cuenta_cobro.estado).toBe(ESTADO_CUENTA_PAGADA);
+
+    // Un mes despues del corte.
+    await cuenta.update({ inicio: sumarDias(hoyEnZonaNegocio(), -30) });
+    await procesarPagos();
+
+    expect((await CuentaCobro.findByPk(cuenta.id_cuenta_cobro))!.estado).toBe(
+      ESTADO_CUENTA_PAGADA,
+    );
+    expect(await morasDe(cuenta.id_cuenta_cobro)).toHaveLength(0);
+  });
+
+  test('el aviso previo tambien llega a una cuenta PARCIAL', async () => {
+    const { propietario: duenio, idContrato } = escenario();
+    const cuenta = await cuentaConCorteHace(idContrato, DIAS_AVISO_PREVIO);
+
+    await abonar(duenio.token, cuenta.id_cuenta_cobro, 400);
+    await procesarPagos();
+
+    const avisos = (await eventosDeSalida('CuentaCobroPorVencer')).filter(
+      (evento) => evento.payload['id_cuenta_cobro'] === cuenta.id_cuenta_cobro,
+    );
+    expect(avisos).toHaveLength(1);
+    expect((await CuentaCobro.findByPk(cuenta.id_cuenta_cobro))!.estado).toBe(
+      ESTADO_CUENTA_PARCIAL,
+    );
   });
 });
 

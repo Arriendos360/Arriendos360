@@ -118,6 +118,7 @@ import { CuentaCobro } from '../models/CuentaCobro';
 import {
   ESTADO_CONTRATO_ACTIVO,
   ESTADO_CUENTA_EN_MORA,
+  ESTADO_CUENTA_PARCIAL,
   ESTADO_CUENTA_PENDIENTE,
 } from '../models/constantes';
 import {
@@ -294,12 +295,39 @@ export const procesarContratos = async (): Promise<void> => {
 };
 
 /**
+ * Los estados de una cuenta que todavia puede entrar en mora: debe algo y aun no
+ * esta en mora.
+ *
+ * ── `PARCIAL` ESTA AQUI, Y DURANTE SIETE TRAMOS NO ESTUVO ──────────────────
+ *
+ * El barrido original filtraba `estado IN (1, 3)` —pendiente y en mora— y la
+ * traduccion al catalogo lo conservo tal cual. El efecto era que una cuenta que
+ * recibia un abono antes del sexto dia pasaba a `PARCIAL` y salia del motor para
+ * siempre: debia el resto, el corte vencia y nunca entraba en mora. Bastaba abonar
+ * un peso a tiempo.
+ *
+ * La regla es la del saldo, no la del historial: **una cuenta con saldo mayor que
+ * cero y el corte vencido entra en mora, haya recibido abonos o no.** `PARCIAL`
+ * siempre tiene saldo —`estadoSegunSaldo` la pasa a `PAGADA` al llegar a cero—, asi
+ * que no hace falta mirarlo aparte. `EN_MORA` no esta porque ya lo esta, y que no
+ * este es lo que impide que un segundo barrido repita el aviso.
+ *
+ * La usan este barrido y `verificarMora`, igual que `DIAS_PARA_MORA`, para que las
+ * dos reglas no vuelvan a separarse. Ver la correccion en `docs/adr/0018`.
+ */
+export const ESTADOS_QUE_ENTRAN_EN_MORA: readonly string[] = [
+  ESTADO_CUENTA_PENDIENTE,
+  ESTADO_CUENTA_PARCIAL,
+];
+
+const puedeEntrarEnMora = (estado: string): boolean => ESTADOS_QUE_ENTRAN_EN_MORA.includes(estado);
+
+/**
  * Control de dias de gracia (requisito por confirmar en el SRS).
  * RF-12: alertas de vencimiento y vencido.
  *
- * Barre las cuentas PENDIENTE y EN_MORA, igual que antes barria los estados 1 y
- * 3. `PARCIAL` sigue quedando fuera, que es lo que hacia: una cuenta con algo
- * abonado no se marca en mora por este camino.
+ * Barre las cuentas que pueden entrar en mora (`ESTADOS_QUE_ENTRAN_EN_MORA`) y las
+ * `EN_MORA`, que ya estaban en el filtro y ninguna rama de abajo modifica.
  *
  * Los dias se cuentan desde `inicio`, que es la fecha de corte y es exactamente
  * lo que guardaba `mes_correspondiente`.
@@ -309,7 +337,9 @@ export const procesarPagos = async (): Promise<void> => {
     const hoy = hoyEnZonaNegocio();
 
     const cuentasPendientes = await CuentaCobro.findAll({
-      where: { estado: { [Op.in]: [ESTADO_CUENTA_PENDIENTE, ESTADO_CUENTA_EN_MORA] } },
+      where: {
+        estado: { [Op.in]: [...ESTADOS_QUE_ENTRAN_EN_MORA, ESTADO_CUENTA_EN_MORA] },
+      },
     });
 
     // Los contratos de todas las cuentas del barrido en UNA peticion, por
@@ -366,7 +396,10 @@ export const procesarPagos = async (): Promise<void> => {
       // dia y no de todos los que quedan. Y ademas es lo unico que impide el aviso
       // repetido, porque esta rama no cambia nada en la base — no hay estado que haga
       // de bitacora, al contrario que en la de la mora. Ver `eventos/salida.ts`.
-      if (diasDesdeCorte === DIAS_AVISO_PREVIO && cuenta.estado === ESTADO_CUENTA_PENDIENTE) {
+      //
+      // Se avisa tambien a una cuenta PARCIAL: si va a entrar en mora dentro de dos
+      // dias, tiene el mismo derecho a enterarse que una que no ha abonado nada.
+      if (diasDesdeCorte === DIAS_AVISO_PREVIO && puedeEntrarEnMora(cuenta.estado)) {
         if (puedeAvisar) {
           // UN evento para las DOS partes. Quien decide que al inquilino se le habla
           // de «tu pago» y al propietario de «el pago del inmueble X» es
@@ -382,11 +415,12 @@ export const procesarPagos = async (): Promise<void> => {
 
       // Cambio a mora. La MISMA constante que aplica `verificarMora`, que es lo
       // que cierra la trampa de las dos reglas distintas.
-      if (diasDesdeCorte >= DIAS_PARA_MORA && cuenta.estado === ESTADO_CUENTA_PENDIENTE) {
+      if (diasDesdeCorte >= DIAS_PARA_MORA && puedeEntrarEnMora(cuenta.estado)) {
         // El UPDATE y su aviso van en UNA transaccion: no puede haber una mora sin
         // aviso ni un aviso sin mora. Y como la condicion exige que venga de
-        // `PENDIENTE`, una segunda pasada no vuelve a cambiar el estado y por tanto
-        // tampoco vuelve a anotar el evento — el estado de la cuenta hace de bitacora.
+        // `PENDIENTE` o `PARCIAL`, una segunda pasada no vuelve a cambiar el estado y
+        // por tanto tampoco vuelve a anotar el evento — el estado de la cuenta hace de
+        // bitacora.
         await sequelize.transaction(async (transaccion) => {
           await cuenta.update(
             { estado: ESTADO_CUENTA_EN_MORA },

@@ -59,7 +59,7 @@ const MAX_CONTRATOS = 500;
  * propietario sin contratos tiene cero cuentas de cobro, y eso es un hecho.
  *
  * `estado` acepta varios separados por coma: el dashboard pide las PAGADA para
- * los ingresos y las PENDIENTE/EN_MORA para la mora, y hacerlo en dos peticiones
+ * los ingresos y las PENDIENTE/PARCIAL/EN_MORA para la mora, y hacerlo en dos peticiones
  * seria pedir dos veces lo mismo.
  */
 export const listarCuentas = async (req: Request, res: Response): Promise<Response> => {
