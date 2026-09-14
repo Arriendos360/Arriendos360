@@ -148,3 +148,29 @@ Ms-identidad sigue sin comprobar nada, que es lo que el ADR 0010 protegía. Lo
   hace falta cachear esto.
 - `docs/adr/0010` — la reemisión de la contraseña temporal, cuyo emplazamiento
   este ADR corrige.
+
+## Anotaciones posteriores (2026-09-14)
+
+- **La forma del endpoint.** `GET /interno/contratos?parte=<sub>` devuelve la lista
+  de identificadores de los contratos donde `sub` es parte, y quien pregunta la usa
+  en un `IN` contra su base local. Un salto de red donde habría habido dos. Si algún
+  día la lista pesa, la salida es paginar en `/interno`; hoy no.
+  `?incluir=inmueble` adjunta el `Inmueble` de cada contrato en un solo lote: lo usa
+  ms-financiero para los comprobantes y el motor, y existe para no encadenar dos
+  saltos, porque hasta que Contratos no dice de qué inmueble es cada contrato nadie
+  sabe qué inmuebles pedir.
+- **Los clientes cambiaron en el paso 6e.** Donde este ADR dice que el gateway filtra
+  cuentas de cobro, desde el 6e lo hace **ms-financiero** contra su propia base. El
+  gateway sólo conserva la mitad de propietario, para vetar borrados y componer el
+  dashboard.
+- **Cerró la decisión abierta de los listados con doble rol.** La visibilidad es una
+  disyunción —dueño del inmueble **o** inquilino del contrato— y hasta el 6d se
+  resolvía con `Op.or` sobre columnas alcanzadas por `include`, es decir, JOINs que
+  cruzaban contextos, en tres sitios: `contrato.controller.js`
+  (`$Inmueble.id_propietario$`, Contratos → Inmuebles) y dos en `pago.controller.js`
+  (`$Contrato.Inmueble.id_propietario$` para cuentas y
+  `$CuentaCobro.Contrato.Inmueble.id_propietario$` para transacciones, Financiero →
+  Contratos → Inmuebles).
+- **El calendario subió a `packages/shared` en el mismo paso** (`fechas.ts`), porque
+  al separarse Contratos y Financiero la alternativa era copiarlo. La justificación
+  está en la cabecera del archivo.

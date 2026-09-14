@@ -188,3 +188,14 @@ token emitido antes del cambio quede inválido —comprobado contra la API y con
 
 `apps/gateway/tests/cacheRevocados.test.js`: la invalidación en bloque, incluido el caso
 del empate en el mismo segundo y la convivencia de las dos formas de invalidar.
+
+## Anotaciones posteriores (2026-09-14)
+
+- **Decisión 1 — el emplazamiento cambió en el paso 6d.** La reemisión de la
+  contraseña temporal se mudó a ms-contratos junto con los contratos: el argumento
+  de este ADR sigue valiendo, pero quien tiene los datos ya no es el gateway. Ver
+  `docs/adr/0017`, «Lo que esto arrastra».
+- **Decisión 4 — SALDADA en el paso 7.** ms-identidad ya no envía correo: publica
+  `RecuperacionSolicitada` y `ContrasenaTemporalEmitida`, y `Notificador` se retiró
+  con su interfaz. Ver `docs/adr/0019`. Sigue pendiente de incorporar al Capítulo 2
+  el resto: los endpoints, la tabla de tokens y la columna `contrasena_cambiada_en`.

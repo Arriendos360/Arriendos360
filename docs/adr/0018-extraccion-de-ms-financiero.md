@@ -227,3 +227,11 @@ la defensa sin desplegar nada.
   día: en el paso 7 el motor pasa a **publicar eventos** —«cuenta próxima a
   vencer», «cuenta en mora»— y Notificaciones decide a quién avisar. Eso
   convertirá a ms-financiero en productor del bus, con su propia tabla de salida.
+
+## Anotaciones posteriores (2026-09-14)
+
+- **La conexión SMTP del motor quedó SALDADA en el paso 7**: el motor publica
+  `CuentaCobroPorVencer` y `CuentaCobroEnMora` y ms-financiero ganó su tabla de
+  salida. Ver `docs/adr/0019`.
+- **El cron sigue abierto y sigue siendo bloqueante para producción.** Es la primera
+  tarea del paso 8.

@@ -70,3 +70,29 @@ encima, y el día que alguien meta un segundo campo ahí nadie sabrá qué conti
 `docs/adr/0016` decide que una transacción se anule en vez de borrarse, y las dos
 apuntan a lo mismo: un movimiento de dinero deja un documento en manos de alguien,
 y el sistema tiene que poder seguir explicando ese documento más tarde.
+
+## Anotación posterior (2026-09-14): el resto del paso 6c
+
+El paso 6c no tiene un ADR propio para la realineación en sí; estos dos (0015 y 0016)
+recogen lo que se apartaba del documento. Lo demás estaba sólo en CLAUDE.md:
+
+- **`Pago` y `Abono` no se renombraron: se partieron** en los dos conceptos que
+  mezclaban. Una cuenta de cobro es la factura mensual que el sistema genera; una
+  transacción es el movimiento de dinero contra ella.
+- **Los estados enteros de `pagos` (1, 2, 4, 3) pasaron al catálogo** `PENDIENTE`,
+  `PAGADA`, `PARCIAL`, `EN_MORA`.
+- **`saldo_pendiente` dejó de ser columna** y se deriva (`docs/adr/0016`), pero se
+  adjunta a la respuesta con el mismo nombre, así que el frontend recibe lo de
+  siempre.
+- **`tipo_transaccion` no se convirtió en `tipo`.** Guardaba «Transferencia
+  Bancaria» y «Efectivo», que son medios de pago; su destino es `medio_pago`.
+  Mapearlo por el parecido del nombre habría puesto el dato en el campo equivocado,
+  y sólo se habría notado al imprimir un comprobante.
+- **`PUT /api/pagos/:id/pagar` desapareció.** Registrar un pago es
+  `POST /api/pagos` con el cuerpo del Capítulo 2, y el alta manual de un cobro se
+  movió a `POST /api/pagos/cuentas-cobro`.
+- **El motor dejó de comparar contra `new Date()` local** y pasó a
+  `hoyEnZonaNegocio()` (día de calendario en `America/Bogota`), con `diasEntre()`
+  contando días de calendario en vez de intervalos de 24 horas. Tuvo que decidirse
+  aquí porque `inicio` pasó de `TIMESTAMPTZ` a `DATE`, y una fecha de calendario no
+  significa nada sin decir en qué zona se lee.

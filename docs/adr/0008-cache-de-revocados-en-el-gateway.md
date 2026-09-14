@@ -140,3 +140,15 @@ inmediato y que el temporizador no impida terminar el proceso.
 
 La ventana real se comprueba de punta a punta en `tests/integracion/`, donde tras un
 logout se espera al refresco y se confirma que el token deja de servir.
+
+## Anotaciones posteriores (2026-09-14)
+
+- **Ya no es una caché, son cuatro:** la del gateway y la de cada servicio que
+  verifica tokens de usuario, las cuatro con el mismo intervalo de 15 s, así que la
+  ventana observable es la misma en todas. `ms-notificaciones` no tiene: nunca le
+  llega un token de usuario.
+- **Trampa de configuración.** `REVOCADOS_INTERVALO_MS=` vacía en un `.env` llega
+  como cadena vacía; `Number('')` es `0` y el refresco se convierte en un bucle. Los
+  servicios caen al valor por defecto con `||`, no con `??`, justamente por eso.
+  La misma trampa con `EMAIL_USER=` mantuvo roto el correo de desarrollo; ver la
+  anotación de `docs/adr/0019`.

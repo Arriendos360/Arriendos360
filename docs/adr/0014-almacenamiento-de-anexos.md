@@ -167,3 +167,13 @@ llamarlo referencia.
 
 No hay desviación que tramitar: el documento no fija el proveedor ni cómo se sirve el
 archivo de vuelta.
+
+## Anotación posterior (2026-09-14): anexos subidos antes del paso 6d
+
+La migración `database/contratos/002` movió las FILAS de `anexos` a ms-contratos,
+no los archivos. Con la implementación de disco, los subidos antes del 6d quedaron en
+`apps/gateway/almacenamiento/` y hay que copiarlos a mano a
+`services/ms-contratos/almacenamiento/`. Con Azure Blob no hace falta: el contenedor es
+el mismo y la referencia guardada sigue valiendo. En la base de desarrollo no había
+ninguno cuando se hizo la mudanza. Está anotado también en la cabecera de la
+migración.

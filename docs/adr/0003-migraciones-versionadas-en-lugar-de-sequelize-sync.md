@@ -101,3 +101,35 @@ también entra por volumen, pero **la imagen por sí sola no puede migrar**.
 - **Migraciones con `down`.** Se descartó por ahora. Revertir el esquema en un
   proyecto sin datos de producción es ceremonia sin beneficio; cuando haya
   despliegue real en Azure, valdrá la pena reconsiderarlo.
+
+## Anotaciones posteriores (2026-09-14)
+
+Recogidas de CLAUDE.md al depurarlo. Son la historia de cómo se usaron las
+migraciones en cada extracción; no cambian la decisión.
+
+- **`database/dominio/` ya no existe, y el runner ya no vive sólo en el gateway.**
+  La carpeta se fue vaciando paso a paso y desapareció en el 6e, junto con el
+  aplicador de migraciones del gateway. Cada servicio migra su propio esquema. Ver
+  `docs/adr/0018`, decisión 2.
+- **Paso 4b — Inmuebles.** La tabla cambió de esquema con dos migraciones:
+  `database/inmuebles/002` (copia) y `database/dominio/002` (retirada), en ese orden
+  y con Compose garantizándolo por el healthcheck del servicio. Voltear el gateway
+  obligó a reescribir como composición HTTP los 29 sitios que alcanzaban
+  `inmuebles` por asociación de Sequelize, lo que adelantó la mitad del trabajo
+  previsto para el paso 6.
+- **Paso 6a — Contratos al modelo canónico, sin extraer.** Una migración que
+  TRANSFORMÓ los datos existentes: renombres a `inicio`/`fin`/`canon`, `estado`
+  pasó de un entero sin significado al catálogo `activo`/`finalizado`/`cancelado`,
+  entraron `fecha_inicio_corte`, `fecha_limite_pago`, `info_contrato` y los dos
+  campos del deudor solidario, y salieron `deposito` e `inventario_fotografico`
+  (ver `docs/adr/0015`). Las dos fechas derivadas se rellenaron con
+  `AT TIME ZONE 'UTC'`. Desde entonces `ContratoFormalizado` no traduce nombres.
+- **Paso 6c — `Pago`/`Abono` a `Cuentas_cobro`/`Transacciones`.** La migración
+  (`database/dominio/006`) transformaba los datos y, antes de borrar
+  `saldo_pendiente`, comprobaba fila a fila que lo guardado cuadrara con lo
+  derivado; si no cuadraba, se negaba a seguir. En una base nueva las tablas nacen
+  ya en su forma final desde `database/financiero/001`.
+- **Paso 6d — Contratos y Anexos.** `database/contratos/002` movió las filas pero no
+  los archivos de los anexos; ver la anotación de `docs/adr/0014`.
+- **Paso 6e — Financiero.** Rompió el patrón «una copia, otra retira» y hace las dos
+  cosas en `database/financiero/002`. Ver `docs/adr/0018`, decisión 2.
