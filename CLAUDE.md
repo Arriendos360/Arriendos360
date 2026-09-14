@@ -1116,7 +1116,9 @@ esa migración.
 ~~**Un contrato de 16 líneas de mora no existe: `verificar-mora` y el motor no aplican la
 misma regla.**~~ **Resuelto en el paso 6e**, que es cuando el motor se mudó a Financiero
 y las dos reglas quedaron en el mismo servicio. Ahora las dos usan `DIAS_PARA_MORA`, una
-constante exportada de `services/motor.ts`, y `PARCIAL` queda fuera en los dos caminos.
+constante exportada de `services/motor.ts`, y los mismos estados, `ESTADOS_QUE_ENTRAN_EN_MORA`
+(`PENDIENTE` y `PARCIAL`). **`PARCIAL` estuvo fuera hasta `feature/fix-mora-parcial`**, y
+con ello una cuenta con un abono parcial antes del sexto día no entraba nunca en mora.
 Lo que NO se unificó es el alcance —el motor barre el sistema entero y el endpoint sólo
 los contratos de quien llama—, y esa diferencia sí tiene que seguir: es la que hay entre
 un proceso y una petición.

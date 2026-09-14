@@ -467,6 +467,40 @@ describe('verificar-mora aplica la MISMA regla que el motor', () => {
     expect(cuenta.estado).toBe('EN_MORA');
   });
 
+  test('marca tambien una PARCIAL: un abono no la saca de la mora', async () => {
+    // Mismos estados que el motor (`ESTADOS_QUE_ENTRAN_EN_MORA`). Hasta
+    // feature/fix-mora-parcial este endpoint sólo miraba las PENDIENTE.
+    const hoy = new Date();
+    const haceOchoDias = new Date(hoy.getTime() - 8 * 86400000).toISOString().slice(0, 10);
+
+    const { propietario: duenio, idContrato } = escenario();
+    const { id } = await crearCuenta(duenio.token, idContrato, {
+      inicio: haceOchoDias,
+      valor: 1000,
+    });
+
+    const abono = await request(app)
+      .post('/api/pagos')
+      .set(...conToken(duenio.token))
+      .send({ id_cuenta_cobro: id, monto: 400, tipo: 'INGRESO', medio_pago: 'Transferencia' });
+    expect(abono.body.cuenta_cobro.estado).toBe(ESTADO_CUENTA_PARCIAL);
+
+    const respuesta = await request(app)
+      .post('/api/pagos/verificar-mora')
+      .set(...conToken(duenio.token));
+    expect(respuesta.statusCode).toBe(200);
+
+    const cuentas = await request(app)
+      .get('/api/pagos')
+      .set(...conToken(duenio.token));
+
+    const cuenta = cuentas.body.find(
+      (c: { id_cuenta_cobro: string }) => c.id_cuenta_cobro === id,
+    );
+    expect(cuenta.estado).toBe('EN_MORA');
+    expect(parseFloat(cuenta.saldo_pendiente)).toBe(600);
+  });
+
   test('un inquilino no puede marcarse a si mismo', async () => {
     // Verificar la mora ESCRIBE, asi que aqui no basta con ser parte: hay que
     // ser el dueño del inmueble.
