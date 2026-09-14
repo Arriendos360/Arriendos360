@@ -16,6 +16,8 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
+const { CABECERAS_DE_ORIGEN, cabecerasDeOrigen } = require('./origen');
+
 /**
  * Cabeceras salto-a-salto (RFC 7230, seccion 6.1): describen la conexion, no el
  * mensaje, y no deben propagarse a traves de un proxy.
@@ -44,16 +46,21 @@ const TIMEOUT_POR_DEFECTO_MS = 10000;
  * `authorization` no recibe trato especial: se copia como cualquier otra, que es
  * justo lo que se necesita para que el servicio destino verifique el token por
  * su cuenta con el secreto compartido.
+ *
+ * Las cabeceras de ORIGEN no se copian nunca: las escribiría el cliente. Llegan en
+ * `origen`, calculadas por el gateway. Ver `origen.js`.
  */
-const construirCabeceras = (cabecerasEntrantes, urlDestino) => {
+const construirCabeceras = (cabecerasEntrantes, urlDestino, origen = {}) => {
     const salida = {};
 
     for (const [nombre, valor] of Object.entries(cabecerasEntrantes)) {
-        if (!CABECERAS_SALTO_A_SALTO.has(nombre.toLowerCase())) {
+        const minusculas = nombre.toLowerCase();
+        if (!CABECERAS_SALTO_A_SALTO.has(minusculas) && !CABECERAS_DE_ORIGEN.has(minusculas)) {
             salida[nombre] = valor;
         }
     }
 
+    Object.assign(salida, origen);
     salida.host = urlDestino.host;
     return salida;
 };
@@ -86,8 +93,9 @@ const responderFalloDeRed = (res, servicio, causa) => {
  * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {string} urlBase URL del servicio, por ejemplo `http://ms-inmuebles:3012`
- * @param {string} servicio Nombre del servicio, solo para mensajes de error
- * @param {{ timeoutMs?: number }} [opciones]
+ * @param {string} servicio Nombre del servicio: para los mensajes de error y como
+ *   audiencia de la IP firmada
+ * @param {{ timeoutMs?: number, secretoServicio?: string }} [opciones]
  */
 const reenviar = (req, res, urlBase, servicio, opciones = {}) => {
     const timeoutMs = opciones.timeoutMs || TIMEOUT_POR_DEFECTO_MS;
@@ -110,7 +118,8 @@ const reenviar = (req, res, urlBase, servicio, opciones = {}) => {
             port: destino.port,
             path: `${destino.pathname}${destino.search}`,
             method: req.method,
-            headers: construirCabeceras(req.headers, destino)
+            // La IP se firma aquí, en cada reenvío: nunca se reutiliza entre peticiones.
+            headers: construirCabeceras(req.headers, destino, cabecerasDeOrigen(req, servicio, opciones))
         },
         (respuesta) => {
             res.status(respuesta.statusCode);

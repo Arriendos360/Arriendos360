@@ -108,9 +108,10 @@ const crearIdentidadFalsa = async (opciones = {}) => {
         }
 
         const usuario = porEmail(email);
-        if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-        if (usuario.contrasena !== contrasena) {
-            return res.status(401).json({ mensaje: 'Contraseña incorrecta' });
+        // Un solo 401 para «no existe» y «contraseña mal», como el servicio real
+        // desde docs/adr/0020: el login no dice qué correos están registrados.
+        if (!usuario || usuario.contrasena !== contrasena) {
+            return res.status(401).json({ mensaje: 'Correo o contraseña incorrectos' });
         }
 
         const jti = crypto.randomUUID();

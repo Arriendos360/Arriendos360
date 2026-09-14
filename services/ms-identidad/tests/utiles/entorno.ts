@@ -26,13 +26,28 @@ import { app } from '../../src/app';
 import { sequelize } from '../../src/config/database';
 import { recrearEsquema } from '../../src/database/migraciones';
 import { TABLA_SALIDA, crearPublicadorDeSalida } from '../../src/eventos';
+import { LIMITES_POR_DEFECTO, usarLimites, type NombreLimite } from '../../src/services/limites';
 
 export const CONTRASENA_POR_DEFECTO = 'pass123';
 
 export { app, sequelize };
 
-/** Deja el esquema del servicio vacío y recién migrado. */
-export const recrearBase = (): Promise<string[]> => recrearEsquema(sequelize);
+/** Todos los límites de tasa con un máximo que ninguna suite alcanza. */
+const LIMITES_HOLGADOS = Object.fromEntries(
+  (Object.keys(LIMITES_POR_DEFECTO) as NombreLimite[]).map((nombre) => [nombre, { maximo: 1_000_000 }]),
+);
+
+/**
+ * Deja el esquema del servicio vacío y recién migrado.
+ *
+ * Y con los límites de tasa holgados: todas las suites llaman desde la misma IP, y
+ * la de recuperación sola hace más de cinco solicitudes. Los límites reales se
+ * prueban en `limites.test.ts`, que los restablece.
+ */
+export const recrearBase = (): Promise<string[]> => {
+  usarLimites(LIMITES_HOLGADOS);
+  return recrearEsquema(sequelize);
+};
 
 export const cerrarBase = (): Promise<void> => sequelize.close();
 

@@ -140,6 +140,23 @@ barrido programado**: la verificación filtra por `expira_en > NOW()`; si estorb
 `DELETE` manual. El gateway y cada servicio que verifica tokens guardan una copia en
 memoria de los `jti` vigentes, refrescada cada 15 s (`docs/adr/0008`).
 
+### Limitación de tasa
+
+En **ms-identidad**, no en el gateway: contar fallos por cuenta exige leer el cuerpo y
+saber si el login falló, y el gateway reenvía sin leer (`docs/adr/0020`). Tabla operativa
+`identidad.limites_tasa` (`UNLOGGED`), ventana fija, un `INSERT … ON CONFLICT` atómico.
+
+- Login: 100 / 15 min por IP y 5 fallos / 15 min **por cuenta e IP**. Nunca sólo por
+  cuenta: sería bloquear a alguien a pedido. Registro 10 / h; recuperar y restablecer
+  5 / h por IP; recuperar 3 / h por cuenta **en silencio** (mismo 200, sin enlace, log).
+- 429 con `Retry-After` = la ventana entera y sin cabeceras de cuota. El login fallido
+  responde un único 401 y compara con bcrypt aunque el correo no exista.
+- La IP la **firma el gateway en cada reenvío** (`x-origen-cliente`,
+  `apps/gateway/src/routing/origen.js`); si la firma no vale, el servicio usa la de la
+  conexión. `PROXY_SALTOS_CONFIANZA`: vacía en local, 1 en Container Apps.
+- El ingreso de Container Apps **no ofrece limitación de tasa** (sólo restricción por IP,
+  CORS y afinidad de sesión): no hay nada que configurar ahí.
+
 ### Capa 1 — Cliente (SPA)
 
 - El token vive **en memoria**, no en `localStorage` ni en cookies.
@@ -457,8 +474,9 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
   no, si se usa `FOR UPDATE SKIP LOCKED` (`docs/adr/0012`).
 - **Clave por servicio.** Todos comparten `SERVICIO_JWT_SECRET`. Claves asimétricas por
   emisor o identidad administrada de Azure (`docs/adr/0009`).
-- **Limitación de tasa.** No existe; `login` y `recuperar` primero. Quizá en el ingreso
-  de Container Apps.
+- **Límite holgado para el resto de la API.** Aplazado: el estricto de las rutas de
+  autenticación está hecho (`docs/adr/0020`); si hace falta frenar abuso en lo demás,
+  cada servicio se limita a sí mismo.
 - **Autoservicio de pago del inquilino** (`docs/adr/0006`): reporte + confirmación, o
   pasarela. La regla iría en el ABAC de ms-financiero.
 - **Devoluciones:** `EGRESO` en `TIPOS_TRANSACCION` y en el `CHECK`. No es anular.
@@ -482,7 +500,11 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
 - No introduzcas service mesh, Kubernetes ni service discovery.
 - No guardes el token en `localStorage`, `sessionStorage` ni cookies, ni lo aceptes por
   query string.
-- No crees tablas fuera de las canónicas sin actualizar el documento primero.
+- No crees tablas **de dominio** fuera de las canónicas sin actualizar el documento
+  primero. La regla es del modelo de negocio: las tablas operativas internas de un
+  servicio —salida, procesados, envíos, `limites_tasa`— no lo amplían y no se tramitan.
+  Una tabla nueva sí se tramita cuando llega con un flujo de negocio nuevo, como
+  `tokens_recuperacion` con la recuperación de contraseña.
 - No cambies el SRS ni el PMP por tu cuenta: los cambios van por PMP §13.3.2.
 - No borres pruebas para que el build pase.
 

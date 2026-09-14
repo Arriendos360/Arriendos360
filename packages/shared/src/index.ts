@@ -230,3 +230,16 @@ export {
   validarEntorno,
 } from './entorno';
 export type { Entorno } from './entorno';
+
+// ── Origen del cliente ───────────────────────────────────────────────────────
+//
+// La IP que ve el gateway, firmada para el servicio de destino. `X-Forwarded-For`
+// lo puede escribir el cliente; esto no. Ver la cabecera de `origen.ts`.
+export {
+  CABECERA_ORIGEN_CLIENTE,
+  VIGENCIA_ORIGEN_SEGUNDOS,
+  audienciaDeOrigen,
+  firmarOrigenCliente,
+  verificarOrigenCliente,
+} from './origen';
+export type { OpcionesFirmaOrigen, OpcionesVerificacionOrigen } from './origen';

@@ -11,6 +11,7 @@ const {
     describirMatriz
 } = require('./routing');
 const { crearCacheRevocados } = require('./routing/cacheRevocados');
+const { crearConfianzaDeProxy } = require('./routing/origen');
 const { enteroDeEntorno, validarEntorno } = require('arriendos360-shared');
 
 /**
@@ -38,6 +39,11 @@ const { enteroDeEntorno, validarEntorno } = require('arriendos360-shared');
  *      (regla dura 5).
  */
 const app = express();
+
+// La IP del cliente: la de la conexión, o la de `X-Forwarded-For` tras tantos
+// proxies de confianza como diga PROXY_SALTOS_CONFIANZA. Es la que la costura firma
+// para los servicios. Ver `routing/origen.js`.
+app.set('trust proxy', crearConfianzaDeProxy());
 
 /**
  * Caché de tokens revocados.

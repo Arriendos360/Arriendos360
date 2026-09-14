@@ -33,7 +33,11 @@ import { app } from './app';
 import { sequelize } from './config/database';
 import { aplicarMigraciones } from './database/migraciones';
 import { almacen, publicador } from './eventos';
+import { purgarVencidos } from './services/limites';
 import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
+
+/** Cada cuanto se borran las ventanas vencidas de los limites de tasa. */
+const PURGA_LIMITES_MS = 5 * 60 * 1000;
 
 const PUERTO = enteroDeEntorno('PORT', 3011);
 
@@ -53,6 +57,14 @@ const iniciar = async (): Promise<void> => {
         ? `✅ ms-identidad: migraciones aplicadas: ${aplicadas.join(', ')}`
         : '✅ ms-identidad: esquema al día, sin migraciones pendientes',
     );
+
+    // Una ventana vencida ya no cuenta para nada, solo ocupa sitio. Aqui y no al
+    // cargar el modulo, para que ninguna suite arranque un temporizador.
+    setInterval(() => {
+      purgarVencidos().catch((error: Error) =>
+        console.error('⚠️  ms-identidad: no se pudieron purgar los límites de tasa:', error.message),
+      );
+    }, PURGA_LIMITES_MS).unref();
 
     const pendientes = await almacen.contar();
     await publicador.iniciar();
