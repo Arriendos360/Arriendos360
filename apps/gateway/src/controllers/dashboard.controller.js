@@ -46,6 +46,7 @@ const {
     ESTADO_CONTRATO_FINALIZADO,
     ESTADO_CUENTA_EN_MORA,
     ESTADO_CUENTA_PAGADA,
+    ESTADO_CUENTA_PARCIAL,
     ESTADO_CUENTA_PENDIENTE
 } = require('../constantes');
 const { hoyEnZonaNegocio } = require('arriendos360-shared');
@@ -105,13 +106,16 @@ const obtenerMora = async (req, res) => {
         const hoy = hoyEnZonaNegocio();
         const mios = await idsDeContratos(sub);
 
-        // Los dos estados en UNA petición, y el `Op.or` que había se convierte
-        // en un filtro sobre lo que vuelve. La condición no es simétrica —las
-        // EN_MORA entran todas, las PENDIENTE sólo si su corte ya pasó— así que
-        // no cabía en un filtro de estado y se aplica aquí, igual que antes se
-        // aplicaba en el `where`.
+        // Los estados en UNA petición, y el `Op.or` que había se convierte en
+        // un filtro sobre lo que vuelve. La condición no es simétrica —las
+        // EN_MORA entran todas, las PENDIENTE y PARCIAL sólo si su corte ya
+        // pasó— así que no cabía en un filtro de estado y se aplica aquí.
+        //
+        // PARCIAL entra por la misma razón que en el motor de ms-financiero: una
+        // cuenta con saldo y el corte vencido debe, haya recibido abonos o no.
         const candidatas = await cuentasDeContratos(mios, [
             ESTADO_CUENTA_PENDIENTE,
+            ESTADO_CUENTA_PARCIAL,
             ESTADO_CUENTA_EN_MORA
         ]);
 

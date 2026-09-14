@@ -170,7 +170,13 @@ const crearFinancieroFalso = async (opciones = {}) => {
         transacciones.set(transaccion.id_transaccion, transaccion);
 
         const nuevoSaldo = saldoDe(cuenta);
-        cuenta.estado = nuevoSaldo <= 0 ? 'PAGADA' : nuevoSaldo < parseFloat(cuenta.valor) ? 'PARCIAL' : 'PENDIENTE';
+        // EN_MORA gana sobre PARCIAL, como en `estadoSegunSaldo` del servicio real:
+        // abonar a una cuenta vencida no la pone al día.
+        cuenta.estado = nuevoSaldo <= 0
+            ? 'PAGADA'
+            : cuenta.estado === 'EN_MORA'
+              ? 'EN_MORA'
+              : nuevoSaldo < parseFloat(cuenta.valor) ? 'PARCIAL' : 'PENDIENTE';
 
         return res.status(201).json({
             mensaje: nuevoSaldo === 0 ? 'Pago completado exitosamente' : 'Pago parcial registrado exitosamente',

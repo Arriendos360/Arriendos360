@@ -110,6 +110,14 @@ beforeAll(async () => {
     });
     financieroFalso().sembrarCuenta({
         id_contrato: idContrato,
+        valor: 200,
+        estado: 'PARCIAL',
+        // Abonada a medias y con el corte pasado: también debe. Hasta
+        // feature/fix-mora-parcial el dashboard no la contaba.
+        inicio: '2020-02-01'
+    });
+    financieroFalso().sembrarCuenta({
+        id_contrato: idContrato,
         valor: 300,
         estado: 'EN_MORA',
         inicio: '2026-03-01'
@@ -129,14 +137,14 @@ describe('Las métricas se componen de tres servicios', () => {
         expect(respuesta.body.cantidad_pagos).toBe(2);
     });
 
-    test('mora cuenta las EN_MORA y las PENDIENTE con el corte pasado', async () => {
+    test('mora cuenta las EN_MORA y las PENDIENTE o PARCIAL con el corte pasado', async () => {
         const respuesta = await metrica('mora');
 
         expect(respuesta.statusCode).toBe(200);
-        // La de 700 (pendiente y vencida) y la de 300 (en mora). La de
-        // 2026-02-01 está pagada y la otra pendiente no ha llegado a su corte.
-        expect(respuesta.body.cantidad_en_mora).toBe(2);
-        expect(respuesta.body.total_mora).toBe(1000);
+        // La de 700 (pendiente y vencida), la de 200 (parcial y vencida) y la de
+        // 300 (en mora). Las de enero y febrero de 2026 están pagadas.
+        expect(respuesta.body.cantidad_en_mora).toBe(3);
+        expect(respuesta.body.total_mora).toBe(1200);
     });
 
     test('el detalle de mora trae `saldo_pendiente`, que el gateway no calcula', async () => {

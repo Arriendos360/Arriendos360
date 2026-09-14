@@ -70,7 +70,7 @@ import {
 import { esUuid } from '../models/uuid';
 import { emitirCuentaCobro } from '../services/cuentas';
 import { adjuntarContratoACuentas, adjuntarContratoATransacciones, adjuntarInquilino } from '../services/composicion';
-import { DIAS_PARA_MORA, periodoAFacturar } from '../services/motor';
+import { DIAS_PARA_MORA, ESTADOS_QUE_ENTRAN_EN_MORA, periodoAFacturar } from '../services/motor';
 import { generarPDFComprobante } from '../services/pdfService';
 import {
   conSaldo,
@@ -560,8 +560,8 @@ export const anularTransaccion = async (req: Request, res: Response): Promise<Re
  *
  * Se unifica aqui, que es lo que el paso 6e tocaba hacer: la regla es «seis dias
  * desde el corte», la misma constante y el mismo `diasEntre()` que usa el motor.
- * Y `PARCIAL` deja de entrar, tambien como en el motor: una cuenta con algo
- * abonado no se marca en mora por este camino.
+ * Y los mismos estados, `ESTADOS_QUE_ENTRAN_EN_MORA`: `PENDIENTE` y `PARCIAL`. Una
+ * cuenta con saldo y el corte vencido entra en mora aunque haya recibido abonos.
  *
  * Lo que NO se unifica es el alcance: el motor barre el sistema entero y esto
  * solo los contratos de quien llama. Es la diferencia entre un proceso y una
@@ -579,7 +579,7 @@ export const verificarMora = async (req: Request, res: Response): Promise<Respon
 
     const candidatas = await CuentaCobro.findAll({
       where: {
-        estado: ESTADO_CUENTA_PENDIENTE,
+        estado: { [Op.in]: [...ESTADOS_QUE_ENTRAN_EN_MORA] },
         inicio: { [Op.lt]: hoy },
         id_contrato: { [Op.in]: mios },
       },
