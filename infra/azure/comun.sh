@@ -10,6 +10,9 @@
 # $(...) —ids, estados y hasta el sufijo saldrían distintos—, y MSYS reescribe como rutas de
 # Windows los argumentos que empiezan por «/», como /subscriptions/... Hacia la terminal se
 # deja pasar tal cual, para que las preguntas de `az` se vean.
+#
+# Sin esa reescritura, una ruta de archivo como /c/Users/... llega a `az` —un programa de
+# Windows— como C:\c\Users\...: las que se le pasan van por `ruta`.
 case "${OSTYPE:-}" in
   msys* | cygwin*)
     export MSYS_NO_PATHCONV=1
@@ -20,6 +23,10 @@ case "${OSTYPE:-}" in
         command az "$@" | tr -d '\r'
       fi
     }
+    ruta() { cygpath -m "$1"; }
+    ;;
+  *)
+    ruta() { printf '%s' "$1"; }
     ;;
 esac
 
