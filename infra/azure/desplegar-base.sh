@@ -27,7 +27,7 @@ fi
 az deployment group create \
   -g "$GRUPO" \
   -n base \
-  -f "$DIR/base.bicep" \
+  -f "$(ruta "$DIR/base.bicep")" \
   -p sufijo="$SUFIJO" \
   --confirm-with-what-if \
   -o none

@@ -26,7 +26,7 @@ fi
 
 PARAMETROS=(sufijo="$SUFIJO" etiqueta="$ETIQUETA" usuarioRegistro="$USUARIO_GHCR")
 
-az deployment group what-if -g "$GRUPO" -n trabajos -f "$DIR/trabajos.bicep" -p "${PARAMETROS[@]}"
+az deployment group what-if -g "$GRUPO" -n trabajos -f "$(ruta "$DIR/trabajos.bicep")" -p "${PARAMETROS[@]}"
 
 if [ "${CONFIRMADO:-}" != "si" ]; then
   read -rp "¿Desplegar los Jobs con la etiqueta $ETIQUETA? (s/N) " respuesta
@@ -36,7 +36,7 @@ if [ "${CONFIRMADO:-}" != "si" ]; then
   fi
 fi
 
-az deployment group create -g "$GRUPO" -n trabajos -f "$DIR/trabajos.bicep" \
+az deployment group create -g "$GRUPO" -n trabajos -f "$(ruta "$DIR/trabajos.bicep")" \
   -p "${PARAMETROS[@]}" -o none
 
 echo
