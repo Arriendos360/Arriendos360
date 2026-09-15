@@ -504,7 +504,7 @@ ramas nuevas desde `main` con ese prefijo.
   compilados; tiempo límite del proxy y `CORS_ORIGENES` en el gateway; aviso de
   «despertando» y reintento en el login de la SPA; borrador del ADR 0022. *Verifica:* todas
   las suites, las seis imágenes `--target produccion` con su tamaño, Compose igual que hoy.
-- [ ] **2 — Infraestructura base (PR; empieza el gasto).** Desde Cloud Shell y en orden:
+- [x] **2 — Infraestructura base (PR; empieza el gasto).** Desde Cloud Shell y en orden:
   `infra/azure/bootstrap.sh` (grupo `rg-arriendos360`, Key Vault, identidades, credencial
   federada, roles y secretos), `desplegar-base.sh` (`base.bicep`: Log Analytics con tope
   diario, PostgreSQL 15, Storage con `anexos` y el entorno, sin apps) y
@@ -527,19 +527,19 @@ ramas nuevas desde `main` con ese prefijo.
 
 ### Estado al 2026-09-15
 
-- **PRs abiertos, sin fusionar:** #27 (plan y corte 1, sobre `main`) y #28 (corte 2, sobre
-  #27; GitHub lo retargetea a `main` al fusionar #27).
-- **En Azure, desplegado con los scripts del corte 2:** grupo `rg-arriendos360`
-  (`mexicocentral`), `kv-arriendos360-8b4d5b` con los seis secretos,
-  `id-arriendos360-apps`, `id-arriendos360-despliegue`, `log-arriendos360`,
-  `cae-arriendos360`, `starriendos3608b4d5b` y `psql-arriendos360-8b4d5b`.
-  **PostgreSQL está cobrando** mientras esté encendido.
-- **`verificar-base.sh`:** pasaron secretos, tope de logs, entorno y Storage. Se cortó al
-  listar el firewall de PostgreSQL (la CLI ya no acepta `-n` ahí; corregido en #28), así que
-  **falta la prueba de TLS**. Siguiente paso: en Cloud Shell, `git pull` en la rama
-  `feature/despliegue-azure-base` y repetir `bash infra/azure/verificar-base.sh`. Si la base
-  está detenida, antes `az postgres flexible-server start -g rg-arriendos360 -n
-  psql-arriendos360-8b4d5b`. Con todo en verde se marca el corte 2.
+- **Cortes 0, 1 y 2 cerrados.** #27 (corte 1) está en `main`. #28 (corte 2) se fusionó en
+  `feature/despliegue-azure` segundos después de #27, antes de que GitHub lo retargeteara,
+  y no llegó a `main`: lo trae `feature/despliegue-azure-corte2`. **No apilar PRs**: cada
+  corte sale de `main` cuando el anterior ya está fusionado.
+- **En Azure:** grupo `rg-arriendos360` (`mexicocentral`), `kv-arriendos360-8b4d5b` con los
+  seis secretos, `id-arriendos360-apps`, `id-arriendos360-despliegue`, `log-arriendos360`,
+  `cae-arriendos360`, `starriendos3608b4d5b` y `psql-arriendos360-8b4d5b`. **PostgreSQL
+  cobra** mientras esté encendido: `az postgres flexible-server stop|start -g
+  rg-arriendos360 -n psql-arriendos360-8b4d5b`.
+- **`verificar-base.sh` sin fallos:** secretos, tope de logs, entorno, Storage privado con
+  `anexos`, TLSv1.3 con certificado verificado a PostgreSQL 15.19 y rechazo de conexiones
+  sin TLS. Cloud Shell entra por la regla de servicios de Azure.
+- **Siguiente:** corte 3, imágenes a GHCR y Jobs de migración y seed.
 - **CLI de Azure en la máquina de desarrollo:** no instalada. Se propuso instalarla para
   que Claude lea estado, `what-if` y logs desde el corte 3; los scripts siguen pensados para
   Cloud Shell (en Windows `az` devuelve `\r\n` y la base no acepta conexiones de fuera de

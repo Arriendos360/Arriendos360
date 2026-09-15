@@ -95,6 +95,10 @@ gateway.
 - **Log Analytics** con tope de 0,15 GB diarios, por debajo de los 5 GB mensuales gratuitos.
 - **Validado** con `bicep build` y `bicep lint` sin avisos (CLI 0.47). Sin `az` en la
   máquina de desarrollo, el `what-if` y la verificación se ejecutan en Cloud Shell.
+- **Verificado en Azure** (2026-09-15) con `verificar-base.sh`: los seis secretos, el tope
+  de logs, el entorno, Storage sin acceso público, y PostgreSQL 15.19 con TLSv1.3 y
+  certificado verificado por el almacén de Node —lo mismo que `DB_SSL=si`—, rechazando
+  las conexiones sin TLS.
 
 ## Mediciones del corte 1 (local, Docker Desktop)
 
