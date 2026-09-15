@@ -74,6 +74,32 @@ gateway.
 - El login de la SPA reintenta ante un 502, 503 o 504, o si no hay respuesta, y avisa de
   que el servicio está despertando.
 
+### Infraestructura base (corte 2)
+
+- **Un script para lo previo, Bicep para lo demás.** `infra/azure/bootstrap.sh` crea el
+  grupo, el Key Vault, las identidades, sus roles y la credencial federada, y carga los
+  secretos. Va aparte por dos motivos: `base.bicep` lee del Key Vault la contraseña de
+  PostgreSQL, que tiene que existir antes, y asignar roles exige ser propietario, mientras
+  que la identidad del pipeline sólo es colaboradora del grupo.
+- **Secretos que no ve nadie.** Los aleatorios los genera el script sin imprimirlos, y
+  repetirlo nunca los rota. La cadena de conexión de Storage no existe hasta crear la
+  cuenta: la escribe Bicep directamente en el Key Vault.
+- **Nombres.** Los que deben ser únicos en Azure llevan un sufijo derivado del id de la
+  suscripción: estable entre ejecuciones y sin anotar nada en el repositorio.
+- **Identidades.** `id-arriendos360-apps` sólo lee secretos. `id-arriendos360-despliegue`
+  entra desde GitHub Actions por OIDC con el sujeto
+  `repo:Arriendos360/Arriendos360:environment:produccion`.
+- **PostgreSQL 15**, la misma versión mayor que Compose, con `require_secure_transport`
+  fijado. Los cinco servicios entran con el usuario administrador, como en Compose; un rol
+  por esquema queda como decisión abierta.
+- **Log Analytics** con tope de 0,15 GB diarios, por debajo de los 5 GB mensuales gratuitos.
+- **Validado** con `bicep build` y `bicep lint` sin avisos (CLI 0.47). Sin `az` en la
+  máquina de desarrollo, el `what-if` y la verificación se ejecutan en Cloud Shell.
+- **Verificado en Azure** (2026-09-15) con `verificar-base.sh`: los seis secretos, el tope
+  de logs, el entorno, Storage sin acceso público, y PostgreSQL 15.19 con TLSv1.3 y
+  certificado verificado por el almacén de Node —lo mismo que `DB_SSL=si`—, rechazando
+  las conexiones sin TLS.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |
