@@ -160,6 +160,32 @@ gateway.
   Analytics era inválida (`rows[].[0]`, ahora `rows[*][0]`) y el error se silenciaba; y
   `verificar-base.sh` daba por bueno el rechazo sin TLS ante un simple timeout.
 
+### Servicios y motor (corte 4)
+
+- **Una Container App por proceso** (`modulos/app.bicep`): revisión única, perfil
+  Consumption, 0,25 vCPU y 0,5 GiB, de 0 a 1 réplica. El tope de 1 también protege el orden
+  por clave del bus, que no está garantizado con varias réplicas de un productor.
+- **Ingreso.** `gateway` externo, sólo HTTPS (HTTP redirige), con `PROXY_SALTOS_CONFIANZA=1`
+  y `PROXY_TIMEOUT_MS=60000`. Los cinco servicios internos, llamados por `http://ms-*` dentro
+  del entorno con `allowInsecure`: la protección son los tokens de usuario y de servicio, no
+  la red. El cifrado entre apps del entorno queda como opción, no activada.
+- **Variables.** Las que cada `server.ts` exige, con `MIGRACIONES_AL_ARRANCAR=no`,
+  `DB_SSL=si`, `DB_POOL_MAX=3` y `MOTOR_PROGRAMACION=trabajo`. Todo valor secreto es referencia
+  al Key Vault, y también la dirección de Gmail (`email-usuario`): no es secreta, pero es
+  personal y no va en el repositorio. `URL_APP` y `CORS_ORIGENES` quedan vacías hasta el
+  corte 5.
+- **Motor.** Job programado `motor-financiero` con `modulos/trabajo.bicep`, que unifica los
+  Jobs manuales y programados. Hallazgo: el script sólo anotaba los avisos en la tabla de
+  salida y salía, y con ms-financiero dormido nadie los publicaba hasta que algo lo
+  despertara. Ahora hace hasta doce barridos del publicador, con 10 s de pausa, antes de
+  salir; lo pendiente lo entrega el servicio al arrancar. Exige `MS_NOTIFICACIONES_URL`,
+  porque sin suscriptores el publicador marca los avisos como entregados.
+- **Verificación** (`verificar-apps.sh`): primero espera a que las seis apps estén en cero
+  réplicas y mide el login en frío, porque cualquier otra prueba las despierta; después
+  HTTPS y redirección, servicios inalcanzables por su FQDN interno y externo, login en
+  caliente, el Job del motor y, con `CORREO_PRUEBA`, el envío de recuperación en el log de
+  ms-notificaciones.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |

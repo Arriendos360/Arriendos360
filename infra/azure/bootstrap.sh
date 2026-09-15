@@ -157,6 +157,7 @@ pedir() {
     echo "  $nombre: guardado"
   fi
 }
+pedir email-usuario "Dirección de Gmail que envía los correos"
 pedir email-pass "Contraseña de aplicación de Gmail"
 pedir ghcr-token "Token classic de GHCR con read:packages"
 

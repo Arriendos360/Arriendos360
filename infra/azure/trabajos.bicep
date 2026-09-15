@@ -90,7 +90,7 @@ var servicios = [
   'notificaciones'
 ]
 
-module migrar 'modulos/trabajo-manual.bicep' = [
+module migrar 'modulos/trabajo.bicep' = [
   for servicio in servicios: {
     name: 'migrar-${servicio}'
     params: {
@@ -113,7 +113,7 @@ module migrar 'modulos/trabajo-manual.bicep' = [
   }
 ]
 
-module seedIdentidad 'modulos/trabajo-manual.bicep' = {
+module seedIdentidad 'modulos/trabajo.bicep' = {
   name: 'seed-identidad'
   params: {
     nombre: 'seed-identidad'
