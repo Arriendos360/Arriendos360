@@ -100,6 +100,31 @@ gateway.
   certificado verificado por el almacén de Node —lo mismo que `DB_SSL=si`—, rechazando
   las conexiones sin TLS.
 
+### Imágenes y Jobs de migración (corte 3)
+
+- **Workflow manual «Imágenes», sólo desde `main`.** Construye las seis imágenes con
+  `--target produccion` y las publica en `ghcr.io/arriendos360/<nombre>:<commit>`. Sin
+  `latest`: cada despliegue nombra exactamente lo que corre. Publica con el `GITHUB_TOKEN`
+  de la ejecución (`packages: write`), sin secretos guardados ni acceso a Azure, y por eso
+  no pasa por el entorno con aprobación. La etiqueta `source` enlaza el paquete con el
+  repositorio, que es privado: el token de GHCR de Container Apps lo lee por esa vía.
+- **Un Job manual por servicio, `migrar-<servicio>`,** con la imagen de producción del
+  servicio y `node dist/database/aplicar.js`: cada uno migra sólo su esquema. Más
+  `seed-identidad` con `node dist/database/seed.js`. 0,25 vCPU y 0,5 GiB, diez minutos
+  y un reintento, que es seguro: el runner toma el bloqueo consultivo y salta lo aplicado, y
+  el seed no repite usuarios. `DB_POOL_MAX=2`.
+- **Secretos y registro.** `db-password` y `ghcr-token` son referencias al Key Vault
+  resueltas con `id-arriendos360-apps`; el registro es `ghcr.io` con el usuario dueño del
+  token. Si la referencia del registro fallara (riesgo anotado en CLAUDE.md), la salida es
+  publicar las imágenes como públicas.
+- **Scripts.** `desplegar-trabajos.sh <commit>` con `what-if` y confirmación;
+  `ejecutar-trabajo.sh <job>` lanza, espera y muestra la salida desde Log Analytics con
+  `az rest`, sin la extensión `containerapp`. `verificar-trabajos.sh` hace dos rondas de los
+  seis Jobs a la vez: en la segunda cada migración debe decir «sin migraciones pendientes» y
+  el seed encontrar los tres usuarios, así que vale sobre una base vacía o ya migrada.
+- **Git Bash.** `comun.sh` quita el `\r` que `az` añade en Windows y fija
+  `MSYS_NO_PATHCONV`; sin eso, hasta el sufijo de los nombres saldría distinto.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |

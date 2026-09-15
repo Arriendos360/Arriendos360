@@ -1,0 +1,86 @@
+# Construye las seis imágenes de producción y las publica en GHCR (corte 3, docs/adr/0022).
+#
+# Manual y sólo desde `main`: a Azure llega lo que pasó por un PR. La etiqueta de cada imagen
+# es el commit; es la que recibe infra/azure/desplegar-trabajos.sh.
+#
+# No toca Azure ni usa secretos guardados: publica con el GITHUB_TOKEN que Actions crea para
+# cada ejecución. Por eso no pasa por el entorno `produccion` ni pide aprobación; eso llega
+# con el pipeline de despliegue del corte 6.
+
+name: Imágenes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: imagenes
+  cancel-in-progress: false
+
+jobs:
+  imagen:
+    name: ${{ matrix.nombre }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nombre: gateway
+            dockerfile: apps/gateway/Dockerfile
+          - nombre: ms-identidad
+            dockerfile: services/ms-identidad/Dockerfile
+          - nombre: ms-inmuebles
+            dockerfile: services/ms-inmuebles/Dockerfile
+          - nombre: ms-contratos
+            dockerfile: services/ms-contratos/Dockerfile
+          - nombre: ms-financiero
+            dockerfile: services/ms-financiero/Dockerfile
+          - nombre: ms-notificaciones
+            dockerfile: services/ms-notificaciones/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: produccion
+          push: true
+          # Sin atestación de procedencia: la imagen queda como un manifiesto simple, el
+          # formato más compatible con el registro de Container Apps.
+          provenance: false
+          tags: ghcr.io/arriendos360/${{ matrix.nombre }}:${{ github.sha }}
+          # `source` enlaza el paquete con el repositorio: quien puede leer el repositorio
+          # puede descargar la imagen, incluido el token de Container Apps.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.nombre }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.nombre }}
+
+  resumen:
+    needs: imagen
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          {
+            echo "### Imágenes publicadas"
+            echo
+            echo "Etiqueta: \`${GITHUB_SHA}\`"
+            echo
+            echo '```bash'
+            echo "bash infra/azure/desplegar-trabajos.sh ${GITHUB_SHA}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
