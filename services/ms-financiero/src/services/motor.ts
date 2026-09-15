@@ -594,9 +594,9 @@ export const HORARIO_CRON = '1 0 * * *';
  *
  * `trabajo` (Container Apps): este proceso NO programa nada. Container Apps escala a
  * cero sin trafico, y un contenedor dormido a las 00:01 no dispararia su cron: no se
- * generarian cuentas ni alertas, sin error ni log. Lo ejecuta un trabajo programado
- * (`infra/azure/motor-financiero-job.bicep`) que levanta la misma imagen, corre
- * `npm run motor` y se apaga. Ver `docs/adr/0021`.
+ * generarian cuentas ni alertas, sin error ni log. Lo ejecuta el Job programado
+ * `motor-financiero` (`infra/azure/apps.bicep`), que levanta la misma imagen, corre
+ * `node dist/scripts/motor.js` y se apaga. Ver `docs/adr/0021`.
  *
  * La zona horaria va explicita: sin ella el cron usa la del contenedor, y en uno en UTC
  * las 00:01 son las 19:01 del dia anterior en Bogota. `noOverlap` evita que un barrido

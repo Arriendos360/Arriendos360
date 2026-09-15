@@ -288,11 +288,14 @@ Tipos en `packages/shared/src/eventos.ts`.
 
 `services/ms-financiero/src/services/motor.ts`. **Cuándo corre lo decide
 `MOTOR_PROGRAMACION`, obligatoria y sin defecto:** `cron` en Compose y local (node-cron en
-el proceso, 00:01 de Bogotá) y `trabajo` en Container Apps, donde un Job programado
-(`infra/azure/motor-financiero-job.bicep`, `1 5 * * *` en UTC) ejecuta `npm run motor` y
-el proceso no programa nada (`docs/adr/0021`). **El motor es idempotente**: puede correr
-dos veces el mismo día, seguidas o a la vez, sin duplicar cuentas ni avisos, y
-`npm run motor` sale con 1 si algo falla para que el Job reintente.
+el proceso, 00:01 de Bogotá) y `trabajo` en Container Apps, donde el Job programado
+`motor-financiero` (`infra/azure/apps.bicep`, `1 5 * * *` en UTC) ejecuta
+`node dist/scripts/motor.js` —lo mismo que `npm run motor`, compilado— y el proceso no
+programa nada (`docs/adr/0021`). **El motor es idempotente**: puede correr dos veces el
+mismo día, seguidas o a la vez, sin duplicar cuentas ni avisos, y sale con 1 si algo falla
+para que el Job reintente. **Antes de salir entrega sus avisos** con unos barridos del
+publicador: con ms-financiero escalado a cero nadie más lo haría. Por eso exige
+`MS_NOTIFICACIONES_URL`: sin ella el publicador marcaría los avisos como entregados.
 
 **La primera cuenta de cobro es del evento**: `procesarContratos()` hace las siguientes y
 **salta el primer periodo SIEMPRE, exista o no**, para no facturar dos veces dentro de la
@@ -516,10 +519,14 @@ ramas nuevas desde `main` con ese prefijo.
   `gh workflow run imagenes.yml --ref main`, `desplegar-trabajos.sh <commit>` y
   `verificar-trabajos.sh`. *Verifica:* ese script sin fallos —ejecuciones en `Succeeded`,
   relanzar una migración no hace nada, usuarios de demostración creados—.
-- [ ] **4 — Servicios y motor (PR).** Módulo genérico de app ×6 con referencias a Key Vault
-  y variables de Azure; Job del motor con comando compilado. *Verifica:* gateway por HTTPS,
-  servicios inalcanzables desde internet, login con `curl`, motor en `Succeeded`, correo de
-  recuperación recibido, y **el primer login con todo en cero, medido**.
+- [ ] **4 — Servicios y motor (PR).** `apps.bicep` con `modulos/app.bicep` ×6 (0–1 réplica,
+  referencias a Key Vault) y el Job `motor-financiero` con `modulos/trabajo.bicep`, que
+  sustituye a `trabajo-manual.bicep` y a `motor-financiero-job.bicep`. Secreto nuevo
+  `email-usuario` (lo pide `bootstrap.sh`). En orden, tras fusionar: imágenes,
+  `desplegar-trabajos.sh <commit>`, `verificar-trabajos.sh`, `desplegar-apps.sh <commit>` y
+  `CORREO_PRUEBA=<gmail> verificar-apps.sh`. *Verifica:* ese script sin fallos —primer login
+  con todo en cero medido, gateway por HTTPS, servicios inalcanzables desde internet, login,
+  motor en `Succeeded` y envío de recuperación registrado— y el correo en el buzón.
 - [ ] **5 — SPA (PR).** Static Web Apps Free con `REACT_APP_API_URL` del gateway.
   *Verifica:* la demostración completa en el navegador, incluida la recarga de una ruta interna.
 - [ ] **6 — Pipeline (PR).** `desplegar.yml`: pruebas → imágenes → Bicep → migraciones →
@@ -553,7 +560,10 @@ ramas nuevas desde `main` con ese prefijo.
   esa etiqueta. Los cinco esquemas migrados y los tres usuarios de demostración creados.
 - **`verificar-trabajos.sh` sin fallos:** Container Apps descarga de GHCR privado con el
   token del Key Vault; relanzar no migra nada y el seed encuentra los tres usuarios.
-- **Siguiente:** corte 4, las seis apps y el Job del motor.
+- **Corte 4 en PR** (`feature/despliegue-azure-apps`), sin desplegar: `what-if` de
+  `apps.bicep` en `Succeeded` (crea las seis apps y el Job del motor). Faltan imágenes nuevas
+  —cambió `scripts/motor.ts`—, el secreto `email-usuario`, desplegar y verificar. La suite de
+  ms-financiero no se pudo correr: necesita Docker Desktop encendido.
 - **CLI de Azure instalada en la máquina de desarrollo** (2.90). `comun.sh` quita el `\r` de
   `az` y desactiva la conversión de rutas de MSYS, así que los scripts corren también desde
   Git Bash; si una terminal no encuentra `az`, abrir una nueva (el PATH es de la

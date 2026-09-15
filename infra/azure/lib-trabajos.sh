@@ -35,33 +35,38 @@ esperar_ejecucion() {
   done
 }
 
-# salida_ejecucion <ejecución>: lo que escribió el contenedor, leído de Log Analytics
-# (ContainerAppConsoleLogs_CL; cada réplica se llama <ejecución>-<sufijo>). La ingesta tarda:
-# consulta hasta que dos lecturas seguidas coinciden, seis minutos como mucho, e imprime lo
-# último que obtuvo. Un error de la consulta se muestra y corta: reintentarlo en silencio
-# sólo lo esconde.
-salida_ejecucion() {
-  local espacio consulta cuerpo salida anterior="" error
+# consulta_logs <kql>: primera columna de cada fila de una consulta a Log Analytics. La
+# consulta va dentro de JSON: sólo comillas simples. Un error se muestra y devuelve 1:
+# reintentarlo en silencio sólo lo esconde.
+consulta_logs() {
+  local espacio error
   espacio="$(az monitor log-analytics workspace show -g "$GRUPO" -n log-arriendos360 --query customerId -o tsv)"
-  consulta="ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith '$1' | order by TimeGenerated asc | project Log_s"
-  cuerpo="{\"query\": \"$consulta\"}"
   error="$(mktemp)"
+  if ! az rest --method post \
+    --url "https://api.loganalytics.io/v1/workspaces/$espacio/query" \
+    --resource "https://api.loganalytics.io" \
+    --body "{\"query\": \"$1\"}" \
+    --query "tables[0].rows[*][0]" -o tsv 2>"$error"; then
+    printf 'ERROR al consultar Log Analytics: %s\n' "$(head -c 300 "$error")" >&2
+    rm -f "$error"
+    return 1
+  fi
+  rm -f "$error"
+}
+
+# salida_ejecucion <ejecución>: lo que escribió el contenedor (ContainerAppConsoleLogs_CL;
+# cada réplica se llama <ejecución>-<sufijo>). La ingesta tarda: consulta hasta que dos
+# lecturas seguidas coinciden, seis minutos como mucho, e imprime lo último que obtuvo.
+salida_ejecucion() {
+  local consulta salida anterior=""
+  consulta="ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith '$1' | order by TimeGenerated asc | project Log_s"
   for _ in $(seq 1 24); do
-    if ! salida="$(az rest --method post \
-      --url "https://api.loganalytics.io/v1/workspaces/$espacio/query" \
-      --resource "https://api.loganalytics.io" \
-      --body "$cuerpo" \
-      --query "tables[0].rows[*][0]" -o tsv 2>"$error")"; then
-      printf 'ERROR al consultar Log Analytics: %s\n' "$(head -c 300 "$error")" >&2
-      rm -f "$error"
-      return 1
-    fi
+    salida="$(consulta_logs "$consulta")" || return 1
     if [ -n "$salida" ] && [ "$salida" = "$anterior" ]; then
       break
     fi
     anterior="$salida"
     sleep 15
   done
-  rm -f "$error"
   printf '%s\n' "$salida"
 }

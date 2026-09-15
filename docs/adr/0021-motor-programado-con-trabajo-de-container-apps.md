@@ -31,6 +31,12 @@ trabajo programado —que se reintenta y puede solaparse— hacía visibles:
 Un `Microsoft.App/jobs` con `triggerType: Schedule` levanta la imagen de ms-financiero,
 ejecuta `npm run motor` y se apaga (`infra/azure/motor-financiero-job.bicep`).
 
+> **Anotación (paso 8, corte 4, `docs/adr/0022`):** el Job vive ahora en
+> `infra/azure/apps.bicep` con el comando compilado `node dist/scripts/motor.js` y los
+> secretos como referencias al Key Vault; `motor-financiero-job.bicep` se borró. Antes de
+> salir, el script entrega los avisos que anotó, porque con ms-financiero escalado a cero
+> nadie más los publicaría.
+
 Se descartó que el trabajo llamara a un endpoint interno del servicio:
 
 - **El estado de la ejecución es el código de salida**, que es lo que Container Apps usa
