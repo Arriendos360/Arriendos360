@@ -485,7 +485,7 @@ ramas nuevas desde `main` con ese prefijo.
 | Recursos anteriores | Se borra el grupo `Arriendos360_Project` entero: App Service B1, Container Registry Basic y el Static Web App enlazado al repositorio del curso, todos de la versión monolítica. Su base estaba en Neon, fuera de Azure, y no se migra. |
 | Base | PostgreSQL Flexible Server B1ms, una base con los cinco esquemas, TLS obligatorio, acceso público restringido a servicios de Azure. Riesgo documentado; la red privada queda como decisión abierta. |
 | Archivos | Blob Storage, contenedor privado `anexos`. |
-| Secretos | Key Vault. Apps y Jobs sólo llevan referencias, resueltas con identidad administrada. Ningún valor en el Bicep ni en el repo. |
+| Secretos | Key Vault. Apps y Jobs sólo llevan referencias, resueltas con identidad administrada. Ningún valor en el Bicep ni en el repo. `jwt-secret`, `servicio-jwt-secret` y `db-password` los genera `bootstrap.sh` sin mostrarlos y nunca los rota; `email-pass` y `ghcr-token` se teclean; `storage-connection-string` la escribe Bicep. |
 | Migraciones | Un Job manual por servicio, lanzado por el pipeline **antes** de publicar revisiones. En Azure `MIGRACIONES_AL_ARRANCAR=no`: con migraciones pendientes el servicio no arranca. Bloqueo consultivo en el runner. |
 | Motor | Job programado `1 5 * * *` UTC (`docs/adr/0021`), con el comando compilado. |
 | Imágenes | GHCR privado. Etapa `produccion` en cada Dockerfile: TypeScript compilado y sin dependencias de desarrollo. |
@@ -495,20 +495,21 @@ ramas nuevas desde `main` con ese prefijo.
 
 ### Cortes
 
-- [ ] **0 — Verificaciones (manual, $0).** En Cloud Shell: Container Apps, Jobs y PostgreSQL
-  B1ms disponibles en `mexicocentral`; proveedores registrados; gasto actual en Cost
-  Management; contraseña de aplicación de Gmail; token `read:packages` de GHCR. *Hecho:*
-  regiones y política, proveedores (faltaban `KeyVault` y `ManagedIdentity`), inventario y
-  grupo anterior borrado; crédito restante $52 de $100 (2026-09-15). *Falta:* Gmail, GHCR.
+- [x] **0 — Verificaciones (manual, $0).** Container Apps, Jobs y PostgreSQL B1ms
+  disponibles en `mexicocentral`; proveedores `KeyVault` y `ManagedIdentity` registrados;
+  grupo anterior borrado; $52 de $100 de crédito el 2026-09-15; contraseña de aplicación de
+  Gmail y token `read:packages` de GHCR creados.
 - [x] **1 — Código para producción (PR, $0).** Dockerfiles multietapa; `DB_SSL` y
   `DB_POOL_MAX`; `MIGRACIONES_AL_ARRANCAR` y bloqueo consultivo; migrar, motor y seed
   compilados; tiempo límite del proxy y `CORS_ORIGENES` en el gateway; aviso de
   «despertando» y reintento en el login de la SPA; borrador del ADR 0022. *Verifica:* todas
   las suites, las seis imágenes `--target produccion` con su tamaño, Compose igual que hoy.
-- [ ] **2 — Infraestructura base (PR; empieza el gasto).** `infra/azure/bootstrap.sh`
-  (grupo, Key Vault, identidades, credencial federada, roles) y carga manual de secretos.
-  Bicep de Log Analytics con tope diario, PostgreSQL, Storage y el entorno, sin apps.
-  *Verifica:* conexión TLS a la base y secretos presentes.
+- [ ] **2 — Infraestructura base (PR; empieza el gasto).** Desde Cloud Shell y en orden:
+  `infra/azure/bootstrap.sh` (grupo `rg-arriendos360`, Key Vault, identidades, credencial
+  federada, roles y secretos), `desplegar-base.sh` (`base.bicep`: Log Analytics con tope
+  diario, PostgreSQL 15, Storage con `anexos` y el entorno, sin apps) y
+  `verificar-base.sh`. *Verifica:* ese script sin fallos —secretos presentes, TLS con
+  certificado verificado y rechazo de conexiones sin TLS—.
 - [ ] **3 — Imágenes y migraciones (PR).** Workflow manual de imágenes a GHCR; Jobs
   `migrar-*` y `seed-identidad`. *Verifica:* ejecuciones en `Succeeded`, relanzar una
   migración no hace nada, usuario de demostración creado.
@@ -523,6 +524,26 @@ ramas nuevas desde `main` con ese prefijo.
   *Verifica:* repetir el despliegue sin cambios es inocuo.
 - [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
   presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
+
+### Estado al 2026-09-15
+
+- **PRs abiertos, sin fusionar:** #27 (plan y corte 1, sobre `main`) y #28 (corte 2, sobre
+  #27; GitHub lo retargetea a `main` al fusionar #27).
+- **En Azure, desplegado con los scripts del corte 2:** grupo `rg-arriendos360`
+  (`mexicocentral`), `kv-arriendos360-8b4d5b` con los seis secretos,
+  `id-arriendos360-apps`, `id-arriendos360-despliegue`, `log-arriendos360`,
+  `cae-arriendos360`, `starriendos3608b4d5b` y `psql-arriendos360-8b4d5b`.
+  **PostgreSQL está cobrando** mientras esté encendido.
+- **`verificar-base.sh`:** pasaron secretos, tope de logs, entorno y Storage. Se cortó al
+  listar el firewall de PostgreSQL (la CLI ya no acepta `-n` ahí; corregido en #28), así que
+  **falta la prueba de TLS**. Siguiente paso: en Cloud Shell, `git pull` en la rama
+  `feature/despliegue-azure-base` y repetir `bash infra/azure/verificar-base.sh`. Si la base
+  está detenida, antes `az postgres flexible-server start -g rg-arriendos360 -n
+  psql-arriendos360-8b4d5b`. Con todo en verde se marca el corte 2.
+- **CLI de Azure en la máquina de desarrollo:** no instalada. Se propuso instalarla para
+  que Claude lea estado, `what-if` y logs desde el corte 3; los scripts siguen pensados para
+  Cloud Shell (en Windows `az` devuelve `\r\n` y la base no acepta conexiones de fuera de
+  Azure).
 
 ### Riesgos a vigilar
 
@@ -549,6 +570,9 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
   no, si se usa `FOR UPDATE SKIP LOCKED` (`docs/adr/0012`).
 - **Clave por servicio.** Todos comparten `SERVICIO_JWT_SECRET`. Claves asimétricas por
   emisor o identidad administrada de Azure (`docs/adr/0009`).
+- **Usuario de base por servicio.** En Azure, como en Compose, los cinco servicios entran
+  con el mismo usuario administrador: la regla 3 la sostiene el código, no la base. Un rol
+  por servicio con permisos sólo sobre su esquema (`docs/adr/0022`).
 - **Límite holgado para el resto de la API.** Aplazado: el estricto de las rutas de
   autenticación está hecho (`docs/adr/0020`); si hace falta frenar abuso en lo demás,
   cada servicio se limita a sí mismo.
