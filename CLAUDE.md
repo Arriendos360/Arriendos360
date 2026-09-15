@@ -499,7 +499,7 @@ ramas nuevas desde `main` con ese prefijo.
   B1ms disponibles en `mexicocentral`; proveedores registrados; gasto actual en Cost
   Management; contraseña de aplicación de Gmail; token `read:packages` de GHCR. *Hecho:*
   regiones y política, proveedores (faltaban `KeyVault` y `ManagedIdentity`), inventario y
-  decisión de borrar el grupo anterior. *Falta:* borrarlo, crédito restante, Gmail, GHCR.
+  grupo anterior borrado; crédito restante $52 de $100 (2026-09-15). *Falta:* Gmail, GHCR.
 - [x] **1 — Código para producción (PR, $0).** Dockerfiles multietapa; `DB_SSL` y
   `DB_POOL_MAX`; `MIGRACIONES_AL_ARRANCAR` y bloqueo consultivo; migrar, motor y seed
   compilados; tiempo límite del proxy y `CORS_ORIGENES` en el gateway; aviso de
@@ -532,7 +532,8 @@ ramas nuevas desde `main` con ese prefijo.
   una réplica.
 - **Crédito limitado.** ~$16/mes de PostgreSQL (~$1 si entra en la oferta gratuita, sin
   confirmar para Azure for Students). El App Service B1 y el registro de la versión anterior
-  estuvieron gastando el mismo crédito hasta que se borraron: medir cuánto queda. Al agotarse
+  gastaron casi la mitad del crédito: el 2026-09-15 quedaban $52, unos tres meses de
+  PostgreSQL encendido. Detenerlo entre sesiones es lo que más lo estira. Al agotarse
   el crédito o a los 12 meses la suscripción se deshabilita y todo se detiene: `pg_dump`
   antes de cada hito. PostgreSQL se puede detener entre sesiones, siete días como máximo.
 - **Correo con cuenta personal:** credencial personal en la nube y tope diario de Gmail.
