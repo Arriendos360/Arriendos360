@@ -185,6 +185,33 @@ gateway.
   HTTPS y redirección, servicios inalcanzables por su FQDN interno y externo, login en
   caliente, el Job del motor y, con `CORREO_PRUEBA`, el envío de recuperación en el log de
   ms-notificaciones.
+- **Tiempos de espera al despertar.** La primera verificación mostró que los clientes internos
+  esperan 3 s por defecto y un servicio dormido tarda más: el Job del motor falló contra
+  ms-contratos y sólo pasó en el reintento. Lo mismo le pasaría al dashboard, a la
+  pertenencia y a la resolución de correos. En Azure todas las `MS_*_TIMEOUT_MS` y
+  `COMPOSICION_TIMEOUT_MS` son de 30 s, por debajo de los 60 s del proxy del gateway. La
+  entrega del bus sigue en 10 s: si falla, reintenta.
+- **Escala a cero en cadena.** Los servicios con caché de revocados consultan a ms-identidad
+  cada 15 s, así que ms-identidad es la última en dormirse: sólo cuando las demás ya no
+  tienen tráfico. Medido: las otras cinco a cero a los ~5 minutos, ms-identidad a los ~20.
+- **Tres fallos del script en Git Bash, corregidos:** el `curl` de mingw es un programa de
+  Windows y no escribía en rutas `/tmp/...` —el login respondía 200, pero el cuerpo se
+  perdía—; `date +%s | tail -c 9` dejaba un `\n` en el documento del registro de prueba; y el
+  `openssl` de mingw termina en `\r\n`, así que `tr -d '\n'` dejaba un `\r` en la contraseña.
+  Los dos últimos invalidaban el JSON y ms-identidad respondía 400. El del `\r` también
+  estaba en `bootstrap.sh`: los secretos existentes se generaron en Cloud Shell y están bien.
+- **Medido en Azure (2026-09-15), tras subir las esperas:**
+
+  | Prueba | Resultado |
+  |---|---|
+  | Primer login con las seis apps en cero réplicas | 200 con token en **36,8 s** |
+  | Login con todo despierto | 200 en 0,6 s |
+  | `http://` del gateway | 301 a HTTPS |
+  | Los cinco servicios por su FQDN interno y externo, desde internet | 404 |
+  | Job `motor-financiero` | `Succeeded` al primer intento |
+  | Registro de un propietario de prueba con apps despertando | 201 en 30,8 s |
+  | Recuperación → correo enviado por ms-notificaciones | 200; envío registrado a los 26 s |
+
 
 ## Mediciones del corte 1 (local, Docker Desktop)
 
@@ -211,10 +238,10 @@ Blob y la generación de PDF.
   lista las siete pendientes. Dos `aplicar.js` lanzados a la vez aplican cada migración una
   sola vez —el segundo termina «sin migraciones pendientes»— y un tercero no hace nada.
 
-## Pendiente de medir (corte 4)
+## Pendiente de medir (corte 7)
 
-- Tiempo del primer login en Azure con todo escalado a cero.
-- Costo real de las primeras semanas, y si PostgreSQL entra en la oferta gratuita.
+- Costo real de las primeras semanas, y si PostgreSQL entra en la oferta gratuita. El primer
+  login en frío ya se midió en el corte 4: 36,8 s.
 
 ## Consecuencias
 

@@ -519,14 +519,17 @@ ramas nuevas desde `main` con ese prefijo.
   `gh workflow run imagenes.yml --ref main`, `desplegar-trabajos.sh <commit>` y
   `verificar-trabajos.sh`. *Verifica:* ese script sin fallos —ejecuciones en `Succeeded`,
   relanzar una migración no hace nada, usuarios de demostración creados—.
-- [ ] **4 — Servicios y motor (PR).** `apps.bicep` con `modulos/app.bicep` ×6 (0–1 réplica,
+- [x] **4 — Servicios y motor (PR).** `apps.bicep` con `modulos/app.bicep` ×6 (0–1 réplica,
   referencias a Key Vault) y el Job `motor-financiero` con `modulos/trabajo.bicep`, que
   sustituye a `trabajo-manual.bicep` y a `motor-financiero-job.bicep`. Secreto nuevo
-  `email-usuario` (lo pide `bootstrap.sh`). En orden, tras fusionar: imágenes,
+  `email-usuario` (lo pide `bootstrap.sh`). Clientes internos con 30 s de espera
+  (`MS_*_TIMEOUT_MS`): con 3 s fallaba toda llamada a un servicio dormido. En orden, tras
+  fusionar: imágenes,
   `desplegar-trabajos.sh <commit>`, `verificar-trabajos.sh`, `desplegar-apps.sh <commit>` y
   `CORREO_PRUEBA=<gmail> verificar-apps.sh`. *Verifica:* ese script sin fallos —primer login
   con todo en cero medido, gateway por HTTPS, servicios inalcanzables desde internet, login,
-  motor en `Succeeded` y envío de recuperación registrado— y el correo en el buzón.
+  motor en `Succeeded` y envío de recuperación registrado— y el correo en el buzón. *Hecho:*
+  todo en verde y el correo llegó (2026-09-15).
 - [ ] **5 — SPA (PR).** Static Web Apps Free con `REACT_APP_API_URL` del gateway.
   *Verifica:* la demostración completa en el navegador, incluida la recarga de una ruta interna.
 - [ ] **6 — Pipeline (PR).** `desplegar.yml`: pruebas → imágenes → Bicep → migraciones →
@@ -535,48 +538,102 @@ ramas nuevas desde `main` con ese prefijo.
 - [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
   presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
 
-### Estado al 2026-09-15
+### Estado y cómo retomar (2026-09-15)
 
-- **Cortes 0, 1 y 2 cerrados.** #27 (corte 1) está en `main`. #28 (corte 2) se fusionó en
-  `feature/despliegue-azure` segundos después de #27, antes de que GitHub lo retargeteara,
-  y no llegó a `main`: lo trae `feature/despliegue-azure-corte2`. **No apilar PRs**: cada
-  corte sale de `main` cuando el anterior ya está fusionado.
-- **En Azure:** grupo `rg-arriendos360` (`mexicocentral`), `kv-arriendos360-8b4d5b` con los
-  seis secretos, `id-arriendos360-apps`, `id-arriendos360-despliegue`, `log-arriendos360`,
-  `cae-arriendos360`, `starriendos3608b4d5b` y `psql-arriendos360-8b4d5b`. **PostgreSQL
-  cobra** mientras esté encendido: `az postgres flexible-server stop|start -g
-  rg-arriendos360 -n psql-arriendos360-8b4d5b`.
-- **`verificar-base.sh` sin fallos:** secretos, tope de logs, entorno, Storage privado con
-  `anexos`, TLSv1.3 con certificado verificado a PostgreSQL 15.19 y rechazo de conexiones
-  sin TLS. Cloud Shell entra por la regla de servicios de Azure.
-- **Corte 3 cerrado.** #30 y #31 en `main`; el workflow «Imágenes» publicó las seis imágenes
-  con la etiqueta `39e4482a6b89792b3f7fe6b4f04355696189a6ed`. El entorno había nacido en
-  modo **Express** (sin Jobs ni referencias a Key Vault): se borró vacío y se recreó en
-  `WorkloadProfiles`. Eso, la consulta de Log Analytics de `lib-trabajos.sh` y un falso
-  positivo de `verificar-base.sh` van en `feature/despliegue-azure-entorno`.
-- **En Azure, además del corte 2:** `cae-arriendos360` en `WorkloadProfiles`
-  (`ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io`) y los Jobs
-  `migrar-{identidad,inmuebles,contratos,financiero,notificaciones}` y `seed-identidad` con
-  esa etiqueta. Los cinco esquemas migrados y los tres usuarios de demostración creados.
-- **`verificar-trabajos.sh` sin fallos:** Container Apps descarga de GHCR privado con el
-  token del Key Vault; relanzar no migra nada y el seed encuentra los tres usuarios.
-- **Corte 4 en PR** (`feature/despliegue-azure-apps`), sin desplegar: `what-if` de
-  `apps.bicep` en `Succeeded` (crea las seis apps y el Job del motor). Faltan imágenes nuevas
-  —cambió `scripts/motor.ts`—, el secreto `email-usuario`, desplegar y verificar. La suite de
-  ms-financiero no se pudo correr: necesita Docker Desktop encendido.
-- **CLI de Azure instalada en la máquina de desarrollo** (2.90). `comun.sh` quita el `\r` de
-  `az` y desactiva la conversión de rutas de MSYS, así que los scripts corren también desde
-  Git Bash; si una terminal no encuentra `az`, abrir una nueva (el PATH es de la
-  instalación). Claude lee estado, `what-if` y logs; crear, cambiar o borrar se pregunta
-  antes. La base no acepta conexiones desde fuera de Azure: la prueba de TLS de
-  `verificar-base.sh` sólo pasa en Cloud Shell. `verificar-trabajos.sh` no la necesita.
+**Cortes 0 a 4 cerrados. Lo siguiente es el corte 5.**
+
+**Antes de nada, al retomar:**
+
+1. **Fusionar #34** (ajustes y cierre del corte 4) si sigue abierto: `main` no tiene aún las
+   esperas de 30 s, las correcciones de los scripts ni este apartado. Lo desplegado en Azure
+   **sí** lleva las esperas: se desplegó desde esa rama.
+2. **Encender PostgreSQL** si se detuvo; ninguna app arranca sin él:
+   `az postgres flexible-server start -g rg-arriendos360 -n psql-arriendos360-8b4d5b`
+   (unos minutos). Al terminar la sesión, `stop`: cobra ~$0,50 al día encendido.
+3. **Mirar el crédito** en https://www.microsoftazuresponsorships.com/balance (quedaban $52
+   el 2026-09-15).
+4. **No apilar PRs**: cada corte sale de `main` con el anterior ya fusionado. #28 se fusionó
+   en la rama de #27 y no llegó a `main` (lo rescató #29).
+
+**Qué hay en Azure** (grupo `rg-arriendos360`, `mexicocentral`):
+
+| Recurso | Detalle |
+|---|---|
+| `kv-arriendos360-8b4d5b` | Siete secretos: `jwt-secret`, `servicio-jwt-secret`, `db-password`, `storage-connection-string`, `email-usuario`, `email-pass`, `ghcr-token`. |
+| `psql-arriendos360-8b4d5b` | PostgreSQL 15 B1ms, base `arriendos360_db`, los cinco esquemas migrados. Sólo admite servicios de Azure: desde la máquina de desarrollo no hay conexión. |
+| `cae-arriendos360` | Entorno en modo `WorkloadProfiles`, dominio `ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io`. |
+| Apps | `gateway` en **https://gateway.ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io**; `ms-identidad`, `ms-inmuebles`, `ms-contratos`, `ms-financiero`, `ms-notificaciones` internas. 0–1 réplica. |
+| Jobs | `migrar-{identidad,inmuebles,contratos,financiero,notificaciones}` y `seed-identidad` (manuales); `motor-financiero` (`1 5 * * *` UTC). |
+| Etiqueta desplegada | `732ced282ed08f650d58a232f46d9cdfe54560ac` en apps y Jobs. |
+| Otros | `starriendos3608b4d5b` (contenedor `anexos`), `log-arriendos360`, identidades `id-arriendos360-apps` y `id-arriendos360-despliegue`. |
+
+**Datos de prueba en Azure:** los tres usuarios del seed (`propietario@`, `inquilino@` y
+`ambos@arriendos360.test`, contraseña `Prueba123`) y un propietario con el correo real del
+usuario, registrado con contraseña aleatoria para probar la recuperación: se entra
+restableciéndola. El remitente es la cuenta de Gmail de `email-usuario`. **Ninguna dirección
+personal va en el repositorio.** Borrar esa cuenta al terminar el proyecto.
+
+**Medido en el corte 4** (detalle en `docs/adr/0022`): primer login con las seis apps en cero,
+200 en **36,8 s**; en caliente, 0,6 s. ms-identidad es la última en dormirse (~20 min): los
+demás le piden los revocados cada 15 s.
+
+**Máquina de desarrollo:**
+
+- CLI de Azure 2.90 con sesión iniciada. Si una terminal no encuentra `az`, abrir otra, o
+  `export PATH="$PATH:/c/Program Files/Microsoft SDKs/Azure/CLI2/wbin"`.
+- Los scripts de `infra/azure` corren en **Git Bash** y en Cloud Shell. `comun.sh` corrige lo
+  de Windows (`\r` de `az`, conversión de rutas de MSYS, `ruta` para archivos). En Git Bash,
+  `curl` y `openssl` son programas de Windows: rutas con `cygpath` y `tr -d '\r\n'`.
+- Única excepción: la prueba de TLS de `verificar-base.sh` sólo pasa en Cloud Shell.
+- **Pruebas:** con Docker Desktop encendido,
+  `docker compose -f infra/docker-compose.yml up -d db` y `npm test --workspaces --if-present`
+  (695 en verde el 2026-09-15).
+- Claude lee estado, `what-if` y logs por su cuenta; **crear, cambiar o borrar en Azure se
+  pregunta antes**.
+
+**Redesplegar tras un cambio de código,** en este orden:
+
+1. Fusionar el PR en `main`.
+2. `gh workflow run imagenes.yml --ref main`. La etiqueta es el commit de `main`.
+3. `bash infra/azure/desplegar-trabajos.sh <commit>`.
+4. `bash infra/azure/verificar-trabajos.sh`, que aplica las migraciones nuevas y lo comprueba.
+5. `bash infra/azure/desplegar-apps.sh <commit>`.
+6. `CORREO_PRUEBA=<correo de una cuenta real> bash infra/azure/verificar-apps.sh`. Tarda
+   ~30 min: espera a que todo duerma. ms-identidad deja 3 recuperaciones por hora por cuenta
+   y las demás las ignora en silencio.
+
+Con `CONFIRMADO=si` los `desplegar-*` no preguntan tras el `what-if`.
+
+**Corte 5 — lo que ya se sabe:**
+
+- La SPA lee `REACT_APP_API_URL` al compilar (`apps/web/src/services/api.js`) y **incluye
+  `/api`**: `https://gateway.ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io/api`.
+  Se resuelve en el build, no en tiempo de ejecución.
+- Falta `staticwebapp.config.json` con `navigationFallback` a `index.html`, para que recargar
+  una ruta interna no dé 404.
+- El Static Web App es nuevo, Free, con región de metadatos `eastus2`, y va en Bicep.
+- Con su URL, redesplegar las apps con
+  `URL_APP=<url de la SPA> CORS_ORIGENES=<url de la SPA> bash infra/azure/desplegar-apps.sh <commit>`.
+  Hoy el enlace del correo de recuperación apunta a `http://localhost:3000` y el CORS del
+  gateway admite cualquier origen.
+- Por decidir en el corte: cómo se publica el build sin guardar el token del Static Web App
+  en el repositorio ni en GitHub. Una opción es pedirlo con `az staticwebapp secrets list` al
+  publicar; el pipeline del corte 6 lo automatizará.
+- `CI=true npx react-scripts build` pasa desde el corte 1; mantenerlo así.
+
+**Cabos sueltos, fuera de los cortes:**
+
+- GitHub avisa de **34 vulnerabilidades** en las dependencias de `main` (11 altas).
+- Las imágenes usan **Node 18**, sin soporte. Conviene un PR aparte antes de la sustentación.
+- Los logs de Log Analytics leídos desde Windows pierden tildes y emojis. Es sólo al leerlos:
+  no afecta a nada.
 
 ### Riesgos a vigilar
 
-- **Arranque en frío del login.** El gateway espera 3 s a identidad al arrancar y el proxy
-  10 s: con todo dormido, el primer login del día puede tardar 20–60 s y devolver 502. Se
-  mide en el corte 4. Antes de una sustentación, `calentar.yml` deja gateway e identidad con
-  una réplica.
+- **Arranque en frío del login.** Medido en el corte 4: con las seis apps en cero, el primer
+  login tarda **36,8 s** y responde 200 (proxy a 60 s, clientes internos a 30 s). La SPA
+  reintenta y avisa, pero en una sustentación son 37 s de silencio: antes, `calentar.yml`
+  (corte 6) deja gateway e identidad con una réplica.
 - **Crédito limitado.** ~$16/mes de PostgreSQL (~$1 si entra en la oferta gratuita, sin
   confirmar para Azure for Students). El App Service B1 y el registro de la versión anterior
   gastaron casi la mitad del crédito: el 2026-09-15 quedaban $52, unos tres meses de

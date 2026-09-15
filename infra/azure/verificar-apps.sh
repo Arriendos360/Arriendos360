@@ -49,9 +49,12 @@ replicas() {
 
 # login: «<código HTTP> <segundos>», con el cuerpo en $TRABAJO/login.json.
 login() {
-  curl -sS -o "$TRABAJO/login.json" -w '%{http_code} %{time_total}' --max-time 150 \
-    -X POST -H 'Content-Type: application/json' -d "$LOGIN" "$URL/api/auth/login" 2>/dev/null ||
-    echo "000 150"
+  local medida
+  # curl escribe el -w aunque salga con error (un tiempo de espera, un cuerpo que no pudo
+  # guardar): se toma lo que escribió en vez de sumarle una segunda línea.
+  medida="$(curl -sS -o "$(ruta "$TRABAJO/login.json")" -w '%{http_code} %{time_total}' --max-time 150 \
+    -X POST -H 'Content-Type: application/json' -d "$LOGIN" "$URL/api/auth/login" 2>/dev/null)" || true
+  printf '%s\n' "${medida:-000 150}"
 }
 
 comprobar_login() {
@@ -122,11 +125,15 @@ echo "== 6. Correo de recuperación"
 if [ -z "${CORREO_PRUEBA:-}" ]; then
   echo "  (omitido: sin CORREO_PRUEBA)"
 else
-  CONTRASENA="$(openssl rand -base64 18 | tr -d '/+=\n')"
-  DOCUMENTO="9$(date +%s | tail -c 9)"
+  # Sin «\r»: el openssl de Git Bash termina en «\r\n», y un retorno de carro dentro del
+  # string invalida el JSON.
+  CONTRASENA="$(openssl rand -base64 18 | tr -d '/+=\r\n')"
+  # Diez dígitos y nada más: con `tail -c` se colaba el salto de línea y el JSON no parseaba.
+  MARCA="$(date +%s)"
+  DOCUMENTO="9${MARCA: -9}"
   REGISTRO="$(printf '{"nombres":"Prueba","apellidos":"Despliegue","email":"%s","contrasena":"%s","telefono":"3000000000","documento":"%s"}' \
     "$CORREO_PRUEBA" "$CONTRASENA" "$DOCUMENTO")"
-  codigo="$(curl -s -o "$TRABAJO/registro.json" -w '%{http_code}' --max-time 90 -X POST \
+  codigo="$(curl -s -o "$(ruta "$TRABAJO/registro.json")" -w '%{http_code}' --max-time 90 -X POST \
     -H 'Content-Type: application/json' -d "$REGISTRO" "$URL/api/auth/registro" || true)"
   case "$codigo" in
     200 | 201) ok "cuenta de prueba registrada" ;;
@@ -135,7 +142,7 @@ else
   esac
 
   DESDE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  codigo="$(curl -s -o "$TRABAJO/recuperar.json" -w '%{http_code}' --max-time 90 -X POST \
+  codigo="$(curl -s -o "$(ruta "$TRABAJO/recuperar.json")" -w '%{http_code}' --max-time 90 -X POST \
     -H 'Content-Type: application/json' -d "{\"email\":\"$CORREO_PRUEBA\"}" "$URL/api/auth/recuperar" || true)"
   if [ "$codigo" = "200" ]; then ok "recuperación solicitada"; else fallo "recuperar: HTTP $codigo: $(head -c 200 "$TRABAJO/recuperar.json")"; fi
 

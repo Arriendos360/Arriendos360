@@ -112,6 +112,16 @@ var jwtUsuario = [
   }
 ]
 
+// Los clientes internos esperan 3 s por defecto, y un servicio que despierta de cero tarda
+// más: sin esto, la primera llamada a un servicio dormido falla —el motor de las 00:01
+// contra ms-contratos, el dashboard, la pertenencia—. 30 s, por debajo de los 60 s del
+// proxy del gateway, para que un fallo interno llegue antes que el del proxy.
+func esperasAlDespertar(variables array) array =>
+  map(variables, variable => {
+    name: variable
+    value: '30000'
+  })
+
 func deProceso(nombre string, puerto int) array => [
   {
     name: 'PORT'
@@ -177,6 +187,12 @@ module gateway 'modulos/app.bicep' = {
           value: '60000'
         }
       ],
+      esperasAlDespertar([
+        'MS_IDENTIDAD_TIMEOUT_MS'
+        'MS_INMUEBLES_TIMEOUT_MS'
+        'MS_CONTRATOS_TIMEOUT_MS'
+        'MS_FINANCIERO_TIMEOUT_MS'
+      ]),
       empty(corsOrigenes)
         ? []
         : [
@@ -234,7 +250,9 @@ module inmuebles 'modulos/app.bicep' = {
       'jwt-secret'
       'servicio-jwt-secret'
     ]
-    variables: concat(deProceso('ms-inmuebles', 3012), baseDatos, jwtUsuario, migracionesFuera, [
+    variables: concat(deProceso('ms-inmuebles', 3012), baseDatos, jwtUsuario, migracionesFuera, esperasAlDespertar([
+      'MS_IDENTIDAD_TIMEOUT_MS'
+    ]), [
       {
         name: 'MS_IDENTIDAD_URL'
         value: url.identidad
@@ -261,7 +279,11 @@ module contratos 'modulos/app.bicep' = {
       'servicio-jwt-secret'
       'storage-connection-string'
     ]
-    variables: concat(deProceso('ms-contratos', 3013), baseDatos, jwtUsuario, migracionesFuera, [
+    variables: concat(deProceso('ms-contratos', 3013), baseDatos, jwtUsuario, migracionesFuera, esperasAlDespertar([
+      'MS_IDENTIDAD_TIMEOUT_MS'
+      'MS_INMUEBLES_TIMEOUT_MS'
+      'COMPOSICION_TIMEOUT_MS'
+    ]), [
       {
         name: 'MS_IDENTIDAD_URL'
         value: url.identidad
@@ -305,7 +327,10 @@ module financiero 'modulos/app.bicep' = {
       'jwt-secret'
       'servicio-jwt-secret'
     ]
-    variables: concat(deProceso('ms-financiero', 3014), baseDatos, jwtUsuario, migracionesFuera, [
+    variables: concat(deProceso('ms-financiero', 3014), baseDatos, jwtUsuario, migracionesFuera, esperasAlDespertar([
+      'MS_CONTRATOS_TIMEOUT_MS'
+      'MS_IDENTIDAD_TIMEOUT_MS'
+    ]), [
       {
         name: 'MS_CONTRATOS_URL'
         value: url.contratos
@@ -349,6 +374,9 @@ module notificaciones 'modulos/app.bicep' = {
       deProceso('ms-notificaciones', 3015),
       baseDatos,
       migracionesFuera,
+      esperasAlDespertar([
+        'MS_IDENTIDAD_TIMEOUT_MS'
+      ]),
       [
         {
           name: 'MS_IDENTIDAD_URL'
@@ -416,7 +444,9 @@ module motor 'modulos/trabajo.bicep' = {
       'db-password'
       'servicio-jwt-secret'
     ]
-    variables: concat(baseDatos, [
+    variables: concat(baseDatos, esperasAlDespertar([
+      'MS_CONTRATOS_TIMEOUT_MS'
+    ]), [
       {
         name: 'SERVICIO_NOMBRE'
         value: 'ms-financiero'
