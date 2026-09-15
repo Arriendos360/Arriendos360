@@ -18,7 +18,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { Sequelize } from 'sequelize';
+import type { Sequelize, Transaction } from 'sequelize';
 
 import { ESQUEMA } from '../config/database';
 
@@ -45,16 +45,40 @@ export const listarMigraciones = (): Migracion[] => {
     .map((archivo) => ({ nombre: archivo, ruta: path.join(RUTA_BASE, archivo) }));
 };
 
+/**
+ * Clave del bloqueo consultivo que serializa a quien migra ESTE esquema.
+ *
+ * En Azure las migraciones las aplica un Job antes de publicar la revision, no cada
+ * replica al arrancar; pero un Job se puede reintentar o lanzar dos veces. Con el
+ * bloqueo, dos procesos migrando a la vez no chocan: el segundo espera y, al
+ * obtenerlo, ve lo que dejo anotado el primero. Ver `docs/adr/0022`.
+ */
+const BLOQUEO = `migraciones:${ESQUEMA}`;
+
+/** Toma el bloqueo DENTRO de la transaccion: se suelta solo al terminarla. */
+const bloquear = (conexion: Sequelize, transaccion: Transaction): Promise<unknown> =>
+  conexion.query('SELECT pg_advisory_xact_lock(hashtext(:clave))', {
+    replacements: { clave: BLOQUEO },
+    transaction: transaccion,
+  });
+
 const asegurarTablaControl = async (conexion: Sequelize): Promise<void> => {
   // El esquema tiene que existir antes que su tabla de control, y la primera
-  // migracion es justamente la que lo crea. De ahi que se cree aqui tambien.
-  await conexion.query(`CREATE SCHEMA IF NOT EXISTS ${ESQUEMA}`);
-  await conexion.query(`
+  // migracion es justamente la que lo crea. De ahi que se cree aqui tambien. Bajo el
+  // bloqueo: dos `CREATE TABLE IF NOT EXISTS` simultaneos pueden chocar en el catalogo.
+  await conexion.transaction(async (transaccion) => {
+    await bloquear(conexion, transaccion);
+    await conexion.query(`CREATE SCHEMA IF NOT EXISTS ${ESQUEMA}`, { transaction: transaccion });
+    await conexion.query(
+      `
         CREATE TABLE IF NOT EXISTS ${TABLA_CONTROL} (
             nombre      VARCHAR(255) PRIMARY KEY,
             aplicada_en TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )
-    `);
+    `,
+      { transaction: transaccion },
+    );
+  });
 };
 
 /**
@@ -66,30 +90,58 @@ const asegurarTablaControl = async (conexion: Sequelize): Promise<void> => {
 export const aplicarMigraciones = async (conexion: Sequelize): Promise<string[]> => {
   await asegurarTablaControl(conexion);
 
-  const [filas] = await conexion.query(`SELECT nombre FROM ${TABLA_CONTROL}`);
-  const yaAplicadas = new Set((filas as Array<{ nombre: string }>).map((f) => f.nombre));
-
   const aplicadas: string[] = [];
 
   for (const migracion of listarMigraciones()) {
-    if (yaAplicadas.has(migracion.nombre)) {
-      continue;
-    }
-
     const sql = fs.readFileSync(migracion.ruta, 'utf8');
 
-    await conexion.transaction(async (transaccion) => {
+    // La comprobacion de si ya esta aplicada va DENTRO de la transaccion y DESPUES del
+    // bloqueo: si otro proceso la esta aplicando, se espera a que termine y se salta.
+    const aplicada = await conexion.transaction(async (transaccion) => {
+      await bloquear(conexion, transaccion);
+
+      const [filas] = await conexion.query(`SELECT 1 FROM ${TABLA_CONTROL} WHERE nombre = :nombre`, {
+        replacements: { nombre: migracion.nombre },
+        transaction: transaccion,
+      });
+      if ((filas as unknown[]).length > 0) {
+        return false;
+      }
+
       await conexion.query(sql, { transaction: transaccion });
       await conexion.query(`INSERT INTO ${TABLA_CONTROL} (nombre) VALUES (:nombre)`, {
         replacements: { nombre: migracion.nombre },
         transaction: transaccion,
       });
+      return true;
     });
 
-    aplicadas.push(migracion.nombre);
+    if (aplicada) {
+      aplicadas.push(migracion.nombre);
+    }
   }
 
   return aplicadas;
+};
+
+/**
+ * Las migraciones de disco que la base no tiene anotadas. NO escribe nada: es lo que
+ * usa el arranque con `MIGRACIONES_AL_ARRANCAR=no` para negarse a servir con el esquema
+ * atrasado.
+ */
+export const migracionesPendientes = async (conexion: Sequelize): Promise<string[]> => {
+  const nombres = listarMigraciones().map((migracion) => migracion.nombre);
+
+  const [control] = await conexion.query('SELECT to_regclass(:tabla) AS tabla', {
+    replacements: { tabla: TABLA_CONTROL },
+  });
+  if ((control as Array<{ tabla: string | null }>)[0]?.tabla == null) {
+    return nombres;
+  }
+
+  const [filas] = await conexion.query(`SELECT nombre FROM ${TABLA_CONTROL}`);
+  const anotadas = new Set((filas as Array<{ nombre: string }>).map((fila) => fila.nombre));
+  return nombres.filter((nombre) => !anotadas.has(nombre));
 };
 
 /**

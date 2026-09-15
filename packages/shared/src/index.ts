@@ -226,6 +226,7 @@ export {
   enteroOpcionalDeEntorno,
   faltantesDeEntorno,
   leerEntorno,
+  siNoDeEntorno,
   textoDeEntorno,
   validarEntorno,
 } from './entorno';

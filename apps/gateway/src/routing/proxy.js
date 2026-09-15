@@ -16,6 +16,8 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
+const { enteroDeEntorno } = require('arriendos360-shared');
+
 const { CABECERAS_DE_ORIGEN, cabecerasDeOrigen } = require('./origen');
 
 /**
@@ -98,7 +100,10 @@ const responderFalloDeRed = (res, servicio, causa) => {
  * @param {{ timeoutMs?: number, secretoServicio?: string }} [opciones]
  */
 const reenviar = (req, res, urlBase, servicio, opciones = {}) => {
-    const timeoutMs = opciones.timeoutMs || TIMEOUT_POR_DEFECTO_MS;
+    // `PROXY_TIMEOUT_MS` sube el límite en Azure: un servicio dormido tarda en despertar
+    // más que los 10 s de desarrollo, y cortar antes es devolver un 502 a una petición que
+    // iba a salir bien. Ver `docs/adr/0022`.
+    const timeoutMs = opciones.timeoutMs || enteroDeEntorno('PROXY_TIMEOUT_MS', TIMEOUT_POR_DEFECTO_MS);
 
     let destino;
     try {

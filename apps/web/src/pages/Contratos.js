@@ -64,8 +64,10 @@ const Contratos = () => {
         telefono: ''
     });
 
+    // Carga una vez al montar; `fetchData` se recrea en cada render.
     useEffect(() => {
         fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const showNotify = (mensaje, tipo = 'error') => {

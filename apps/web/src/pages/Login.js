@@ -4,6 +4,18 @@ import { Link, useNavigate } from 'react-router-dom';
 import { guardarSesion } from '../auth/sesion';
 import api from '../services/api';
 
+/**
+ * Reintentos del login ante un servicio que está despertando.
+ *
+ * En Azure los servicios escalan a cero: el primer acceso del día puede recibir un 502,
+ * 503 o 504 —o quedarse sin respuesta— mientras el gateway y ms-identidad arrancan. No
+ * es un error de credenciales y no hay que mostrarlo como tal: se reintenta con espera
+ * creciente y se dice lo que está pasando. Ver docs/adr/0022.
+ */
+const ESTADOS_DESPERTANDO = [502, 503, 504];
+const ESPERAS_REINTENTO_MS = [3000, 6000, 12000];
+const esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
+
 const Login = () => {
     const [modo, setModo] = useState('login'); // 'login' | 'registro'
     const navigate = useNavigate();
@@ -12,6 +24,8 @@ const Login = () => {
     const [email, setEmail] = useState('');
     const [contrasena, setContrasena] = useState('');
     const [error, setError] = useState('');
+    const [aviso, setAviso] = useState('');
+    const [enviando, setEnviando] = useState(false);
 
     // Registro
     const [regData, setRegData] = useState({
@@ -23,17 +37,44 @@ const Login = () => {
 
     const handleLogin = async (e) => {
         e.preventDefault();
+        if (enviando) return;
+
         setError('');
+        setAviso('');
+        setEnviando(true);
+
         try {
-            const response = await api.post('/auth/login', { email, contrasena });
-            // El token queda en memoria, no en localStorage: recargar la página
-            // cierra la sesión, y es a propósito.
-            guardarSesion({ token: response.data.token, usuario: response.data.usuario });
-            // Quien entro con una temporal no puede ir a ningun otro sitio: la
-            // API se lo denegaria igual. Ver docs/adr/0007.
-            navigate(response.data.usuario?.debe_cambiar_contrasena ? '/cambiar-contrasena' : '/');
-        } catch (err) {
-            setError(err.response?.data?.mensaje || 'Correo o contraseña incorrectos');
+            for (let intento = 0; ; intento += 1) {
+                try {
+                    const response = await api.post('/auth/login', { email, contrasena });
+                    // El token queda en memoria, no en localStorage: recargar la página
+                    // cierra la sesión, y es a propósito.
+                    guardarSesion({ token: response.data.token, usuario: response.data.usuario });
+                    // Quien entro con una temporal no puede ir a ningun otro sitio: la
+                    // API se lo denegaria igual. Ver docs/adr/0007.
+                    navigate(response.data.usuario?.debe_cambiar_contrasena ? '/cambiar-contrasena' : '/');
+                    return;
+                } catch (err) {
+                    const despertando = !err.response || ESTADOS_DESPERTANDO.includes(err.response.status);
+
+                    if (despertando && intento < ESPERAS_REINTENTO_MS.length) {
+                        setAviso('Estamos despertando el servicio: el primer acceso del día puede tardar hasta un minuto…');
+                        await esperar(ESPERAS_REINTENTO_MS[intento]);
+                        continue;
+                    }
+
+                    setAviso('');
+                    setError(
+                        err.response?.data?.mensaje ||
+                            (despertando
+                                ? 'El servicio no respondió. Inténtalo de nuevo en un momento.'
+                                : 'Correo o contraseña incorrectos')
+                    );
+                    return;
+                }
+            }
+        } finally {
+            setEnviando(false);
         }
     };
 
@@ -116,6 +157,7 @@ const Login = () => {
                         <p style={{ color: '#64748b', marginBottom: '1.5rem', fontSize: '0.9rem' }}>Ingresa tus credenciales para continuar</p>
 
                         {error && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.875rem' }}>{error}</div>}
+                        {aviso && <div style={{ background: '#fef3c7', color: '#92400e', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.875rem' }}>{aviso}</div>}
 
                         <form onSubmit={handleLogin} style={{ maxWidth: 'none', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                             <div>

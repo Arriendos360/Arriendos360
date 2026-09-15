@@ -31,10 +31,10 @@
 
 import { app } from './app';
 import { sequelize } from './config/database';
-import { aplicarMigraciones } from './database/migraciones';
+import { aplicarMigraciones, migracionesPendientes } from './database/migraciones';
 import { almacen, publicador } from './eventos';
 import { purgarVencidos } from './services/limites';
-import { enteroDeEntorno, validarEntorno } from 'arriendos360-shared';
+import { enteroDeEntorno, validarEntorno, siNoDeEntorno } from 'arriendos360-shared';
 
 /** Cada cuanto se borran las ventanas vencidas de los limites de tasa. */
 const PURGA_LIMITES_MS = 5 * 60 * 1000;
@@ -42,7 +42,13 @@ const PURGA_LIMITES_MS = 5 * 60 * 1000;
 const PUERTO = enteroDeEntorno('PORT', 3011);
 
 /** Lo que no tiene defecto razonable. Ver la cabecera para la ultima. */
-const OBLIGATORIAS = ['DB_PASSWORD', 'JWT_SECRET', 'SERVICIO_JWT_SECRET', 'MS_NOTIFICACIONES_URL'];
+const OBLIGATORIAS = [
+  'DB_PASSWORD',
+  'JWT_SECRET',
+  'SERVICIO_JWT_SECRET',
+  'MS_NOTIFICACIONES_URL',
+  'MIGRACIONES_AL_ARRANCAR',
+];
 
 const iniciar = async (): Promise<void> => {
   try {
@@ -51,12 +57,26 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-identidad: conexión a PostgreSQL exitosa');
 
-    const aplicadas = await aplicarMigraciones(sequelize);
-    console.log(
-      aplicadas.length > 0
-        ? `✅ ms-identidad: migraciones aplicadas: ${aplicadas.join(', ')}`
-        : '✅ ms-identidad: esquema al día, sin migraciones pendientes',
-    );
+    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
+    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
+    // Ver docs/adr/0022.
+    if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
+      const aplicadas = await aplicarMigraciones(sequelize);
+      console.log(
+        aplicadas.length > 0
+          ? `✅ ms-identidad: migraciones aplicadas: ${aplicadas.join(', ')}`
+          : '✅ ms-identidad: esquema al día, sin migraciones pendientes',
+      );
+    } else {
+      const pendientes = await migracionesPendientes(sequelize);
+      if (pendientes.length > 0) {
+        throw new Error(
+          `ms-identidad: MIGRACIONES_AL_ARRANCAR=no y hay migraciones pendientes: ${pendientes.join(', ')}. ` +
+            'Aplícalas antes con el Job de migración (node dist/database/aplicar.js).',
+        );
+      }
+      console.log('✅ ms-identidad: esquema al día (las migraciones las aplica el Job, no este proceso)');
+    }
 
     // Una ventana vencida ya no cuenta para nada, solo ocupa sitio. Aqui y no al
     // cargar el modulo, para que ninguna suite arranque un temporizador.

@@ -9,8 +9,7 @@ import api from '../services/api';
 import { ESTADOS_CUENTA_COBRO } from 'arriendos360-contracts';
 import {
     TrendingUp, Home, AlertCircle, FileText,
-    MapPin, ArrowRight, Calendar,
-    CheckCircle, Clock
+    MapPin, ArrowRight, Calendar
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);

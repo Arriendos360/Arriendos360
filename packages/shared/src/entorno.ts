@@ -95,6 +95,36 @@ export const enteroDeEntorno = (
   entorno: Entorno = process.env,
 ): number => enteroOpcionalDeEntorno(nombre, entorno) ?? porDefecto;
 
+/**
+ * Un si/no: `si` o `no`, y nada mas. `true`, `1` o `yes` LANZAN, para que no haya dos
+ * formas de escribir lo mismo en dos entornos.
+ *
+ * Sin `porDefecto` la variable es obligatoria, y ausente tambien LANZA. Es lo que se
+ * quiere para diferencias entre entornos que tienen que estar escritas, como
+ * `MIGRACIONES_AL_ARRANCAR`.
+ */
+export const siNoDeEntorno = (
+  nombre: string,
+  porDefecto?: boolean,
+  entorno: Entorno = process.env,
+): boolean => {
+  const valor = leerEntorno(nombre, entorno)?.toLowerCase();
+  if (valor === 'si' || valor === 'sí') {
+    return true;
+  }
+  if (valor === 'no') {
+    return false;
+  }
+  if (valor === undefined && porDefecto !== undefined) {
+    return porDefecto;
+  }
+
+  throw new ErrorDeEntorno(
+    `${nombre} debe ser «si» o «no»${valor === undefined ? '' : `, no «${valor}»`}.`,
+    [nombre],
+  );
+};
+
 /** Las variables de la lista que no tienen valor. */
 export const faltantesDeEntorno = (
   nombres: readonly string[],

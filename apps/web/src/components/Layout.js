@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Home, FileText, CreditCard, LogOut, Receipt } from 'lucide-react';
+import { LayoutDashboard, Home, FileText, CreditCard, LogOut } from 'lucide-react';
 
 import { limpiarSesion, useSesion } from '../auth/sesion';
 import api from '../services/api';

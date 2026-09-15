@@ -37,6 +37,8 @@ services:
     build:
       context: ..
       dockerfile: services/ms-identidad/Dockerfile
+      # La etapa de desarrollo: codigo montado y recarga. Azure usa `produccion`.
+      target: desarrollo
     container_name: arriendos360_identidad
     command: npm run dev
     ports:
@@ -55,6 +57,7 @@ services:
       # usuario serviria para llamar a /interno.
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-identidad
+      - MIGRACIONES_AL_ARRANCAR=si
       # DESDE EL PASO 7 ESTE SERVICIO PUBLICA EN EL BUS Y NO MANDA CORREOS.
       #
       # Aqui estaban URL_APP y las cuatro EMAIL_*, para el correo de recuperacion.
@@ -84,6 +87,8 @@ services:
     build:
       context: ..
       dockerfile: services/ms-inmuebles/Dockerfile
+      # La etapa de desarrollo: codigo montado y recarga. Azure usa `produccion`.
+      target: desarrollo
     container_name: arriendos360_inmuebles
     command: npm run dev
     ports:
@@ -99,6 +104,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-inmuebles
+      - MIGRACIONES_AL_ARRANCAR=si
       # De donde saca la lista de revocados. Sin esto el servicio arranca pero
       # NO comprueba revocacion, y lo avisa en el log.
       - MS_IDENTIDAD_URL=${MS_IDENTIDAD_URL:-http://ms-identidad:3011}
@@ -130,6 +136,8 @@ services:
     build:
       context: ..
       dockerfile: services/ms-contratos/Dockerfile
+      # La etapa de desarrollo: codigo montado y recarga. Azure usa `produccion`.
+      target: desarrollo
     container_name: arriendos360_contratos
     command: npm run dev
     ports:
@@ -145,6 +153,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-contratos
+      - MIGRACIONES_AL_ARRANCAR=si
       # A quien pregunta. Identidad, para la revocacion y para comprobar el
       # inquilino; Inmuebles, para resolver la pertenencia de cada contrato.
       # Core dependiendo de Soporte, que es la direccion correcta.
@@ -205,6 +214,8 @@ services:
     build:
       context: ..
       dockerfile: services/ms-financiero/Dockerfile
+      # La etapa de desarrollo: codigo montado y recarga. Azure usa `produccion`.
+      target: desarrollo
     container_name: arriendos360_financiero
     command: npm run dev
     ports:
@@ -220,6 +231,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-financiero
+      - MIGRACIONES_AL_ARRANCAR=si
       # A quien pregunta. Contratos, para la pertenencia de cada cuenta de cobro
       # y para los datos que imprimen los comprobantes —el inmueble viaja DENTRO
       # del contrato, con `incluir=inmueble`, asi que este servicio no habla con
@@ -287,6 +299,8 @@ services:
     build:
       context: ..
       dockerfile: services/ms-notificaciones/Dockerfile
+      # La etapa de desarrollo: codigo montado y recarga. Azure usa `produccion`.
+      target: desarrollo
     container_name: arriendos360_notificaciones
     command: npm run dev
     ports:
@@ -303,6 +317,7 @@ services:
       # dura 7 se cumple por vacio.
       - SERVICIO_JWT_SECRET=${SERVICIO_JWT_SECRET}
       - SERVICIO_NOMBRE=ms-notificaciones
+      - MIGRACIONES_AL_ARRANCAR=si
       # A quien pregunta: SOLO a ms-identidad, y solo para resolver el correo de un
       # id_usuario. Los eventos NO llevan direcciones de correo a proposito —un correo
       # pertenece a identidad.usuarios y a nadie mas— asi que esta variable es lo que
@@ -351,6 +366,8 @@ services:
     build:
       context: ..
       dockerfile: apps/gateway/Dockerfile
+      # La etapa de desarrollo: codigo montado y recarga. Azure usa `produccion`.
+      target: desarrollo
     container_name: arriendos360_api
     command: npm run dev
     ports:
