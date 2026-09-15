@@ -608,7 +608,7 @@ export const iniciarMotorFinanciero = (entorno: Entorno = process.env): void => 
   if (modo === 'trabajo') {
     console.log(
       '🗓️  ms-financiero: MOTOR_PROGRAMACION=trabajo — el motor NO se programa en este ' +
-        'proceso: lo ejecuta el trabajo programado de Container Apps con `npm run motor`.',
+        'proceso: lo ejecuta el Job programado motor-financiero con `node dist/scripts/motor.js`.',
     );
     return;
   }

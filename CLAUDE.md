@@ -522,7 +522,9 @@ ramas nuevas desde `main` con ese prefijo.
 - [ ] **4 — Servicios y motor (PR).** `apps.bicep` con `modulos/app.bicep` ×6 (0–1 réplica,
   referencias a Key Vault) y el Job `motor-financiero` con `modulos/trabajo.bicep`, que
   sustituye a `trabajo-manual.bicep` y a `motor-financiero-job.bicep`. Secreto nuevo
-  `email-usuario` (lo pide `bootstrap.sh`). En orden, tras fusionar: imágenes,
+  `email-usuario` (lo pide `bootstrap.sh`). Clientes internos con 30 s de espera
+  (`MS_*_TIMEOUT_MS`): con 3 s fallaba toda llamada a un servicio dormido. En orden, tras
+  fusionar: imágenes,
   `desplegar-trabajos.sh <commit>`, `verificar-trabajos.sh`, `desplegar-apps.sh <commit>` y
   `CORREO_PRUEBA=<gmail> verificar-apps.sh`. *Verifica:* ese script sin fallos —primer login
   con todo en cero medido, gateway por HTTPS, servicios inalcanzables desde internet, login,
@@ -560,10 +562,20 @@ ramas nuevas desde `main` con ese prefijo.
   esa etiqueta. Los cinco esquemas migrados y los tres usuarios de demostración creados.
 - **`verificar-trabajos.sh` sin fallos:** Container Apps descarga de GHCR privado con el
   token del Key Vault; relanzar no migra nada y el seed encuentra los tres usuarios.
-- **Corte 4 en PR** (`feature/despliegue-azure-apps`), sin desplegar: `what-if` de
-  `apps.bicep` en `Succeeded` (crea las seis apps y el Job del motor). Faltan imágenes nuevas
-  —cambió `scripts/motor.ts`—, el secreto `email-usuario`, desplegar y verificar. La suite de
-  ms-financiero no se pudo correr: necesita Docker Desktop encendido.
+- **Corte 4 desplegado y verificado** (#33 en `main`; ajustes en
+  `feature/despliegue-azure-corte4`). Imágenes con la etiqueta
+  `732ced282ed08f650d58a232f46d9cdfe54560ac`; Jobs de migración y seed redesplegados con ella
+  y verificados. Gateway en `https://gateway.ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io`.
+  `verificar-apps.sh`: **primer login con las seis apps en cero, 200 en 36,8 s**; en caliente,
+  0,6 s; HTTPS y HTTP→301; los cinco servicios dan 404 desde internet; motor en `Succeeded`
+  al primer intento. Recuperación de `sebastian_dia@hotmail.com` (propietario de prueba):
+  registro 201, envío registrado por ms-notificaciones a los 26 s. Todas las suites en verde.
+- **Hallazgos del corte 4, corregidos:** clientes internos a 3 s (el motor fallaba contra
+  ms-contratos dormido); el motor no entregaba sus avisos; y en Git Bash `curl` no escribía
+  en `/tmp`, y `date | tail -c` y el `openssl` de mingw colaban `\n` y `\r` en el JSON del
+  registro de prueba y en los secretos de `bootstrap.sh`.
+- **ms-identidad es la última en dormirse:** los demás le piden la lista de revocados cada
+  15 s. Las otras cinco llegan a cero a los ~5 min; ella, a los ~20.
 - **CLI de Azure instalada en la máquina de desarrollo** (2.90). `comun.sh` quita el `\r` de
   `az` y desactiva la conversión de rutas de MSYS, así que los scripts corren también desde
   Git Bash; si una terminal no encuentra `az`, abrir una nueva (el PATH es de la
@@ -573,10 +585,10 @@ ramas nuevas desde `main` con ese prefijo.
 
 ### Riesgos a vigilar
 
-- **Arranque en frío del login.** El gateway espera 3 s a identidad al arrancar y el proxy
-  10 s: con todo dormido, el primer login del día puede tardar 20–60 s y devolver 502. Se
-  mide en el corte 4. Antes de una sustentación, `calentar.yml` deja gateway e identidad con
-  una réplica.
+- **Arranque en frío del login.** Medido en el corte 4: con las seis apps en cero, el primer
+  login tarda **36,8 s** y responde 200 (proxy a 60 s, clientes internos a 30 s). La SPA
+  reintenta y avisa, pero en una sustentación son 37 s de silencio: antes, `calentar.yml`
+  (corte 6) deja gateway e identidad con una réplica.
 - **Crédito limitado.** ~$16/mes de PostgreSQL (~$1 si entra en la oferta gratuita, sin
   confirmar para Azure for Students). El App Service B1 y el registro de la versión anterior
   gastaron casi la mitad del crédito: el 2026-09-15 quedaban $52, unos tres meses de

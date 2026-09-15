@@ -118,13 +118,14 @@ existe_secreto() {
 guardar() {
   az keyvault secret set --vault-name "$KEYVAULT" -n "$1" --value "$2" -o none
 }
+# Sin «\r»: el openssl de Git Bash termina en «\r\n» y el secreto lo guardaría.
 aleatorio() {
-  openssl rand -base64 48 | tr -d '\n'
+  openssl rand -base64 48 | tr -d '\r\n'
 }
 # PostgreSQL exige tres de cuatro clases de caracteres: base64 sin símbolos más un prefijo
 # fijo las garantiza, y no hay nada que escapar al usarla.
 contrasena_db() {
-  printf 'Aa1%s' "$(openssl rand -base64 36 | tr -d '/+=\n')"
+  printf 'Aa1%s' "$(openssl rand -base64 36 | tr -d '/+=\r\n')"
 }
 
 paso "Secretos generados"
