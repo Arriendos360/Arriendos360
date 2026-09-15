@@ -30,6 +30,8 @@ if [ "$tope" = "0.15" ]; then ok "tope diario de $tope GB"; else fallo "tope dia
 echo "== Entorno de Container Apps"
 estado="$(az resource show --ids "$(salida idEntorno)" --query properties.provisioningState -o tsv)"
 if [ "$estado" = "Succeeded" ]; then ok "$(salida nombreEntorno): $estado"; else fallo "entorno: $estado"; fi
+modo="$(modo_entorno)"
+if [ "$modo" = "WorkloadProfiles" ]; then ok "modo $modo"; else fallo "modo «$modo»: en Express no hay Jobs ni referencias a Key Vault"; fi
 
 echo "== Storage"
 ALMACENAMIENTO="$(salida nombreAlmacenamiento)"
@@ -92,7 +94,15 @@ const conectar = async (ssl) => {
     console.log('  ✘ aceptó una conexión SIN TLS');
     fallos++;
   } catch (error) {
-    console.log(`  ✔ rechaza conexiones sin TLS: ${error.message.split('\n')[0]}`);
+    // Sólo cuenta el rechazo del servidor. Un timeout —desde fuera de Azure el firewall no
+    // deja pasar— no prueba nada.
+    const mensaje = error.message.split('\n')[0];
+    if (/no encryption/i.test(mensaje)) {
+      console.log(`  ✔ rechaza conexiones sin TLS: ${mensaje}`);
+    } else {
+      console.log(`  ✘ no se pudo comprobar el rechazo sin TLS: ${mensaje}`);
+      fallos++;
+    }
   }
 
   process.exit(fallos);

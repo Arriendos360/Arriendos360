@@ -35,25 +35,33 @@ esperar_ejecucion() {
   done
 }
 
-# salida_ejecucion <ejecución>: lo que escribió el contenedor, leído de Log Analytics.
-# La ingesta tarda unos minutos: consulta hasta que dos lecturas seguidas coinciden, seis
-# minutos como mucho, e imprime lo último que obtuvo.
+# salida_ejecucion <ejecución>: lo que escribió el contenedor, leído de Log Analytics
+# (ContainerAppConsoleLogs_CL; cada réplica se llama <ejecución>-<sufijo>). La ingesta tarda:
+# consulta hasta que dos lecturas seguidas coinciden, seis minutos como mucho, e imprime lo
+# último que obtuvo. Un error de la consulta se muestra y corta: reintentarlo en silencio
+# sólo lo esconde.
 salida_ejecucion() {
-  local espacio consulta cuerpo salida anterior=""
+  local espacio consulta cuerpo salida anterior="" error
   espacio="$(az monitor log-analytics workspace show -g "$GRUPO" -n log-arriendos360 --query customerId -o tsv)"
   consulta="ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith '$1' | order by TimeGenerated asc | project Log_s"
   cuerpo="{\"query\": \"$consulta\"}"
+  error="$(mktemp)"
   for _ in $(seq 1 24); do
-    salida="$(az rest --method post \
+    if ! salida="$(az rest --method post \
       --url "https://api.loganalytics.io/v1/workspaces/$espacio/query" \
       --resource "https://api.loganalytics.io" \
       --body "$cuerpo" \
-      --query "tables[0].rows[].[0]" -o tsv 2>/dev/null || true)"
+      --query "tables[0].rows[*][0]" -o tsv 2>"$error")"; then
+      printf 'ERROR al consultar Log Analytics: %s\n' "$(head -c 300 "$error")" >&2
+      rm -f "$error"
+      return 1
+    fi
     if [ -n "$salida" ] && [ "$salida" = "$anterior" ]; then
       break
     fi
     anterior="$salida"
     sleep 15
   done
+  rm -f "$error"
   printf '%s\n' "$salida"
 }

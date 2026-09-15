@@ -56,12 +56,28 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 
 // ──────────────────────────────────────────────────────────────────── entorno
 
-// Sin `workloadProfiles`: entorno sólo de consumo, que escala a cero y entra en la
-// concesión gratuita mensual de Container Apps.
-resource entorno 'Microsoft.App/managedEnvironments@2024-03-01' = {
+// Entorno con perfiles de carga y sólo el perfil Consumption: escala a cero, se cobra por
+// segundo con la concesión gratuita y no paga tarifa de administración, que es de los
+// perfiles dedicados.
+//
+// TRAMPA (docs/adr/0022): declarado sin `workloadProfiles` —la forma antigua de pedir un
+// entorno «sólo consumo»— Azure lo creó en modo Express, que no admite Jobs, referencias a
+// Key Vault ni descubrimiento interno de servicios, y que no se puede devolver al modo
+// estándar sin recrearlo. Por eso el modo va explícito, y `environmentMode` sólo se puede
+// fijar con una API en preview que Bicep aún no tipa. desplegar-base.sh y
+// verificar-base.sh comprueban el modo después.
+#disable-next-line BCP081
+resource entorno 'Microsoft.App/managedEnvironments@2026-03-02-preview' = {
   name: nombres.entorno
   location: ubicacion
   properties: {
+    environmentMode: 'WorkloadProfiles'
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {

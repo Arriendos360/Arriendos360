@@ -3,8 +3,9 @@
 #
 #   bash infra/azure/desplegar-base.sh
 #
-# Muestra qué va a crear o cambiar y pide confirmación antes de tocar nada. Repetirlo sin
-# cambios en el Bicep no altera nada.
+# Muestra qué va a crear o cambiar y pide confirmación antes de tocar nada; con
+# CONFIRMADO=si no pregunta. Repetirlo sin cambios en el Bicep no altera nada. Al terminar
+# comprueba que el entorno de Container Apps no quedó en modo Express.
 #
 # OJO: crear PostgreSQL empieza a cobrar, unos $0,50 al día mientras está encendido.
 # Para detenerlo entre sesiones (Azure lo vuelve a encender a los 7 días):
@@ -24,13 +25,27 @@ if ! az keyvault secret show --vault-name "$KEYVAULT" -n db-password --query id 
   exit 1
 fi
 
-az deployment group create \
-  -g "$GRUPO" \
-  -n base \
-  -f "$(ruta "$DIR/base.bicep")" \
-  -p sufijo="$SUFIJO" \
-  --confirm-with-what-if \
-  -o none
+PLANTILLA="$(ruta "$DIR/base.bicep")"
+
+az deployment group what-if -g "$GRUPO" -n base -f "$PLANTILLA" -p sufijo="$SUFIJO"
+
+if [ "${CONFIRMADO:-}" != "si" ]; then
+  read -rp "¿Desplegar la infraestructura base? (s/N) " respuesta
+  if [ "$respuesta" != "s" ]; then
+    echo "Cancelado."
+    exit 1
+  fi
+fi
+
+az deployment group create -g "$GRUPO" -n base -f "$PLANTILLA" -p sufijo="$SUFIJO" -o none
+
+MODO="$(modo_entorno)"
+if [ "$MODO" != "WorkloadProfiles" ]; then
+  echo "El entorno $ENTORNO quedó en modo «$MODO», no WorkloadProfiles: no admitirá Jobs ni" >&2
+  echo "referencias a Key Vault. Hay que borrarlo y volver a desplegar (docs/adr/0022)." >&2
+  exit 1
+fi
+echo "Entorno $ENTORNO en modo $MODO."
 
 echo
 echo "Salidas del despliegue:"

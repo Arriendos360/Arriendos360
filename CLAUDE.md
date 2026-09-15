@@ -479,7 +479,7 @@ ramas nuevas desde `main` con ese prefijo.
 | Tema | Decisión |
 |---|---|
 | Región | `mexicocentral`: Container Apps, Jobs y PostgreSQL B1ms verificados en el corte 0. La política de la suscripción sólo permite `southcentralus`, `mexicocentral`, `eastus2`, `brazilsouth` y `centralus`; `brazilsouth` queda de reserva, ~60 % más cara en cómputo. Todo en la misma región salvo el Static Web App. |
-| Cómputo | Un entorno de Container Apps en plan de consumo. `gateway` con ingreso **externo** y sólo HTTPS; los cinco servicios con ingreso **interno**, llamados por `http://ms-*`. Escala a cero en todos. |
+| Cómputo | Un entorno de Container Apps en modo `WorkloadProfiles` con sólo el perfil `Consumption`, **declarados explícitamente**: sin `workloadProfiles` Azure lo crea en modo **Express**, que no admite Jobs, referencias a Key Vault ni descubrimiento interno, y no se revierte sin recrearlo. `gateway` con ingreso **externo** y sólo HTTPS; los cinco servicios con ingreso **interno**, llamados por `http://ms-*`. Escala a cero en todos. |
 | TLS | Lo termina el ingreso del gateway, con certificado administrado. `PROXY_SALTOS_CONFIANZA=1`. |
 | SPA | Azure Static Web Apps Free, **nuevo** y declarado en Bicep, con región de metadatos `eastus2`: el servicio es global pero no se ofrece en `mexicocentral`. Sólo estáticos, con `navigationFallback` a `index.html`. El CORS del gateway se limita a su origen. |
 | Recursos anteriores | Se borra el grupo `Arriendos360_Project` entero: App Service B1, Container Registry Basic y el Static Web App enlazado al repositorio del curso, todos de la versión monolítica. Su base estaba en Neon, fuera de Azure, y no se migra. |
@@ -510,7 +510,7 @@ ramas nuevas desde `main` con ese prefijo.
   diario, PostgreSQL 15, Storage con `anexos` y el entorno, sin apps) y
   `verificar-base.sh`. *Verifica:* ese script sin fallos —secretos presentes, TLS con
   certificado verificado y rechazo de conexiones sin TLS—.
-- [ ] **3 — Imágenes y migraciones (PR).** Workflow manual «Imágenes»
+- [x] **3 — Imágenes y migraciones (PR).** Workflow manual «Imágenes»
   (`.github/workflows/imagenes.yml`, sólo desde `main`, etiqueta = commit) y
   `trabajos.bicep`: Jobs `migrar-<servicio>` ×5 y `seed-identidad`. En orden, tras fusionar:
   `gh workflow run imagenes.yml --ref main`, `desplegar-trabajos.sh <commit>` y
@@ -542,9 +542,18 @@ ramas nuevas desde `main` con ese prefijo.
 - **`verificar-base.sh` sin fallos:** secretos, tope de logs, entorno, Storage privado con
   `anexos`, TLSv1.3 con certificado verificado a PostgreSQL 15.19 y rechazo de conexiones
   sin TLS. Cloud Shell entra por la regla de servicios de Azure.
-- **Corte 3 en PR** (`feature/despliegue-azure-imagenes`), sin ejecutar en Azure: el
-  workflow sólo se puede lanzar cuando esté en `main`. Validado con `bicep build`/`lint` y
-  `actionlint`.
+- **Corte 3 cerrado.** #30 y #31 en `main`; el workflow «Imágenes» publicó las seis imágenes
+  con la etiqueta `39e4482a6b89792b3f7fe6b4f04355696189a6ed`. El entorno había nacido en
+  modo **Express** (sin Jobs ni referencias a Key Vault): se borró vacío y se recreó en
+  `WorkloadProfiles`. Eso, la consulta de Log Analytics de `lib-trabajos.sh` y un falso
+  positivo de `verificar-base.sh` van en `feature/despliegue-azure-entorno`.
+- **En Azure, además del corte 2:** `cae-arriendos360` en `WorkloadProfiles`
+  (`ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io`) y los Jobs
+  `migrar-{identidad,inmuebles,contratos,financiero,notificaciones}` y `seed-identidad` con
+  esa etiqueta. Los cinco esquemas migrados y los tres usuarios de demostración creados.
+- **`verificar-trabajos.sh` sin fallos:** Container Apps descarga de GHCR privado con el
+  token del Key Vault; relanzar no migra nada y el seed encuentra los tres usuarios.
+- **Siguiente:** corte 4, las seis apps y el Job del motor.
 - **CLI de Azure instalada en la máquina de desarrollo** (2.90). `comun.sh` quita el `\r` de
   `az` y desactiva la conversión de rutas de MSYS, así que los scripts corren también desde
   Git Bash; si una terminal no encuentra `az`, abrir una nueva (el PATH es de la
@@ -565,9 +574,11 @@ ramas nuevas desde `main` con ese prefijo.
   el crédito o a los 12 meses la suscripción se deshabilita y todo se detiene: `pg_dump`
   antes de cada hito. PostgreSQL se puede detener entre sesiones, siete días como máximo.
 - **Correo con cuenta personal:** credencial personal en la nube y tope diario de Gmail.
-- **Key Vault y la credencial del registro:** hubo un fallo conocido con esa referencia. Si
-  persiste, imágenes públicas en GHCR: no llevan secretos. ACR Basic (~$5/mes) se descartó
-  por costo.
+- **Key Vault y la credencial del registro:** comprobado en el corte 3, los Jobs descargan
+  de GHCR privado con `ghcr-token` como referencia al Key Vault. Si fallara en las apps,
+  imágenes públicas en GHCR: no llevan secretos. ACR Basic (~$5/mes) se descartó por costo.
+- **Token de GHCR con vencimiento:** cuando venza, Container Apps no podrá descargar
+  imágenes y las réplicas nuevas no arrancarán. Renovarlo y actualizar `ghcr-token` antes.
 
 ## Decisiones abiertas
 
