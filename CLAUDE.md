@@ -525,6 +525,26 @@ ramas nuevas desde `main` con ese prefijo.
 - [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
   presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
 
+### Estado al 2026-09-15
+
+- **PRs abiertos, sin fusionar:** #27 (plan y corte 1, sobre `main`) y #28 (corte 2, sobre
+  #27; GitHub lo retargetea a `main` al fusionar #27).
+- **En Azure, desplegado con los scripts del corte 2:** grupo `rg-arriendos360`
+  (`mexicocentral`), `kv-arriendos360-8b4d5b` con los seis secretos,
+  `id-arriendos360-apps`, `id-arriendos360-despliegue`, `log-arriendos360`,
+  `cae-arriendos360`, `starriendos3608b4d5b` y `psql-arriendos360-8b4d5b`.
+  **PostgreSQL está cobrando** mientras esté encendido.
+- **`verificar-base.sh`:** pasaron secretos, tope de logs, entorno y Storage. Se cortó al
+  listar el firewall de PostgreSQL (la CLI ya no acepta `-n` ahí; corregido en #28), así que
+  **falta la prueba de TLS**. Siguiente paso: en Cloud Shell, `git pull` en la rama
+  `feature/despliegue-azure-base` y repetir `bash infra/azure/verificar-base.sh`. Si la base
+  está detenida, antes `az postgres flexible-server start -g rg-arriendos360 -n
+  psql-arriendos360-8b4d5b`. Con todo en verde se marca el corte 2.
+- **CLI de Azure en la máquina de desarrollo:** no instalada. Se propuso instalarla para
+  que Claude lea estado, `what-if` y logs desde el corte 3; los scripts siguen pensados para
+  Cloud Shell (en Windows `az` devuelve `\r\n` y la base no acepta conexiones de fuera de
+  Azure).
+
 ### Riesgos a vigilar
 
 - **Arranque en frío del login.** El gateway espera 3 s a identidad al arrancar y el proxy

@@ -35,13 +35,13 @@ echo "== Storage"
 ALMACENAMIENTO="$(salida nombreAlmacenamiento)"
 publico="$(az storage account show -g "$GRUPO" -n "$ALMACENAMIENTO" --query allowBlobPublicAccess -o tsv)"
 if [ "$publico" = "false" ]; then ok "sin acceso público a blobs"; else fallo "allowBlobPublicAccess=$publico"; fi
-CADENA="$(az keyvault secret show --vault-name "$KEYVAULT" -n storage-connection-string --query value -o tsv)"
+CADENA="$(az keyvault secret show --vault-name "$KEYVAULT" -n storage-connection-string --query value -o tsv --only-show-errors)"
 existe="$(az storage container exists --name anexos --connection-string "$CADENA" --query exists -o tsv)"
 unset CADENA
 if [ "$existe" = "true" ]; then ok "contenedor anexos, con la cadena del Key Vault"; else fallo "contenedor anexos: $existe"; fi
 
 echo "== PostgreSQL"
-az postgres flexible-server firewall-rule list -g "$GRUPO" -n "$(salida nombrePostgres)" \
+az postgres flexible-server firewall-rule list -g "$GRUPO" --server-name "$(salida nombrePostgres)" \
   --query "[].{regla:name, desde:startIpAddress, hasta:endIpAddress}" -o table
 
 TRABAJO="$(mktemp -d)"
@@ -55,7 +55,7 @@ if ! (
   export PGHOST="$(salida hostPostgres)"
   export PGUSER="$(salida administradorPostgres)"
   export PGDATABASE="$(salida basePostgres)"
-  export PGPASSWORD="$(az keyvault secret show --vault-name "$KEYVAULT" -n db-password --query value -o tsv)"
+  export PGPASSWORD="$(az keyvault secret show --vault-name "$KEYVAULT" -n db-password --query value -o tsv --only-show-errors)"
   node - <<'JS'
 const { Client } = require('pg');
 
