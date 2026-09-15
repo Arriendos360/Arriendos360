@@ -478,10 +478,11 @@ ramas nuevas desde `main` con ese prefijo.
 
 | Tema | Decisión |
 |---|---|
-| Región | `mexicocentral` si Container Apps y sus Jobs están disponibles (corte 0). Si no, `brazilsouth`, donde la cuenta ya despliega App Service, pero ~60 % más cara en cómputo. Todo en la misma región. |
+| Región | `mexicocentral`: Container Apps, Jobs y PostgreSQL B1ms verificados en el corte 0. La política de la suscripción sólo permite `southcentralus`, `mexicocentral`, `eastus2`, `brazilsouth` y `centralus`; `brazilsouth` queda de reserva, ~60 % más cara en cómputo. Todo en la misma región salvo el Static Web App. |
 | Cómputo | Un entorno de Container Apps en plan de consumo. `gateway` con ingreso **externo** y sólo HTTPS; los cinco servicios con ingreso **interno**, llamados por `http://ms-*`. Escala a cero en todos. |
 | TLS | Lo termina el ingreso del gateway, con certificado administrado. `PROXY_SALTOS_CONFIANZA=1`. |
-| SPA | Azure Static Web Apps Free (ubicación global; la cuenta ya tiene uno funcionando). Sólo estáticos, con `navigationFallback` a `index.html`. El CORS del gateway se limita a su origen. |
+| SPA | Azure Static Web Apps Free, **nuevo** y declarado en Bicep, con región de metadatos `eastus2`: el servicio es global pero no se ofrece en `mexicocentral`. Sólo estáticos, con `navigationFallback` a `index.html`. El CORS del gateway se limita a su origen. |
+| Recursos anteriores | Se borra el grupo `Arriendos360_Project` entero: App Service B1, Container Registry Basic y el Static Web App enlazado al repositorio del curso, todos de la versión monolítica. Su base estaba en Neon, fuera de Azure, y no se migra. |
 | Base | PostgreSQL Flexible Server B1ms, una base con los cinco esquemas, TLS obligatorio, acceso público restringido a servicios de Azure. Riesgo documentado; la red privada queda como decisión abierta. |
 | Archivos | Blob Storage, contenedor privado `anexos`. |
 | Secretos | Key Vault. Apps y Jobs sólo llevan referencias, resueltas con identidad administrada. Ningún valor en el Bicep ni en el repo. |
@@ -496,8 +497,9 @@ ramas nuevas desde `main` con ese prefijo.
 
 - [ ] **0 — Verificaciones (manual, $0).** En Cloud Shell: Container Apps, Jobs y PostgreSQL
   B1ms disponibles en `mexicocentral`; proveedores registrados; gasto actual en Cost
-  Management —el App Service y el Static Web App de otros proyectos consumen **el mismo
-  crédito**—; contraseña de aplicación de Gmail; token `read:packages` de GHCR.
+  Management; contraseña de aplicación de Gmail; token `read:packages` de GHCR. *Hecho:*
+  regiones y política, proveedores (faltaban `KeyVault` y `ManagedIdentity`), inventario y
+  decisión de borrar el grupo anterior. *Falta:* borrarlo, crédito restante, Gmail, GHCR.
 - [x] **1 — Código para producción (PR, $0).** Dockerfiles multietapa; `DB_SSL` y
   `DB_POOL_MAX`; `MIGRACIONES_AL_ARRANCAR` y bloqueo consultivo; migrar, motor y seed
   compilados; tiempo límite del proxy y `CORS_ORIGENES` en el gateway; aviso de
@@ -528,13 +530,15 @@ ramas nuevas desde `main` con ese prefijo.
   10 s: con todo dormido, el primer login del día puede tardar 20–60 s y devolver 502. Se
   mide en el corte 4. Antes de una sustentación, `calentar.yml` deja gateway e identidad con
   una réplica.
-- **Crédito compartido.** ~$16/mes de PostgreSQL (~$1 si entra en la oferta gratuita, sin
-  confirmar para Azure for Students) **más lo que gasten los otros proyectos**. Al agotarse
+- **Crédito limitado.** ~$16/mes de PostgreSQL (~$1 si entra en la oferta gratuita, sin
+  confirmar para Azure for Students). El App Service B1 y el registro de la versión anterior
+  estuvieron gastando el mismo crédito hasta que se borraron: medir cuánto queda. Al agotarse
   el crédito o a los 12 meses la suscripción se deshabilita y todo se detiene: `pg_dump`
   antes de cada hito. PostgreSQL se puede detener entre sesiones, siete días como máximo.
 - **Correo con cuenta personal:** credencial personal en la nube y tope diario de Gmail.
 - **Key Vault y la credencial del registro:** hubo un fallo conocido con esa referencia. Si
-  persiste, imágenes públicas o ACR Basic, que ya cuesta.
+  persiste, imágenes públicas en GHCR: no llevan secretos. ACR Basic (~$5/mes) se descartó
+  por costo.
 
 ## Decisiones abiertas
 

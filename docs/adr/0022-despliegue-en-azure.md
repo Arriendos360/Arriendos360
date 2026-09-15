@@ -23,7 +23,7 @@ la vez.
 | Región | `mexicocentral` si Container Apps y sus Jobs están disponibles; si no, `brazilsouth` (~60 % más cara en cómputo). |
 | Cómputo | Un entorno de Container Apps en plan de consumo. `gateway` con ingreso externo y sólo HTTPS; los cinco servicios con ingreso interno. Escala a cero en todos. |
 | TLS | Lo termina el ingreso del gateway, con certificado administrado: es la terminación que pide el módulo de seguridad, sin gestionar certificados. `PROXY_SALTOS_CONFIANZA=1`. |
-| SPA | Azure Static Web Apps Free. Sólo estáticos; la API entra únicamente por el gateway. |
+| SPA | Azure Static Web Apps Free, nuevo, con región de metadatos `eastus2` (no se ofrece en `mexicocentral`). Sólo estáticos; la API entra únicamente por el gateway. |
 | Base | PostgreSQL Flexible Server B1ms, TLS obligatorio, acceso público restringido a servicios de Azure. **Riesgo aceptado**: la red privada es más coherente con confianza cero y queda como decisión abierta. |
 | Secretos | Key Vault, con referencias resueltas por identidad administrada. Ningún valor en el Bicep ni en el repo. |
 | Imágenes | GHCR privado. |
