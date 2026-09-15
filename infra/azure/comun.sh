@@ -1,9 +1,27 @@
 # Nombres compartidos por los scripts de infra/azure. Se carga con `source`, no se ejecuta.
-# Requiere una sesión de `az` (Cloud Shell ya la tiene).
+# Requiere una sesión de `az`: Cloud Shell ya la tiene, y en Windows sirve Git Bash tras
+# `az login`.
 #
 # Key Vault, Storage y PostgreSQL necesitan nombres únicos en todo Azure: llevan un sufijo
 # derivado del id de la suscripción, estable entre ejecuciones y sin guardar nada en el
 # repositorio. base.bicep recibe el mismo sufijo y deriva de él el resto de nombres.
+
+# Git Bash en Windows: `az` termina cada línea con «\r\n», que se cuela en lo capturado con
+# $(...) —ids, estados y hasta el sufijo saldrían distintos—, y MSYS reescribe como rutas de
+# Windows los argumentos que empiezan por «/», como /subscriptions/... Hacia la terminal se
+# deja pasar tal cual, para que las preguntas de `az` se vean.
+case "${OSTYPE:-}" in
+  msys* | cygwin*)
+    export MSYS_NO_PATHCONV=1
+    az() {
+      if [ -t 1 ]; then
+        command az "$@"
+      else
+        command az "$@" | tr -d '\r'
+      fi
+    }
+    ;;
+esac
 
 REGION="${REGION:-mexicocentral}"
 GRUPO="${GRUPO:-rg-arriendos360}"
@@ -20,3 +38,6 @@ IDENTIDAD_DESPLIEGUE="id-arriendos360-despliegue"
 # que es el que exige aprobación. Cambiarlos invalida la credencial federada.
 REPO_GITHUB="Arriendos360/Arriendos360"
 ENTORNO_GITHUB="produccion"
+
+# Dueño del token `ghcr-token` con el que Container Apps descarga las imágenes. No es secreto.
+USUARIO_GHCR="${USUARIO_GHCR:-jsediazr}"

@@ -1,0 +1,2 @@
+# Los scripts de despliegue corren en Bash (Cloud Shell o Git Bash): con CRLF fallan.
+*.sh text eol=lf

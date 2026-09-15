@@ -488,7 +488,7 @@ ramas nuevas desde `main` con ese prefijo.
 | Secretos | Key Vault. Apps y Jobs sólo llevan referencias, resueltas con identidad administrada. Ningún valor en el Bicep ni en el repo. `jwt-secret`, `servicio-jwt-secret` y `db-password` los genera `bootstrap.sh` sin mostrarlos y nunca los rota; `email-pass` y `ghcr-token` se teclean; `storage-connection-string` la escribe Bicep. |
 | Migraciones | Un Job manual por servicio, lanzado por el pipeline **antes** de publicar revisiones. En Azure `MIGRACIONES_AL_ARRANCAR=no`: con migraciones pendientes el servicio no arranca. Bloqueo consultivo en el runner. |
 | Motor | Job programado `1 5 * * *` UTC (`docs/adr/0021`), con el comando compilado. |
-| Imágenes | GHCR privado. Etapa `produccion` en cada Dockerfile: TypeScript compilado y sin dependencias de desarrollo. |
+| Imágenes | GHCR privado, `ghcr.io/arriendos360/<gateway\|ms-*>:<commit>`, sin `latest`. Etapa `produccion` en cada Dockerfile: TypeScript compilado y sin dependencias de desarrollo. Las publica el workflow manual «Imágenes» desde `main` con el `GITHUB_TOKEN`. |
 | Correo | **Temporal:** Gmail personal por SMTP en el 587, con contraseña de aplicación en Key Vault y `EMAIL_REMITENTE` igual a esa dirección. Revocarla tras la sustentación. |
 | Datos de demostración | Sí, con un Job manual de seed. |
 | Pipeline | GitHub Actions sólo manual (`workflow_dispatch`), con aprobación. OIDC contra una identidad administrada: ningún secreto en GitHub. |
@@ -510,9 +510,12 @@ ramas nuevas desde `main` con ese prefijo.
   diario, PostgreSQL 15, Storage con `anexos` y el entorno, sin apps) y
   `verificar-base.sh`. *Verifica:* ese script sin fallos —secretos presentes, TLS con
   certificado verificado y rechazo de conexiones sin TLS—.
-- [ ] **3 — Imágenes y migraciones (PR).** Workflow manual de imágenes a GHCR; Jobs
-  `migrar-*` y `seed-identidad`. *Verifica:* ejecuciones en `Succeeded`, relanzar una
-  migración no hace nada, usuario de demostración creado.
+- [ ] **3 — Imágenes y migraciones (PR).** Workflow manual «Imágenes»
+  (`.github/workflows/imagenes.yml`, sólo desde `main`, etiqueta = commit) y
+  `trabajos.bicep`: Jobs `migrar-<servicio>` ×5 y `seed-identidad`. En orden, tras fusionar:
+  `gh workflow run imagenes.yml --ref main`, `desplegar-trabajos.sh <commit>` y
+  `verificar-trabajos.sh`. *Verifica:* ese script sin fallos —ejecuciones en `Succeeded`,
+  relanzar una migración no hace nada, usuarios de demostración creados—.
 - [ ] **4 — Servicios y motor (PR).** Módulo genérico de app ×6 con referencias a Key Vault
   y variables de Azure; Job del motor con comando compilado. *Verifica:* gateway por HTTPS,
   servicios inalcanzables desde internet, login con `curl`, motor en `Succeeded`, correo de
@@ -539,11 +542,15 @@ ramas nuevas desde `main` con ese prefijo.
 - **`verificar-base.sh` sin fallos:** secretos, tope de logs, entorno, Storage privado con
   `anexos`, TLSv1.3 con certificado verificado a PostgreSQL 15.19 y rechazo de conexiones
   sin TLS. Cloud Shell entra por la regla de servicios de Azure.
-- **Siguiente:** corte 3, imágenes a GHCR y Jobs de migración y seed.
-- **CLI de Azure en la máquina de desarrollo:** no instalada. Se propuso instalarla para
-  que Claude lea estado, `what-if` y logs desde el corte 3; los scripts siguen pensados para
-  Cloud Shell (en Windows `az` devuelve `\r\n` y la base no acepta conexiones de fuera de
-  Azure).
+- **Corte 3 en PR** (`feature/despliegue-azure-imagenes`), sin ejecutar en Azure: el
+  workflow sólo se puede lanzar cuando esté en `main`. Validado con `bicep build`/`lint` y
+  `actionlint`.
+- **CLI de Azure instalada en la máquina de desarrollo** (2.90). `comun.sh` quita el `\r` de
+  `az` y desactiva la conversión de rutas de MSYS, así que los scripts corren también desde
+  Git Bash; si una terminal no encuentra `az`, abrir una nueva (el PATH es de la
+  instalación). Claude lee estado, `what-if` y logs; crear, cambiar o borrar se pregunta
+  antes. La base no acepta conexiones desde fuera de Azure: la prueba de TLS de
+  `verificar-base.sh` sólo pasa en Cloud Shell. `verificar-trabajos.sh` no la necesita.
 
 ### Riesgos a vigilar
 
