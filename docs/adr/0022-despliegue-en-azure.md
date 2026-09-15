@@ -21,7 +21,7 @@ la vez.
 | Tema | Decisión |
 |---|---|
 | Región | `mexicocentral` si Container Apps y sus Jobs están disponibles; si no, `brazilsouth` (~60 % más cara en cómputo). |
-| Cómputo | Un entorno de Container Apps en plan de consumo. `gateway` con ingreso externo y sólo HTTPS; los cinco servicios con ingreso interno. Escala a cero en todos. |
+| Cómputo | Un entorno de Container Apps en modo `WorkloadProfiles` con sólo el perfil `Consumption`, declarado explícitamente (ver «El entorno nació en modo Express»). `gateway` con ingreso externo y sólo HTTPS; los cinco servicios con ingreso interno. Escala a cero en todos. |
 | TLS | Lo termina el ingreso del gateway, con certificado administrado: es la terminación que pide el módulo de seguridad, sin gestionar certificados. `PROXY_SALTOS_CONFIANZA=1`. |
 | SPA | Azure Static Web Apps Free, nuevo, con región de metadatos `eastus2` (no se ofrece en `mexicocentral`). Sólo estáticos; la API entra únicamente por el gateway. |
 | Base | PostgreSQL Flexible Server B1ms, TLS obligatorio, acceso público restringido a servicios de Azure. **Riesgo aceptado**: la red privada es más coherente con confianza cero y queda como decisión abierta. |
@@ -123,7 +123,42 @@ gateway.
   seis Jobs a la vez: en la segunda cada migración debe decir «sin migraciones pendientes» y
   el seed encontrar los tres usuarios, así que vale sobre una base vacía o ya migrada.
 - **Git Bash.** `comun.sh` quita el `\r` que `az` añade en Windows y fija
-  `MSYS_NO_PATHCONV`; sin eso, hasta el sufijo de los nombres saldría distinto.
+  `MSYS_NO_PATHCONV`; sin eso, hasta el sufijo de los nombres saldría distinto. Las rutas de
+  archivo que recibe `az` pasan por `ruta` (`cygpath -m`).
+
+### El entorno nació en modo Express (corte 3)
+
+- **Qué pasó.** `base.bicep` declaraba el entorno sin `workloadProfiles` (API 2024-03-01), la
+  forma antigua de pedir uno «sólo consumo». Azure lo creó en modo **Express**, la variante
+  en preview para apps web, y el primer despliegue de Jobs falló con
+  `ExpressEnvironmentResourceNotSupported`. El modo sólo se ve con la API
+  2026-03-02-preview (`environmentMode`: `ConsumptionOnly`, `WorkloadProfiles`, `Express`,
+  `Archived`); el registro de actividad muestra que nació así, no que lo migraran.
+- **Por qué no sirve.** Express no admite Jobs —ni migraciones ni motor, `docs/adr/0021`—,
+  ni referencias a Key Vault, ni descubrimiento interno de servicios, y la documentación
+  sólo describe el paso de estándar a Express, no el inverso.
+- **Qué se hizo.** Se borró el entorno, que estaba vacío, y se recreó con el mismo nombre en
+  modo `WorkloadProfiles` y sólo el perfil `Consumption`: mismo cobro por segundo y misma
+  concesión gratuita, sin tarifa de administración. `environmentMode` se fija con la API
+  en preview, que Bicep aún no tipa (`BCP081` suprimido). `desplegar-base.sh` y
+  `verificar-base.sh` comprueban el modo.
+- **Coste en tiempo.** Un entorno estándar tarda más de diez minutos en crearse, frente al
+  minuto del Express.
+
+### Verificación del corte 3 en Azure (2026-09-15)
+
+- **Primera ejecución, base vacía:** cada Job aplicó sólo lo suyo —identidad 7 migraciones,
+  inmuebles 3, contratos 2, financiero 4, notificaciones 1— y el seed creó los tres usuarios.
+  `migrar-identidad` y `seed-identidad` corrieron a la vez sobre el mismo esquema sin
+  conflicto: el bloqueo consultivo los serializó.
+- **Registro privado:** la imagen de ms-inmuebles (48 MB) bajó de GHCR en 5 s con
+  `ghcr-token` resuelto desde el Key Vault. El riesgo anotado no se materializó.
+- **`verificar-trabajos.sh`:** doce ejecuciones en `Succeeded`; en la segunda ronda las cinco
+  migraciones dicen «sin migraciones pendientes» y el seed encuentra los tres usuarios. Unos
+  cuatro minutos en total.
+- **Dos fallos del propio script, corregidos:** la expresión JMESPath de la consulta a Log
+  Analytics era inválida (`rows[].[0]`, ahora `rows[*][0]`) y el error se silenciaba; y
+  `verificar-base.sh` daba por bueno el rechazo sin TLS ante un simple timeout.
 
 ## Mediciones del corte 1 (local, Docker Desktop)
 

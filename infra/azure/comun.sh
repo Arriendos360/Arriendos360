@@ -48,3 +48,14 @@ ENTORNO_GITHUB="produccion"
 
 # Dueño del token `ghcr-token` con el que Container Apps descarga las imágenes. No es secreto.
 USUARIO_GHCR="${USUARIO_GHCR:-jsediazr}"
+
+ENTORNO="cae-arriendos360"
+
+# modo_entorno: el modo del entorno de Container Apps. Tiene que ser WorkloadProfiles; en
+# Express no hay Jobs ni referencias a Key Vault (docs/adr/0022). Sólo lo expone una API en
+# preview.
+modo_entorno() {
+  az rest --method get \
+    --url "https://management.azure.com/subscriptions/$SUSCRIPCION/resourceGroups/$GRUPO/providers/Microsoft.App/managedEnvironments/$ENTORNO?api-version=2026-03-02-preview" \
+    --query properties.environmentMode -o tsv
+}
