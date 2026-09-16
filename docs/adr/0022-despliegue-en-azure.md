@@ -281,6 +281,19 @@ gateway.
   devuelve a cero con `if: always()`: si no, un fallo dejaría réplicas encendidas gastando. Los
   minutos se pasan por el entorno y se validan como número, en vez de interpolarse en el
   script.
+- **Estrenado el 2026-09-16.** Ejecución completa en verde en ~18 min: pruebas 222 s, las seis
+  imágenes 19–37 s cada una y el despliegue en Azure 837 s. Dentro de ese despliegue, lo más
+  lento es aplicar las migraciones (283 s: cada Job arranca su contenedor) y la infraestructura
+  base (218 s), que converge sin cambiar nada.
+- **Repetirlo es inocuo, comprobado.** La segunda ejecución sin cambios terminó en verde, las
+  cinco migraciones dijeron «sin migraciones pendientes» y **ninguna app creó una revisión
+  nueva** —la activa siguió siendo la de la ejecución anterior—. El `what-if` sí anuncia
+  «N to modify»: son propiedades que Azure rellena por su cuenta (`exposedPort`,
+  `maxInactiveRevisions`, `runningStatus`, los secretos ocultos), no cambios reales. El
+  contador de revisiones es la prueba, no el what-if.
+- **Tres fallos al estrenarlo, los tres de configuración y ninguno de Azure:** el sujeto OIDC
+  inmutable; la comprobación de secretos que pedía valores que el pipeline no puede leer; y el
+  runner, que clona limpio, compilando la SPA sin dependencias instaladas.
 
 ## Mediciones del corte 1 (local, Docker Desktop)
 
