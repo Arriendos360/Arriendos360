@@ -241,11 +241,27 @@ gateway.
   `desplegar-apps.sh`, `desplegar-spa.sh` y `humo.sh`, con `CONFIRMADO=si`. Lo que corre a
   mano y lo que corre en CI es el mismo código, y por eso una persona puede tomar el relevo a
   mitad de camino.
-- **Manual y con aprobación.** Sólo `workflow_dispatch` y sólo desde `main`. El trabajo que
-  toca Azure declara `environment: produccion`, que además de pedir aprobación es el sujeto
-  exacto de la credencial federada: con otro nombre, OIDC no entra.
+- **Manual.** Sólo `workflow_dispatch` y sólo desde `main`. El trabajo que toca Azure declara
+  `environment: produccion`, que es el sujeto exacto de la credencial federada: con otro
+  nombre, OIDC no entra. **La aprobación por revisor quedó fuera**, no por decisión: las
+  reglas de protección de entorno no están disponibles en repositorios privados del plan
+  gratuito. Lo que queda es que sólo quien tiene acceso al repositorio puede lanzarlo, y que
+  el despliegue es explícito y no automático con cada push. Si el repositorio pasara a
+  público o a un plan con esa función, basta con añadir el revisor: el workflow ya declara el
+  entorno.
 - **Sin secretos en GitHub.** Azure por OIDC con tres variables no secretas; las imágenes con
   el `GITHUB_TOKEN` de la ejecución; el token del Static Web App pedido al vuelo.
+- **El sujeto de la credencial federada lleva identificadores, no nombres.** GitHub emite
+  ahora el sujeto «inmutable»
+  (`repo:Arriendos360@<id org>/Arriendos360@<id repo>:environment:produccion`); con el formato
+  antiguo, Entra rechaza el token con `AADSTS700213`. Es preferible: sobrevive a un renombrado
+  y un repositorio nuevo que reutilice el nombre viejo no hereda el acceso. `bootstrap.sh` lo
+  calcula con `gh`, o lo acepta en `SUJETO_OIDC`.
+- **Desplegar no necesita leer secretos, y no puede.** La identidad del pipeline es
+  colaboradora del grupo: eso permite `getSecret` de Bicep —que es plano de control— pero no
+  leer valores del Key Vault, que se concede con un rol de datos aparte. Por eso los scripts
+  comprueban que un secreto exista preguntando por su nombre en ARM (`secreto_existe` en
+  `comun.sh`) en vez de pedir su valor. Darle el rol de datos habría sido dar de más.
 - **El sitio de la SPA se crea antes que las apps, y su contenido después.** El gateway limita
   el CORS al origen de la SPA y los correos enlazan ahí, así que las apps necesitan esa URL;
   pero el build se compila contra el gateway. De ahí `PASO=sitio|contenido|todo` en

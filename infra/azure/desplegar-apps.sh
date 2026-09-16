@@ -33,7 +33,7 @@ if [ "$ETIQUETA_TRABAJOS" != "$ETIQUETA" ]; then
 fi
 
 for secreto in email-usuario email-pass; do
-  if ! az keyvault secret show --vault-name "$KEYVAULT" -n "$secreto" --query id -o none 2>/dev/null; then
+  if ! secreto_existe "$secreto"; then
     echo "Falta el secreto $secreto en $KEYVAULT: bash infra/azure/bootstrap.sh lo pide." >&2
     exit 1
   fi

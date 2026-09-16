@@ -84,17 +84,37 @@ asignar "$DESPLIEGUE_PRINCIPAL" ServicePrincipal "Contributor" "$GRUPO_ID"
 
 paso "Credencial federada de GitHub Actions"
 CREDENCIAL="github-$ENTORNO_GITHUB"
-if az identity federated-credential show --name "$CREDENCIAL" \
-     --identity-name "$IDENTIDAD_DESPLIEGUE" -g "$GRUPO" -o none 2>/dev/null; then
+
+# GitHub presenta el sujeto en formato «inmutable»: los nombres van acompañados del id
+# numérico de la organización y del repositorio. Sobrevive a un renombrado y, sobre todo, un
+# repositorio nuevo que reutilice el nombre viejo NO hereda este acceso a Azure. Los ids se
+# leen con `gh`; si no está a mano, se pasa el sujeto entero en SUJETO_OIDC —aparece en el log
+# del workflow, en «subject claim»—.
+if [ -z "${SUJETO_OIDC:-}" ]; then
+  if IDS="$(gh api "repos/$REPO_GITHUB" --jq '[.owner.id, .id] | @tsv' 2>/dev/null)"; then
+    SUJETO_OIDC="repo:${REPO_GITHUB%%/*}@$(cut -f1 <<<"$IDS")/${REPO_GITHUB##*/}@$(cut -f2 <<<"$IDS"):environment:$ENTORNO_GITHUB"
+  else
+    echo "  No pude leer los ids de $REPO_GITHUB con gh." >&2
+    echo "  Vuelve a ejecutar con SUJETO_OIDC='repo:<org>@<id>/<repo>@<id>:environment:$ENTORNO_GITHUB'." >&2
+    exit 1
+  fi
+fi
+SUJETO_ACTUAL="$(az identity federated-credential show --name "$CREDENCIAL" \
+  --identity-name "$IDENTIDAD_DESPLIEGUE" -g "$GRUPO" --query subject -o tsv 2>/dev/null || true)"
+if [ "$SUJETO_ACTUAL" = "$SUJETO_OIDC" ]; then
   echo "  ya existe"
 else
+  # `create` sobre una credencial existente la reescribe: sirve igual para corregir el sujeto.
   az identity federated-credential create --name "$CREDENCIAL" \
     --identity-name "$IDENTIDAD_DESPLIEGUE" -g "$GRUPO" \
     --issuer "https://token.actions.githubusercontent.com" \
-    --subject "repo:$REPO_GITHUB:environment:$ENTORNO_GITHUB" \
+    --subject "$SUJETO_OIDC" \
     --audiences "api://AzureADTokenExchange" \
     -o none
-  echo "  creada para repo:$REPO_GITHUB:environment:$ENTORNO_GITHUB"
+  if [ -n "$SUJETO_ACTUAL" ]; then
+    echo "  corregida: el sujeto era «$SUJETO_ACTUAL»"
+  fi
+  echo "  apunta a $SUJETO_OIDC"
 fi
 
 # Un rol recién asignado tarda unos minutos en valer. Hasta entonces, preguntar si un

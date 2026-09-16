@@ -20,7 +20,7 @@ if ! az group show -n "$GRUPO" -o none 2>/dev/null; then
   echo "No existe el grupo $GRUPO: ejecuta antes infra/azure/bootstrap.sh" >&2
   exit 1
 fi
-if ! az keyvault secret show --vault-name "$KEYVAULT" -n db-password --query id -o none 2>/dev/null; then
+if ! secreto_existe db-password; then
   echo "Falta el secreto db-password en $KEYVAULT: ejecuta antes infra/azure/bootstrap.sh" >&2
   exit 1
 fi
