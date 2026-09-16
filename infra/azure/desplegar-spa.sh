@@ -71,6 +71,14 @@ if [ -z "$URL_GATEWAY" ]; then
   exit 1
 fi
 
+# Sin dependencias no hay build: `npx` bajaría react-scripts pero no `react`. Pasa en el
+# runner del pipeline, que clona limpio, y en cualquier máquina recién clonada.
+if [ ! -d "$RAIZ/node_modules/react" ] || [ ! -d "$RAIZ/node_modules/react-scripts" ]; then
+  echo
+  echo "== Instalando dependencias del monorepo"
+  (cd "$RAIZ" && npm ci)
+fi
+
 echo
 echo "== Compilando la SPA contra $URL_GATEWAY/api"
 (
