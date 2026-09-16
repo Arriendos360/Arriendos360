@@ -17,8 +17,8 @@ metadatos en `eastus2`.
 | `swa-arriendos360` | La SPA en Static Web Apps Free. |
 | `psql-arriendos360-*`, `kv-arriendos360-*`, `starriendos360*`, `log-arriendos360` | Base, secretos, anexos y logs. |
 
-Las apps escalan a cero: sin tráfico no cuestan. **PostgreSQL sí cobra mientras esté
-encendido**, ~$0,50 al día.
+Las apps escalan a cero: sin tráfico no hay réplicas encendidas. PostgreSQL no escala a cero,
+así que se apaga a mano cuando no se va a usar.
 
 ## Desplegar
 
@@ -90,15 +90,15 @@ a PostgreSQL, que sólo admite servicios de Azure.
    tarda ~37 s.
 3. Entra a la SPA y haz un login de prueba.
 
-## Cuidar el crédito
+## Apagar la base entre sesiones
 
 ```bash
-az postgres flexible-server stop  -g rg-arriendos360 -n psql-arriendos360-8b4d5b   # entre sesiones
+az postgres flexible-server stop  -g rg-arriendos360 -n psql-arriendos360-8b4d5b
 az postgres flexible-server start -g rg-arriendos360 -n psql-arriendos360-8b4d5b
 ```
 
-Azure lo vuelve a encender solo a los siete días. El saldo está en
-https://www.microsoftazuresponsorships.com/balance.
+Azure la vuelve a encender sola a los siete días. **Con la base apagada no arranca ningún
+servicio**: enciéndela antes de una demostración y dale unos minutos.
 
 ## Cuando algo falla
 
