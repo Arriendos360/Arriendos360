@@ -24,6 +24,9 @@ echo "== $TRABAJO: ejecución $EJECUCION"
 ESTADO="$(esperar_ejecucion "$TRABAJO" "$EJECUCION")"
 echo "   estado: $ESTADO"
 echo "   salida:"
-salida_ejecucion "$EJECUCION" | sed 's/^/     /'
+# La salida es informativa: el veredicto es el estado de la ejecución. Leer Log Analytics
+# puede fallar por permisos —la identidad del pipeline es colaboradora del grupo, no lectora
+# de logs— y eso no debe tumbar el despliegue.
+salida_ejecucion "$EJECUCION" 2>&1 | sed 's/^/     /' || true
 
 [ "$ESTADO" = "Succeeded" ]
