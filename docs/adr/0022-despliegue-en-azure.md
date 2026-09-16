@@ -1,6 +1,7 @@
 # ADR 0022 — Despliegue en Azure
 
-- **Estado:** borrador. Se cierra en el corte 7 del plan con las mediciones reales.
+- **Estado:** aceptado (2026-09-16). Los siete cortes del plan están hechos y lo que aquí se
+  decidió está desplegado y medido.
 - **Fecha:** 2026-09-14
 - **Paso:** 8 (despliegue). El plan por cortes está en CLAUDE.md, «Despliegue en Azure».
 - **Se aparta del Capítulo 2:** no. Resuelve cómo se despliega lo que el documento
