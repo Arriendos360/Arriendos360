@@ -539,7 +539,7 @@ ramas nuevas desde `main` con ese prefijo.
   recarga de una ruta interna. *Hecho (2026-09-16):* script en verde; en el navegador,
   entrar, navegar y el enlace del correo de recuperación. Recargar devuelve la SPA y ésta
   lleva al login porque el token vive en memoria: es el diseño, no un fallo.
-- [ ] **6 — Pipeline (PR).** `desplegar.yml`, manual y sólo desde `main`, con el trabajo de
+- [x] **6 — Pipeline (PR).** `desplegar.yml`, manual y sólo desde `main`, con el trabajo de
   Azure en el entorno `produccion` (aprobación + sujeto de la credencial federada): pruebas →
   imágenes (llama a `imagenes.yml`) → base → **sitio de la SPA** → migraciones → apps →
   contenido de la SPA → `humo.sh`. El sitio va antes que las apps porque el gateway limita el
@@ -547,15 +547,16 @@ ramas nuevas desde `main` con ese prefijo.
   (`desplegar-spa.sh` acepta `PASO=sitio|contenido|todo`). Más `calentar.yml` y la guía
   `docs/despliegue.md`. **Antes de lanzarlo:** crear en ese entorno las variables
   `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. *Verifica:* una ejecución en
-  verde y repetirla sin cambios es inocua.
+  verde y repetirla sin cambios es inocua. *Hecho (2026-09-16):* ejecución completa en verde
+  (~18 min: pruebas 222 s, imágenes 19–37 s cada una, Azure 837 s) y repetición inocua —no
+  aplicó migraciones, no creó revisiones nuevas y el humo pasó—.
 - [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
   presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
 
 ### Estado y cómo retomar (2026-09-16)
 
-**Cortes 0 a 5 cerrados: la aplicación entera corre en Azure y se usa desde el navegador. El
-corte 6 —el pipeline— está escrito y sin estrenar: falta crear las tres variables en el
-entorno `produccion` de GitHub y lanzarlo dos veces para comprobar que repetirlo es inocuo.**
+**Cortes 0 a 6 cerrados: la aplicación entera corre en Azure, se usa desde el navegador y se
+despliega con un workflow. Lo siguiente es el corte 7, el cierre.**
 
 **Antes de nada, al retomar:**
 
@@ -622,20 +623,11 @@ a compilar contra el gateway y sube el build; el sitio ya existe, así que el Bi
 nada. Si cambiara la URL del gateway, hay que recompilar: la SPA la resuelve al compilar, no
 al ejecutarse. `CI=true` trata los avisos como errores, y así se mantiene desde el corte 1.
 
-**Para estrenar el pipeline** (lo que falta del corte 6):
-
-1. En el repositorio: *Settings → Environments → New environment* llamado **`produccion`**,
-   exactamente así, porque forma parte del sujeto de la credencial federada. Ese sujeto lleva
-   los identificadores numéricos de la organización y del repositorio, no sus nombres
-   (`repo:Arriendos360@<id>/Arriendos360@<id>:environment:produccion`): es el formato
-   «inmutable» que GitHub emite hoy, y con el antiguo Entra responde `AADSTS700213`. En un
-   repositorio privado del plan gratuito no se puede exigir revisor.
-2. En ese entorno, tres **variables** (no secretos): `AZURE_CLIENT_ID` (el `clientId` de
-   `id-arriendos360-despliegue`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. Se obtienen con
-   `az identity show -g rg-arriendos360 -n id-arriendos360-despliegue --query clientId -o tsv`
-   y `az account show --query "{tenant:tenantId, suscripcion:id}" -o tsv`.
-3. Actions → **Desplegar** → *Run workflow* sobre `main`, y aprobarlo. Repetirlo sin cambios
-   tiene que salir en verde y no cambiar nada: eso es lo que cierra el corte.
+**El pipeline ya está montado y probado.** El entorno `produccion` existe con sus tres
+variables, y la credencial federada apunta al sujeto **inmutable** que GitHub emite hoy
+(`repo:Arriendos360@<id org>/Arriendos360@<id repo>:environment:produccion`): con el formato
+antiguo, de nombres, Entra responde `AADSTS700213`. Si alguna vez hay que recrearla,
+`bootstrap.sh` calcula ese sujeto con `gh`, o lo toma de `SUJETO_OIDC`.
 
 **Corte 7 — lo que ya se sabe:**
 
