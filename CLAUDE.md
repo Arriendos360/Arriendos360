@@ -530,13 +530,15 @@ ramas nuevas desde `main` con ese prefijo.
   con todo en cero medido, gateway por HTTPS, servicios inalcanzables desde internet, login,
   motor en `Succeeded` y envío de recuperación registrado— y el correo en el buzón. *Hecho:*
   todo en verde y el correo llegó (2026-09-15).
-- [ ] **5 — SPA (PR).** `spa.bicep` (Static Web App Free en `eastus2`, sin enlazar a ningún
+- [x] **5 — SPA (PR).** `spa.bicep` (Static Web App Free en `eastus2`, sin enlazar a ningún
   repositorio) y `staticwebapp.config.json` con `navigationFallback`. `desplegar-spa.sh`
   crea el sitio, compila con `REACT_APP_API_URL=<gateway>/api` —la SPA lo resuelve al
   compilar— y sube el build con la CLI y un token pedido al vuelo; después,
   `URL_APP=<spa> CORS_ORIGENES=<spa> desplegar-apps.sh <commit>` y `verificar-spa.sh`.
   *Verifica:* ese script sin fallos y la demostración completa en el navegador, incluida la
-  recarga de una ruta interna.
+  recarga de una ruta interna. *Hecho (2026-09-16):* script en verde; en el navegador,
+  entrar, navegar y el enlace del correo de recuperación. Recargar devuelve la SPA y ésta
+  lleva al login porque el token vive en memoria: es el diseño, no un fallo.
 - [ ] **6 — Pipeline (PR).** `desplegar.yml`: pruebas → imágenes → Bicep → migraciones →
   apps → SPA → humo. `calentar.yml` para la sustentación; guía `docs/despliegue.md`.
   *Verifica:* repetir el despliegue sin cambios es inocuo.
@@ -545,8 +547,8 @@ ramas nuevas desde `main` con ese prefijo.
 
 ### Estado y cómo retomar (2026-09-16)
 
-**Cortes 0 a 4 cerrados. El 5 está desplegado y verificado por script; se marca cuando la
-demostración en el navegador esté hecha. Lo siguiente es el corte 6.**
+**Cortes 0 a 5 cerrados: la aplicación entera corre en Azure y se usa desde el navegador.
+Lo siguiente es el corte 6, el pipeline.**
 
 **Antes de nada, al retomar:**
 
@@ -671,6 +673,10 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
 - **Límite holgado para el resto de la API.** Aplazado: el estricto de las rutas de
   autenticación está hecho (`docs/adr/0020`); si hace falta frenar abuso en lo demás,
   cada servicio se limita a sí mismo.
+- **Sesión que sobreviva a la recarga.** Hoy F5 devuelve al login, a conciencia. La única
+  salida que no rompe la Capa 1 es un *refresh token* en cookie `HttpOnly` y `SameSite`
+  emitido por el gateway, con su rotación y su revocación; guardar el de acceso en el
+  navegador no es opción. Sólo si estorba en la sustentación.
 - **Autoservicio de pago del inquilino** (`docs/adr/0006`): reporte + confirmación, o
   pasarela. La regla iría en el ABAC de ms-financiero.
 - **Devoluciones:** `EGRESO` en `TIPOS_TRANSACCION` y en el `CHECK`. No es anular.
@@ -683,6 +689,9 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
 - **En desarrollo el correo no sale de la máquina**: sin `EMAIL_USER` va al log de
   ms-notificaciones, único sitio donde leer el enlace de recuperación.
 - **La contraseña temporal se entrega en mano** (`docs/adr/0007`): el correo sólo avisa.
+- **Recargar la página cierra la sesión y devuelve al login.** No es un fallo del
+  despliegue: el token vive en memoria (Capa 1, `apps/web/src/auth/sesion.js`). Lo que el
+  corte 5 arregló es otra cosa —que la recarga diera 404 en Static Web Apps—, y ya no pasa.
 - **CRA** ya no recibe mantenimiento: migrar a Vite es barato, no urgente.
 - **Tailwind está en el PMP pero no instalado**: instálalo si rehaces estilos, o registra
   el cambio en control de configuración.
