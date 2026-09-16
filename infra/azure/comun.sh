@@ -51,6 +51,18 @@ USUARIO_GHCR="${USUARIO_GHCR:-jsediazr}"
 
 ENTORNO="cae-arriendos360"
 
+# secreto_existe <nombre>: ¿está ese secreto en el Key Vault?
+#
+# Pregunta por el plano de control (ARM), que sólo devuelve nombres, y no por el de datos, que
+# devolvería el valor. Así la comprobación vale igual para quien puede leer secretos y para la
+# identidad del pipeline, que es colaboradora del grupo y NO tiene rol de datos sobre el
+# almacén: desplegar no necesita ver ningún valor, porque Bicep los pasa como referencias.
+secreto_existe() {
+  az rest --method get \
+    --url "https://management.azure.com/subscriptions/$SUSCRIPCION/resourceGroups/$GRUPO/providers/Microsoft.KeyVault/vaults/$KEYVAULT/secrets/$1?api-version=2023-07-01" \
+    -o none 2>/dev/null
+}
+
 # modo_entorno: el modo del entorno de Container Apps. Tiene que ser WorkloadProfiles; en
 # Express no hay Jobs ni referencias a Key Vault (docs/adr/0022). Sólo lo expone una API en
 # preview.

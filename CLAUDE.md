@@ -494,7 +494,7 @@ ramas nuevas desde `main` con ese prefijo.
 | Imágenes | GHCR privado, `ghcr.io/arriendos360/<gateway\|ms-*>:<commit>`, sin `latest`. Etapa `produccion` en cada Dockerfile: TypeScript compilado y sin dependencias de desarrollo. Las publica el workflow manual «Imágenes» desde `main` con el `GITHUB_TOKEN`. |
 | Correo | **Temporal:** Gmail personal por SMTP en el 587, con contraseña de aplicación en Key Vault y `EMAIL_REMITENTE` igual a esa dirección. Revocarla tras la sustentación. |
 | Datos de demostración | Sí, con un Job manual de seed. |
-| Pipeline | GitHub Actions sólo manual (`workflow_dispatch`), con aprobación. OIDC contra una identidad administrada: ningún secreto en GitHub. |
+| Pipeline | GitHub Actions sólo manual (`workflow_dispatch`) y sólo desde `main`. OIDC contra una identidad administrada: ningún secreto en GitHub. **La aprobación por revisor no se pudo exigir:** las reglas de protección de entorno no están disponibles en un repositorio privado del plan gratuito. La barrera es quién puede lanzar el workflow; el entorno `produccion` sigue existiendo porque es el sujeto de la credencial federada. |
 
 ### Cortes
 
@@ -625,8 +625,11 @@ al ejecutarse. `CI=true` trata los avisos como errores, y así se mantiene desde
 **Para estrenar el pipeline** (lo que falta del corte 6):
 
 1. En el repositorio: *Settings → Environments → New environment* llamado **`produccion`**,
-   exactamente así, porque es el sujeto de la credencial federada
-   (`repo:Arriendos360/Arriendos360:environment:produccion`). Añádete como revisor obligatorio.
+   exactamente así, porque forma parte del sujeto de la credencial federada. Ese sujeto lleva
+   los identificadores numéricos de la organización y del repositorio, no sus nombres
+   (`repo:Arriendos360@<id>/Arriendos360@<id>:environment:produccion`): es el formato
+   «inmutable» que GitHub emite hoy, y con el antiguo Entra responde `AADSTS700213`. En un
+   repositorio privado del plan gratuito no se puede exigir revisor.
 2. En ese entorno, tres **variables** (no secretos): `AZURE_CLIENT_ID` (el `clientId` de
    `id-arriendos360-despliegue`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. Se obtienen con
    `az identity show -g rg-arriendos360 -n id-arriendos360-despliegue --query clientId -o tsv`
