@@ -213,6 +213,27 @@ gateway.
   | Recuperación → correo enviado por ms-notificaciones | 200; envío registrado a los 26 s |
 
 
+### SPA en Static Web Apps (corte 5)
+
+- **Sitio sin enlazar a GitHub.** Un Static Web App enlazado publica en cada push y guarda su
+  token en los secretos del repositorio, justo lo que el plan evita. `spa.bicep` lo crea con
+  `provider: 'None'`, y `desplegar-spa.sh` sube el build con la CLI oficial y un token pedido
+  con `az staticwebapp secrets list` en el momento, pasado por el entorno y no como argumento.
+- **`eastus2`,** porque Static Web Apps sólo existe en cinco regiones y es la única que además
+  permite la política de la suscripción. Es región de metadatos: el contenido se sirve desde
+  la red de borde.
+- **La URL de la API se fija al compilar.** CRA resuelve `REACT_APP_API_URL` en el build, así
+  que el sitio queda atado al gateway de ese momento y cambiarlo exige recompilar. Incluye
+  `/api`, como el valor por defecto de `apps/web/src/services/api.js`.
+- **`navigationFallback`** devuelve `index.html` en las rutas del enrutador, y excluye
+  `/static/*` y los archivos con extensión para que un recurso que falta siga dando 404 en vez
+  de disfrazarse de portada. Sin `responseOverrides`: convertir todo 404 en 200 escondería
+  errores reales.
+- **Verificado en Azure** (2026-09-16) con `verificar-spa.sh`: portada, `/contratos` recargada
+  sin 404, estáticos servidos y uno inexistente en 404, el JavaScript publicado apuntando al
+  gateway, y el gateway admitiendo por CORS el origen de la SPA y no uno ajeno. Con el
+  redespliegue de las apps, `URL_APP` y `CORS_ORIGENES` quedan en esa URL.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |
