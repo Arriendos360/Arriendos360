@@ -1,0 +1,98 @@
+# Deja gateway e identidad despiertos un rato (corte 6, docs/adr/0022).
+#
+# Con escala a cero, el primer login del día tarda ~37 s (medido en el corte 4). La SPA avisa
+# y reintenta, pero en una sustentación son 37 s de pantalla quieta. Esto sube a una réplica
+# el gateway y ms-identidad —los dos del camino de entrada—, espera los minutos que se le
+# pidan y los devuelve a cero al terminar, también si el paso anterior falla o se cancela.
+#
+# Los demás servicios se quedan en cero: despiertan con la primera petición que los toque, y
+# para entonces ya hay alguien usando la aplicación.
+#
+# Mientras están despiertos consumen de la concesión gratuita de Container Apps; una hora de
+# dos réplicas de 0,25 vCPU es una fracción pequeña del mes. Dejarlos así indefinidamente no:
+# por eso el propio workflow los vuelve a dormir.
+
+name: Calentar
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutos:
+        description: Cuántos minutos mantenerlos despiertos
+        type: string
+        default: '45'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: calentar
+  cancel-in-progress: false
+
+jobs:
+  calentar:
+    name: Calentar para la sustentación
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: produccion
+    timeout-minutes: 180
+    env:
+      GRUPO: rg-arriendos360
+      APPS: gateway ms-identidad
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Entrar a Azure con OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Instalar la extensión containerapp
+        run: az extension add --name containerapp --upgrade --yes --only-show-errors
+
+      - name: Subir a una réplica
+        run: |
+          for app in $APPS; do
+            az containerapp update -n "$app" -g "$GRUPO" --min-replicas 1 -o none
+            echo "$app: mínimo 1 réplica"
+          done
+
+      - name: Despertar con una petición real
+        run: |
+          URL="$(az deployment group show -g "$GRUPO" -n apps --query properties.outputs.urlGateway.value -o tsv)"
+          codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 150 \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"email":"propietario@arriendos360.test","contrasena":"Prueba123"}' \
+            "$URL/api/auth/login")"
+          echo "login de prueba: HTTP $codigo"
+          echo "Listo para la demostración: $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      # Por el entorno y validado: interpolar una entrada dentro del script sería inyección
+      # de comandos, aunque sólo pueda lanzarlo quien ya tiene acceso al repositorio.
+      - name: Esperar
+        env:
+          MINUTOS: ${{ inputs.minutos }}
+        run: |
+          case "$MINUTOS" in
+            '' | *[!0-9]*)
+              echo "minutos debe ser un número entero: «$MINUTOS»" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$MINUTOS" -lt 1 ] || [ "$MINUTOS" -gt 170 ]; then
+            echo "minutos fuera de rango (1 a 170): $MINUTOS" >&2
+            exit 1
+          fi
+          sleep $((MINUTOS * 60))
+
+      # Pase lo que pase: si esto no corre, las réplicas se quedan encendidas gastando.
+      - name: Devolver a cero
+        if: always()
+        run: |
+          for app in $APPS; do
+            az containerapp update -n "$app" -g "$GRUPO" --min-replicas 0 -o none
+            echo "$app: mínimo 0 réplicas"
+          done

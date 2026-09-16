@@ -39,6 +39,13 @@ for secreto in email-usuario email-pass; do
   fi
 done
 
+# Si el Static Web App ya existe, su URL es el valor por defecto de las dos variables que la
+# nombran: el gateway limita ahí el CORS y los correos enlazan ahí. Así no hay que recordarlo
+# en cada despliegue, y se puede forzar otra con URL_APP o CORS_ORIGENES.
+URL_SPA="$(az deployment group show -g "$GRUPO" -n spa --query properties.outputs.url.value -o tsv 2>/dev/null || true)"
+URL_APP="${URL_APP:-$URL_SPA}"
+CORS_ORIGENES="${CORS_ORIGENES:-$URL_SPA}"
+
 PLANTILLA="$(ruta "$DIR/apps.bicep")"
 PARAMETROS=(sufijo="$SUFIJO" etiqueta="$ETIQUETA" usuarioRegistro="$USUARIO_GHCR")
 [ -n "${URL_APP:-}" ] && PARAMETROS+=(urlApp="$URL_APP")

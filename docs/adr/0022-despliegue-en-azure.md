@@ -234,6 +234,38 @@ gateway.
   gateway, y el gateway admitiendo por CORS el origen de la SPA y no uno ajeno. Con el
   redespliegue de las apps, `URL_APP` y `CORS_ORIGENES` quedan en esa URL.
 
+### Pipeline (corte 6)
+
+- **Un workflow que llama a los mismos scripts.** `desplegar.yml` no reimplementa el
+  despliegue: ejecuta `desplegar-base.sh`, `desplegar-trabajos.sh`, `ejecutar-trabajo.sh`,
+  `desplegar-apps.sh`, `desplegar-spa.sh` y `humo.sh`, con `CONFIRMADO=si`. Lo que corre a
+  mano y lo que corre en CI es el mismo código, y por eso una persona puede tomar el relevo a
+  mitad de camino.
+- **Manual y con aprobación.** Sólo `workflow_dispatch` y sólo desde `main`. El trabajo que
+  toca Azure declara `environment: produccion`, que además de pedir aprobación es el sujeto
+  exacto de la credencial federada: con otro nombre, OIDC no entra.
+- **Sin secretos en GitHub.** Azure por OIDC con tres variables no secretas; las imágenes con
+  el `GITHUB_TOKEN` de la ejecución; el token del Static Web App pedido al vuelo.
+- **El sitio de la SPA se crea antes que las apps, y su contenido después.** El gateway limita
+  el CORS al origen de la SPA y los correos enlazan ahí, así que las apps necesitan esa URL;
+  pero el build se compila contra el gateway. De ahí `PASO=sitio|contenido|todo` en
+  `desplegar-spa.sh`, y que `desplegar-apps.sh` tome esa URL por defecto del despliegue `spa`.
+- **Las pruebas en CI necesitan entorno explícito:** las suites cargan `dotenv` y en el runner
+  no hay `.env`. El workflow da `DB_*`, `JWT_SECRET` y `SERVICIO_JWT_SECRET`, y PostgreSQL 15
+  como servicio. Las `MS_*_URL` no: cada suite levanta sus dobles y las fija ella misma.
+- **Humo corto, verificaciones largas a mano.** `humo.sh` —gateway, login, SPA y CORS— tarda
+  dos o tres minutos y cierra cada despliegue. Medir el arranque en frío, mandar un correo de
+  recuperación o correr las dos rondas de Jobs se queda en los `verificar-*`, que se lanzan
+  cuando toca cerrar un corte.
+- **Leer los logs no puede tumbar un despliegue.** `ejecutar-trabajo.sh` decide por el estado
+  de la ejecución, que da la API de Container Apps; la salida de Log Analytics es informativa
+  y se tolera que falle, porque la identidad del pipeline es colaboradora del grupo y puede no
+  tener acceso de consulta.
+- **`calentar.yml`** sube a una réplica gateway e identidad, espera los minutos pedidos y los
+  devuelve a cero con `if: always()`: si no, un fallo dejaría réplicas encendidas gastando. Los
+  minutos se pasan por el entorno y se validan como número, en vez de interpolarse en el
+  script.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |

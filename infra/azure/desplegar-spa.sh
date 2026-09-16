@@ -10,6 +10,14 @@
 #   3. Sube el build con la CLI de Static Web Apps, con el token de despliegue pedido al
 #      vuelo y pasado por el entorno: no se guarda en el repositorio ni en GitHub.
 #
+# `PASO` parte eso en dos para el pipeline, que necesita el sitio ANTES de desplegar las apps
+# —el gateway limita el CORS a su origen y los correos enlazan ahí— y subir el contenido
+# DESPUÉS, cuando ya hay gateway contra el que compilar:
+#
+#   PASO=sitio      sólo el Bicep.
+#   PASO=contenido  sólo compilar y subir; el sitio ya tiene que existir.
+#   PASO=todo       las dos cosas (por defecto).
+#
 # El plan Free no cuesta. Después hay que redesplegar las apps con URL_APP y CORS_ORIGENES
 # —lo dice al terminar— y verificar con infra/azure/verificar-spa.sh.
 
@@ -18,29 +26,50 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 RAIZ="$(cd "$DIR/../.." && pwd)"
 source "$DIR/comun.sh"
 
+PASO="${PASO:-todo}"
+case "$PASO" in
+  sitio | contenido | todo) ;;
+  *)
+    echo "PASO debe ser «sitio», «contenido» o «todo», no «$PASO»." >&2
+    exit 1
+    ;;
+esac
+
+if [ "$PASO" != "contenido" ]; then
+  PLANTILLA="$(ruta "$DIR/spa.bicep")"
+
+  az deployment group what-if -g "$GRUPO" -n spa -f "$PLANTILLA"
+
+  if [ "${CONFIRMADO:-}" != "si" ]; then
+    read -rp "¿Crear o actualizar el Static Web App? (s/N) " respuesta
+    if [ "$respuesta" != "s" ]; then
+      echo "Cancelado."
+      exit 1
+    fi
+  fi
+
+  az deployment group create -g "$GRUPO" -n spa -f "$PLANTILLA" -o none
+fi
+
+NOMBRE_SPA="$(az deployment group show -g "$GRUPO" -n spa --query properties.outputs.nombre.value -o tsv 2>/dev/null || true)"
+URL_SPA="$(az deployment group show -g "$GRUPO" -n spa --query properties.outputs.url.value -o tsv 2>/dev/null || true)"
+if [ -z "$NOMBRE_SPA" ]; then
+  echo "No existe el Static Web App: ejecuta antes PASO=sitio bash infra/azure/desplegar-spa.sh" >&2
+  exit 1
+fi
+
+if [ "$PASO" = "sitio" ]; then
+  echo
+  echo "SPA: $URL_SPA (sin contenido nuevo)"
+  exit 0
+fi
+
 URL_GATEWAY="$(az deployment group show -g "$GRUPO" -n apps \
   --query properties.outputs.urlGateway.value -o tsv 2>/dev/null || true)"
 if [ -z "$URL_GATEWAY" ]; then
   echo "No hay apps desplegadas: ejecuta antes infra/azure/desplegar-apps.sh <etiqueta>" >&2
   exit 1
 fi
-
-PLANTILLA="$(ruta "$DIR/spa.bicep")"
-
-az deployment group what-if -g "$GRUPO" -n spa -f "$PLANTILLA"
-
-if [ "${CONFIRMADO:-}" != "si" ]; then
-  read -rp "¿Crear o actualizar el Static Web App? (s/N) " respuesta
-  if [ "$respuesta" != "s" ]; then
-    echo "Cancelado."
-    exit 1
-  fi
-fi
-
-az deployment group create -g "$GRUPO" -n spa -f "$PLANTILLA" -o none
-
-NOMBRE_SPA="$(az deployment group show -g "$GRUPO" -n spa --query properties.outputs.nombre.value -o tsv)"
-URL_SPA="$(az deployment group show -g "$GRUPO" -n spa --query properties.outputs.url.value -o tsv)"
 
 echo
 echo "== Compilando la SPA contra $URL_GATEWAY/api"

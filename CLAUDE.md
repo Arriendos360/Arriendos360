@@ -539,16 +539,23 @@ ramas nuevas desde `main` con ese prefijo.
   recarga de una ruta interna. *Hecho (2026-09-16):* script en verde; en el navegador,
   entrar, navegar y el enlace del correo de recuperación. Recargar devuelve la SPA y ésta
   lleva al login porque el token vive en memoria: es el diseño, no un fallo.
-- [ ] **6 — Pipeline (PR).** `desplegar.yml`: pruebas → imágenes → Bicep → migraciones →
-  apps → SPA → humo. `calentar.yml` para la sustentación; guía `docs/despliegue.md`.
-  *Verifica:* repetir el despliegue sin cambios es inocuo.
+- [ ] **6 — Pipeline (PR).** `desplegar.yml`, manual y sólo desde `main`, con el trabajo de
+  Azure en el entorno `produccion` (aprobación + sujeto de la credencial federada): pruebas →
+  imágenes (llama a `imagenes.yml`) → base → **sitio de la SPA** → migraciones → apps →
+  contenido de la SPA → `humo.sh`. El sitio va antes que las apps porque el gateway limita el
+  CORS a su origen; el contenido, después, porque se compila contra el gateway
+  (`desplegar-spa.sh` acepta `PASO=sitio|contenido|todo`). Más `calentar.yml` y la guía
+  `docs/despliegue.md`. **Antes de lanzarlo:** crear en ese entorno las variables
+  `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. *Verifica:* una ejecución en
+  verde y repetirla sin cambios es inocua.
 - [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
   presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
 
 ### Estado y cómo retomar (2026-09-16)
 
-**Cortes 0 a 5 cerrados: la aplicación entera corre en Azure y se usa desde el navegador.
-Lo siguiente es el corte 6, el pipeline.**
+**Cortes 0 a 5 cerrados: la aplicación entera corre en Azure y se usa desde el navegador. El
+corte 6 —el pipeline— está escrito y sin estrenar: falta crear las tres variables en el
+entorno `produccion` de GitHub y lanzarlo dos veces para comprobar que repetirlo es inocuo.**
 
 **Antes de nada, al retomar:**
 
@@ -599,39 +606,42 @@ demás le piden los revocados cada 15 s.
 - Claude lee estado, `what-if` y logs por su cuenta; **crear, cambiar o borrar en Azure se
   pregunta antes**.
 
-**Redesplegar tras un cambio de código,** en este orden:
+**Redesplegar tras un cambio de código:** fusionar el PR y lanzar **Desplegar** desde Actions
+sobre `main`, aprobándolo cuando GitHub lo pida. Hace pruebas, imágenes y los seis pasos de
+Azure con estos mismos scripts. El detalle y la secuencia a mano están en
+`docs/despliegue.md`; `CONFIRMADO=si` evita la pregunta tras el what-if, y `PASO=sitio` o
+`PASO=contenido` parten el despliegue de la SPA.
 
-1. Fusionar el PR en `main`.
-2. `gh workflow run imagenes.yml --ref main`. La etiqueta es el commit de `main`.
-3. `bash infra/azure/desplegar-trabajos.sh <commit>`.
-4. `bash infra/azure/verificar-trabajos.sh`, que aplica las migraciones nuevas y lo comprueba.
-5. `bash infra/azure/desplegar-apps.sh <commit>`.
-6. `CORREO_PRUEBA=<correo de una cuenta real> bash infra/azure/verificar-apps.sh`. Tarda
-   ~30 min: espera a que todo duerma. ms-identidad deja 3 recuperaciones por hora por cuenta
-   y las demás las ignora en silencio.
-
-Con `CONFIRMADO=si` los `desplegar-*` no preguntan tras el `what-if`.
+Lo que el pipeline **no** hace, porque tarda demasiado para cada despliegue, y sigue siendo
+manual: `verificar-apps.sh` (~30 min, mide el arranque en frío y manda un correo de
+recuperación; ms-identidad deja 3 por hora y cuenta, y las demás las ignora en silencio),
+`verificar-base.sh` y `verificar-trabajos.sh`. El pipeline sólo corre `humo.sh`.
 
 **Republicar la SPA** tras un cambio en `apps/web`: `bash infra/azure/desplegar-spa.sh`. Vuelve
 a compilar contra el gateway y sube el build; el sitio ya existe, así que el Bicep no cambia
 nada. Si cambiara la URL del gateway, hay que recompilar: la SPA la resuelve al compilar, no
 al ejecutarse. `CI=true` trata los avisos como errores, y así se mantiene desde el corte 1.
 
-**Corte 6 — lo que ya se sabe:**
+**Para estrenar el pipeline** (lo que falta del corte 6):
 
-- El pipeline repite lo que hoy se hace a mano: pruebas → imágenes → Bicep → migraciones →
-  apps → SPA → humo, sólo `workflow_dispatch` y con aprobación del entorno `produccion` de
-  GitHub. La credencial federada ya existe para ese entorno exacto
-  (`repo:Arriendos360/Arriendos360:environment:produccion`): si se usa otro nombre, no entra.
-- Variables (no secretos) que hay que crear en ese entorno: `AZURE_CLIENT_ID` (el `clientId`
-  de `id-arriendos360-despliegue`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. Los imprime
-  `bootstrap.sh` al final.
-- El token del Static Web App se pide al vuelo con `az staticwebapp secrets list`, como hace
-  `desplegar-spa.sh`: no se guarda en GitHub.
-- Falta `calentar.yml`, que antes de una sustentación deja gateway e identidad con una
-  réplica —el primer login en frío son 37 s— y la guía `docs/despliegue.md`.
-- Los scripts ya aceptan `CONFIRMADO=si` para no preguntar, que es lo que necesita un
-  workflow.
+1. En el repositorio: *Settings → Environments → New environment* llamado **`produccion`**,
+   exactamente así, porque es el sujeto de la credencial federada
+   (`repo:Arriendos360/Arriendos360:environment:produccion`). Añádete como revisor obligatorio.
+2. En ese entorno, tres **variables** (no secretos): `AZURE_CLIENT_ID` (el `clientId` de
+   `id-arriendos360-despliegue`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. Se obtienen con
+   `az identity show -g rg-arriendos360 -n id-arriendos360-despliegue --query clientId -o tsv`
+   y `az account show --query "{tenant:tenantId, suscripcion:id}" -o tsv`.
+3. Actions → **Desplegar** → *Run workflow* sobre `main`, y aprobarlo. Repetirlo sin cambios
+   tiene que salir en verde y no cambiar nada: eso es lo que cierra el corte.
+
+**Corte 7 — lo que ya se sabe:**
+
+- El ADR 0022 ya tiene las mediciones de los cortes 1 a 5; falta el costo real y si
+  PostgreSQL entró en la oferta gratuita.
+- Faltan las alertas de presupuesto al 50 % y al 80 % del crédito
+  (`Microsoft.Consumption/budgets`, gratis).
+- Este apartado se reduce entonces a su resumen: lo desplegado, cómo se despliega y los
+  riesgos vivos.
 
 **Cabos sueltos, fuera de los cortes:**
 

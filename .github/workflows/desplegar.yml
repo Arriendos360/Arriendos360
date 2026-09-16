@@ -1,0 +1,154 @@
+# Despliegue completo en Azure (corte 6, docs/adr/0022).
+#
+# Repite lo que hasta ahora se hacía a mano, en el mismo orden y con los mismos scripts de
+# `infra/azure`: pruebas → imágenes → base → sitio de la SPA → migraciones → apps → contenido
+# de la SPA → humo.
+#
+# Sólo manual y sólo desde `main`. El trabajo que toca Azure vive en el entorno `produccion`,
+# que exige aprobación y es el sujeto exacto de la credencial federada
+# (`repo:Arriendos360/Arriendos360:environment:produccion`): con otro nombre, OIDC no entra.
+#
+# NINGÚN SECRETO EN GITHUB: la sesión de Azure se abre con OIDC contra
+# `id-arriendos360-despliegue`, las imágenes se publican con el GITHUB_TOKEN de la ejecución
+# y el token del Static Web App se pide al vuelo. Lo único que hay en el entorno son tres
+# variables que no son secretas: AZURE_CLIENT_ID, AZURE_TENANT_ID y AZURE_SUBSCRIPTION_ID.
+#
+# Repetirlo sin cambios es inocuo: el Bicep converge, las migraciones ya aplicadas se saltan
+# y el seed no repite usuarios.
+
+name: Desplegar
+
+on:
+  workflow_dispatch:
+    inputs:
+      sembrar:
+        description: Ejecutar también el Job de datos de demostración
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # OIDC contra Azure; sin esto no hay sesión.
+  id-token: write
+  packages: write
+
+# Dos despliegues a la vez se pisarían en las mismas revisiones; se encolan.
+concurrency:
+  group: despliegue
+  cancel-in-progress: false
+
+jobs:
+  pruebas:
+    name: Pruebas
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: pruebas
+          POSTGRES_DB: arriendos360_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Las suites cargan dotenv, y en el runner no hay `.env`: se las damos aquí. Las
+      # `MS_*_URL` no, porque cada suite levanta sus dobles y las fija ella misma.
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: pruebas
+      DB_NAME_TEST: arriendos360_test
+      JWT_SECRET: pruebas-jwt-secreto
+      SERVICIO_JWT_SECRET: pruebas-servicio-secreto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+      - run: npm ci
+      - run: npm test --workspaces --if-present
+
+  imagenes:
+    name: Imágenes
+    needs: pruebas
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/imagenes.yml
+
+  desplegar:
+    name: Desplegar en Azure
+    needs: imagenes
+    runs-on: ubuntu-latest
+    # Aprobación humana: la pide GitHub antes de ejecutar este trabajo.
+    environment: produccion
+    env:
+      # Los scripts preguntan antes de crear o cambiar; en un workflow no hay quien conteste,
+      # y la aprobación del entorno ya cumple esa función.
+      CONFIRMADO: si
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+
+      - name: Entrar a Azure con OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Preparar Bicep
+        run: az bicep install
+
+      - name: Infraestructura base
+        run: bash infra/azure/desplegar-base.sh
+
+      # El sitio ANTES que las apps: el gateway limita el CORS a su origen y los correos
+      # enlazan ahí. El contenido se sube al final, cuando ya hay gateway contra el que
+      # compilar.
+      - name: Sitio de la SPA
+        run: PASO=sitio bash infra/azure/desplegar-spa.sh
+
+      - name: Jobs de migración y seed
+        run: bash infra/azure/desplegar-trabajos.sh "${{ github.sha }}"
+
+      # Antes de publicar las revisiones nuevas: en Azure los servicios no migran al
+      # arrancar, y con una migración pendiente se niegan a arrancar.
+      - name: Aplicar migraciones
+        run: |
+          for servicio in identidad inmuebles contratos financiero notificaciones; do
+            bash infra/azure/ejecutar-trabajo.sh "migrar-$servicio"
+          done
+
+      - name: Datos de demostración
+        if: inputs.sembrar
+        run: bash infra/azure/ejecutar-trabajo.sh seed-identidad
+
+      - name: Apps y Job del motor
+        run: bash infra/azure/desplegar-apps.sh "${{ github.sha }}"
+
+      - name: Contenido de la SPA
+        run: PASO=contenido bash infra/azure/desplegar-spa.sh
+
+      - name: Humo
+        run: bash infra/azure/humo.sh
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "### Despliegue ${GITHUB_SHA}"
+            echo
+            echo "- Gateway: $(az deployment group show -g rg-arriendos360 -n apps --query properties.outputs.urlGateway.value -o tsv 2>/dev/null)"
+            echo "- SPA: $(az deployment group show -g rg-arriendos360 -n spa --query properties.outputs.url.value -o tsv 2>/dev/null)"
+          } >> "$GITHUB_STEP_SUMMARY"
