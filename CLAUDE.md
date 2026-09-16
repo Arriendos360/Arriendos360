@@ -530,23 +530,28 @@ ramas nuevas desde `main` con ese prefijo.
   con todo en cero medido, gateway por HTTPS, servicios inalcanzables desde internet, login,
   motor en `Succeeded` y envío de recuperación registrado— y el correo en el buzón. *Hecho:*
   todo en verde y el correo llegó (2026-09-15).
-- [ ] **5 — SPA (PR).** Static Web Apps Free con `REACT_APP_API_URL` del gateway.
-  *Verifica:* la demostración completa en el navegador, incluida la recarga de una ruta interna.
+- [ ] **5 — SPA (PR).** `spa.bicep` (Static Web App Free en `eastus2`, sin enlazar a ningún
+  repositorio) y `staticwebapp.config.json` con `navigationFallback`. `desplegar-spa.sh`
+  crea el sitio, compila con `REACT_APP_API_URL=<gateway>/api` —la SPA lo resuelve al
+  compilar— y sube el build con la CLI y un token pedido al vuelo; después,
+  `URL_APP=<spa> CORS_ORIGENES=<spa> desplegar-apps.sh <commit>` y `verificar-spa.sh`.
+  *Verifica:* ese script sin fallos y la demostración completa en el navegador, incluida la
+  recarga de una ruta interna.
 - [ ] **6 — Pipeline (PR).** `desplegar.yml`: pruebas → imágenes → Bicep → migraciones →
   apps → SPA → humo. `calentar.yml` para la sustentación; guía `docs/despliegue.md`.
   *Verifica:* repetir el despliegue sin cambios es inocuo.
 - [ ] **7 — Cierre (PR).** ADR 0022 con las mediciones y el costo real; alertas de
   presupuesto al 50 % y al 80 %; este apartado se reduce a su resumen.
 
-### Estado y cómo retomar (2026-09-15)
+### Estado y cómo retomar (2026-09-16)
 
-**Cortes 0 a 4 cerrados. Lo siguiente es el corte 5.**
+**Cortes 0 a 4 cerrados. El 5 está desplegado y verificado por script; se marca cuando la
+demostración en el navegador esté hecha. Lo siguiente es el corte 6.**
 
 **Antes de nada, al retomar:**
 
-1. **Fusionar #34** (ajustes y cierre del corte 4) si sigue abierto: `main` no tiene aún las
-   esperas de 30 s, las correcciones de los scripts ni este apartado. Lo desplegado en Azure
-   **sí** lleva las esperas: se desplegó desde esa rama.
+1. **Fusionar #35** (corte 5) si sigue abierto: `main` no tiene aún el Bicep de la SPA, su
+   configuración ni los dos scripts. Lo que corre en Azure **sí** salió de esa rama.
 2. **Encender PostgreSQL** si se detuvo; ninguna app arranca sin él:
    `az postgres flexible-server start -g rg-arriendos360 -n psql-arriendos360-8b4d5b`
    (unos minutos). Al terminar la sesión, `stop`: cobra ~$0,50 al día encendido.
@@ -563,6 +568,7 @@ ramas nuevas desde `main` con ese prefijo.
 | `psql-arriendos360-8b4d5b` | PostgreSQL 15 B1ms, base `arriendos360_db`, los cinco esquemas migrados. Sólo admite servicios de Azure: desde la máquina de desarrollo no hay conexión. |
 | `cae-arriendos360` | Entorno en modo `WorkloadProfiles`, dominio `ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io`. |
 | Apps | `gateway` en **https://gateway.ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io**; `ms-identidad`, `ms-inmuebles`, `ms-contratos`, `ms-financiero`, `ms-notificaciones` internas. 0–1 réplica. |
+| SPA | `swa-arriendos360` (Static Web Apps Free, `eastus2`) en **https://victorious-sand-0d7da490f.5.azurestaticapps.net**. Sin enlace a repositorio: el contenido lo sube `desplegar-spa.sh`. El gateway sólo admite ese origen (`CORS_ORIGENES`) y los correos enlazan ahí (`URL_APP`). |
 | Jobs | `migrar-{identidad,inmuebles,contratos,financiero,notificaciones}` y `seed-identidad` (manuales); `motor-financiero` (`1 5 * * *` UTC). |
 | Etiqueta desplegada | `732ced282ed08f650d58a232f46d9cdfe54560ac` en apps y Jobs. |
 | Otros | `starriendos3608b4d5b` (contenedor `anexos`), `log-arriendos360`, identidades `id-arriendos360-apps` y `id-arriendos360-despliegue`. |
@@ -604,22 +610,26 @@ demás le piden los revocados cada 15 s.
 
 Con `CONFIRMADO=si` los `desplegar-*` no preguntan tras el `what-if`.
 
-**Corte 5 — lo que ya se sabe:**
+**Republicar la SPA** tras un cambio en `apps/web`: `bash infra/azure/desplegar-spa.sh`. Vuelve
+a compilar contra el gateway y sube el build; el sitio ya existe, así que el Bicep no cambia
+nada. Si cambiara la URL del gateway, hay que recompilar: la SPA la resuelve al compilar, no
+al ejecutarse. `CI=true` trata los avisos como errores, y así se mantiene desde el corte 1.
 
-- La SPA lee `REACT_APP_API_URL` al compilar (`apps/web/src/services/api.js`) y **incluye
-  `/api`**: `https://gateway.ambitioussea-8d2f1b9e.mexicocentral.azurecontainerapps.io/api`.
-  Se resuelve en el build, no en tiempo de ejecución.
-- Falta `staticwebapp.config.json` con `navigationFallback` a `index.html`, para que recargar
-  una ruta interna no dé 404.
-- El Static Web App es nuevo, Free, con región de metadatos `eastus2`, y va en Bicep.
-- Con su URL, redesplegar las apps con
-  `URL_APP=<url de la SPA> CORS_ORIGENES=<url de la SPA> bash infra/azure/desplegar-apps.sh <commit>`.
-  Hoy el enlace del correo de recuperación apunta a `http://localhost:3000` y el CORS del
-  gateway admite cualquier origen.
-- Por decidir en el corte: cómo se publica el build sin guardar el token del Static Web App
-  en el repositorio ni en GitHub. Una opción es pedirlo con `az staticwebapp secrets list` al
-  publicar; el pipeline del corte 6 lo automatizará.
-- `CI=true npx react-scripts build` pasa desde el corte 1; mantenerlo así.
+**Corte 6 — lo que ya se sabe:**
+
+- El pipeline repite lo que hoy se hace a mano: pruebas → imágenes → Bicep → migraciones →
+  apps → SPA → humo, sólo `workflow_dispatch` y con aprobación del entorno `produccion` de
+  GitHub. La credencial federada ya existe para ese entorno exacto
+  (`repo:Arriendos360/Arriendos360:environment:produccion`): si se usa otro nombre, no entra.
+- Variables (no secretos) que hay que crear en ese entorno: `AZURE_CLIENT_ID` (el `clientId`
+  de `id-arriendos360-despliegue`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. Los imprime
+  `bootstrap.sh` al final.
+- El token del Static Web App se pide al vuelo con `az staticwebapp secrets list`, como hace
+  `desplegar-spa.sh`: no se guarda en GitHub.
+- Falta `calentar.yml`, que antes de una sustentación deja gateway e identidad con una
+  réplica —el primer login en frío son 37 s— y la guía `docs/despliegue.md`.
+- Los scripts ya aceptan `CONFIRMADO=si` para no preguntar, que es lo que necesita un
+  workflow.
 
 **Cabos sueltos, fuera de los cortes:**
 
