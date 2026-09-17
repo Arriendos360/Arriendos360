@@ -1,0 +1,53 @@
+# Las pruebas de todo el monorepo contra dobles (docs/adr/0022).
+#
+# Corren en cada Pull Request hacia `main` —quien codifica no es quien prueba, PMP— y otra vez
+# dentro de «Desplegar», que las llama antes de tocar nada: entre la aprobación del PR y el
+# push a `main` puede colarse un conflicto que nadie compiló.
+#
+# `npm test --workspaces` no incluye `tests/integracion`: eso necesita el stack arriba.
+
+name: Pruebas
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    name: Pruebas
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: pruebas
+          POSTGRES_DB: arriendos360_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Las suites cargan dotenv, y en el runner no hay `.env`: se las damos aquí. Las
+      # `MS_*_URL` no, porque cada suite levanta sus dobles y las fija ella misma.
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: pruebas
+      DB_NAME_TEST: arriendos360_test
+      JWT_SECRET: pruebas-jwt-secreto
+      SERVICIO_JWT_SECRET: pruebas-servicio-secreto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+      - run: npm ci
+      - run: npm test --workspaces --if-present

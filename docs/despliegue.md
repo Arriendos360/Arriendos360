@@ -26,14 +26,18 @@ Lo normal es el workflow, que hace lo mismo que los scripts y en el mismo orden.
 
 ### Con el pipeline
 
-1. Fusiona el PR en `main`.
-2. Actions → **Desplegar** → *Run workflow* sobre `main`. Marca *sembrar* sólo si quieres
-   recrear los usuarios de demostración.
-3. Apruébalo cuando GitHub lo pida: el trabajo que toca Azure está en el entorno
-   `produccion`.
+**Fusionar un PR en `main` despliega**: el push dispara **Desplegar**, que hace, en orden,
+pruebas → imágenes a GHCR → `base.bicep` → sitio de la SPA → Jobs de migración y su ejecución
+→ apps y Job del motor → contenido de la SPA → humo. Sólo se reconstruye y se republica lo que
+cambió, y un push que toca únicamente documentación (`**.md`, `docs/`) no dispara nada.
 
-Hace, en orden: pruebas → imágenes a GHCR → `base.bicep` → sitio de la SPA → Jobs de
-migración y su ejecución → apps y Job del motor → contenido de la SPA → humo.
+Si el entorno `produccion` tiene revisores, el trabajo que toca Azure espera la aprobación;
+si no, entra solo. Las pruebas corren además en cada Pull Request hacia `main` (**Pruebas**),
+antes de fusionar.
+
+A mano —Actions → **Desplegar** → *Run workflow* sobre `main`— para repetir un despliegue sin
+cambios o para marcar *sembrar* y recrear los usuarios de demostración; esa casilla sólo existe
+en el disparo manual.
 
 **Requisito de una sola vez:** en el entorno `produccion` del repositorio tienen que existir
 tres *variables* (no secretos), que imprime `bootstrap.sh` al terminar:
@@ -68,6 +72,32 @@ bash infra/azure/bootstrap.sh    # grupo, Key Vault, identidades, roles, credenc
 Pide por teclado la dirección de Gmail y su contraseña de aplicación, y el token de GHCR
 (`read:packages`, classic). Genera los secretos aleatorios sin mostrarlos y **nunca los rota**
 al repetirlo. Al final imprime las tres variables para GitHub.
+
+## Revertir un despliegue
+
+**El camino normal es git**: `git revert <sha>`, PR y fusión. El push redespliega solo, y sólo
+el servicio afectado —el revert vuelve a tocar sus rutas, así que su etiqueta cambia y se
+reconstruye su imagen—. Tarda lo que tarde el pipeline, ~18 min con pruebas e imágenes.
+
+**Si no puede esperar**, desde Git Bash con `az login` hecho, se publica la revisión anterior
+en un par de minutos sin construir nada: las imágenes de ese commit siguen en GHCR y las
+etiquetas se calculan con el `git log` del árbol en el que estés.
+
+```bash
+git checkout <sha-bueno>
+CONFIRMADO=si bash infra/azure/desplegar-trabajos.sh   # los Jobs vuelven a esas etiquetas
+CONFIRMADO=si bash infra/azure/desplegar-apps.sh       # las apps, con las imágenes de antes
+git checkout main
+```
+
+Los Jobs primero: `desplegar-apps.sh` se niega si no llevan las mismas etiquetas. Y deja Azure
+por detrás del repositorio hasta que fusiones el revert; el siguiente push a `main` vuelve a
+poner lo que haya en `main`.
+
+**Las migraciones no se revierten**: no hay `down`. Si el commit que rompió cambió el esquema,
+volver atrás el código no deshace el `ALTER`, y la revisión anterior puede no arrancar contra
+el esquema nuevo. Por eso una migración tiene que ser compatible con la versión anterior del
+servicio; cuando no lo sea, la salida es una migración nueva que corrija, no un revert.
 
 ## Comprobar
 

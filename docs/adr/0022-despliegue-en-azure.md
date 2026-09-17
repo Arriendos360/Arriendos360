@@ -324,6 +324,28 @@ gateway.
   en el portal, el despliegue lo devuelve a su sitio; con despliegues selectivos, esa deriva
   sobreviviría hasta que alguien tocara ese servicio.
 
+### Fusionar es desplegar
+
+- **El problema.** El pipeline sólo arrancaba a mano. Un PR fusionado se quedaba en `main` sin
+  llegar a Azure hasta que alguien se acordara de lanzarlo, y mientras tanto lo desplegado y lo
+  fusionado no eran lo mismo. Con el despliegue ya independiente por servicio, esperar dejó de
+  tener sentido: un push mueve lo que cambió y nada más.
+- **Se dispara con el push a `main`.** Fusionar un PR despliega; el disparo manual queda para
+  repetir un despliegue o para sembrar, que sigue siendo una casilla del formulario.
+- **Documentación no despliega** (`paths-ignore`: `**.md` y `docs/`). Dejarlo correr también
+  habría sido correcto —es idempotente y no construiría nada—, pero gasta ~18 min de runner por
+  corregir una tilde. Ningún `.md` entra en una imagen ni en un Bicep.
+- **Las pruebas corren en el PR**, en un workflow reutilizable que «Desplegar» llama otra vez
+  antes de tocar Azure: una sola receta, y lo que se despliega es lo que se probó ya fusionado.
+- **Volver atrás es `git revert`**, que redespliega solo el servicio afectado; si urge, se
+  publican las imágenes de un commit anterior desde ese checkout, sin construir nada
+  (`docs/despliegue.md`). **Las migraciones no tienen `down`**: una que rompa hacia atrás se
+  corrige con otra migración, no con un revert.
+- **Riesgo aceptado.** Sin revisores en el entorno `produccion`, un push a `main` llega a
+  producción sin puerta humana. Lo sostienen tres cosas: a `main` sólo se entra por PR, las
+  pruebas corren antes, y revertir cuesta dos minutos. Poner revisores en el entorno es un
+  interruptor, no un cambio de código.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |
