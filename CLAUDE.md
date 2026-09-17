@@ -471,8 +471,8 @@ creó servicios ni tocó tablas ni bus, y está resumido justo debajo.
 
 ## Despliegue en Azure (paso 8)
 
-Hecho y funcionando. El **cómo** está en `docs/despliegue.md` —desplegar, verificar, calentar,
-cuidar el crédito y qué mirar cuando algo falla—; el **porqué** de cada decisión y las
+Hecho y funcionando. El **cómo** está en `docs/despliegue.md` —desplegar, verificar, calentar
+antes de una sustentación y qué mirar cuando algo falla—; el **porqué** de cada decisión y las
 mediciones, en `docs/adr/0022`. Aquí queda lo que hay que saber sin abrir nada más.
 
 **Qué corre**, todo en el grupo `rg-arriendos360` (`mexicocentral`), salvo la SPA:
@@ -519,10 +519,10 @@ repositorio**; el remitente vive en el secreto `email-usuario`. Borrar esa cuent
 
 **Riesgos vivos:**
 
-- **El crédito.** PostgreSQL es lo único que cobra sin que nadie use el sistema, ~$0,50 al día:
-  `az postgres flexible-server stop|start -g rg-arriendos360 -n psql-arriendos360-8b4d5b`.
-  Cuando el crédito se agote, la suscripción se deshabilita y todo se detiene; `pg_dump` antes
-  de cada hito. El saldo está en https://www.microsoftazuresponsorships.com/balance.
+- **La base se puede apagar entre sesiones**, y es lo que conviene cuando nadie va a usar el
+  sistema: `az postgres flexible-server stop|start -g rg-arriendos360 -n psql-arriendos360-8b4d5b`.
+  Azure la vuelve a encender sola a los siete días. Con la base apagada no arranca ninguna
+  app, así que hay que encenderla antes de una demostración. `pg_dump` antes de cada hito.
 - **El token de GHCR vence.** Cuando pase, Container Apps no podrá descargar imágenes y las
   réplicas nuevas no arrancarán: renovarlo y actualizar el secreto `ghcr-token`.
 - **Node 18 sin soporte** en las imágenes, y **34 vulnerabilidades** que GitHub reporta en las

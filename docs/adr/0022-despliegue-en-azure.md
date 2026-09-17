@@ -321,10 +321,6 @@ Blob y la generación de PDF.
   lista las siete pendientes. Dos `aplicar.js` lanzados a la vez aplican cada migración una
   sola vez —el segundo termina «sin migraciones pendientes»— y un tercero no hace nada.
 
-## Pendiente de medir (corte 7)
-
-- Costo real de las primeras semanas, y si PostgreSQL entra en la oferta gratuita. El primer
-  login en frío ya se midió en el corte 4: 36,8 s.
 
 ## Consecuencias
 

@@ -7,8 +7,8 @@
 # CONFIRMADO=si no pregunta. Repetirlo sin cambios en el Bicep no altera nada. Al terminar
 # comprueba que el entorno de Container Apps no quedó en modo Express.
 #
-# OJO: crear PostgreSQL empieza a cobrar, unos $0,50 al día mientras está encendido.
-# Para detenerlo entre sesiones (Azure lo vuelve a encender a los 7 días):
+# PostgreSQL queda encendido al crearlo y no escala a cero. Para apagarlo entre sesiones
+# (Azure lo vuelve a encender a los 7 días):
 #   az postgres flexible-server stop  -g rg-arriendos360 -n <nombrePostgres>
 #   az postgres flexible-server start -g rg-arriendos360 -n <nombrePostgres>
 
