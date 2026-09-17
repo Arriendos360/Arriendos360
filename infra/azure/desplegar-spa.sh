@@ -110,8 +110,10 @@ npx --yes @azure/static-web-apps-cli@2 deploy "$(ruta "$RAIZ/apps/web/build")" -
 unset SWA_CLI_DEPLOYMENT_TOKEN
 
 # Queda anotado qué se publicó, para no recompilar lo mismo en el siguiente despliegue.
-az resource tag --is-incremental \
-  --ids "$(az staticwebapp show -n "$NOMBRE_SPA" -g "$GRUPO" --query id -o tsv)" \
+# Con `az tag update --operation merge`, no con `az resource tag`: ése rechaza el Static Web
+# App con «Unexpected token Null when parsing enum».
+az tag update --operation merge \
+  --resource-id "$(az staticwebapp show -n "$NOMBRE_SPA" -g "$GRUPO" --query id -o tsv)" \
   --tags etiquetaWeb="$ETIQUETA_WEB" urlApi="$API" -o none
 
 echo
