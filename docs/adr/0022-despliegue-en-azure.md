@@ -296,6 +296,34 @@ gateway.
   inmutable; la comprobación de secretos que pedía valores que el pipeline no puede leer; y el
   runner, que clona limpio, compilando la SPA sin dependencias instaladas.
 
+### Despliegue independiente por servicio
+
+- **El problema.** Con la etiqueta igual al commit de la rama, un cambio en un servicio
+  cambiaba las seis imágenes, y Container Apps estrenaba revisión en las seis aunque su código
+  fuera idéntico. Medido: un despliegue que sólo tocaba scripts de infraestructura creó
+  revisión nueva en `gateway` y en `ms-notificaciones`.
+- **La etiqueta es el último commit que tocó ese servicio** (`infra/azure/etiquetas.sh`). Una
+  imagen que no cambió conserva su etiqueta, la plantilla queda idéntica y no hay revisión
+  nueva. `packages/shared`, `packages/contracts`, los manifiestos de la raíz y el script que
+  arma las imágenes cuentan para todos los servicios: si cambia el contrato compartido, se
+  redespliegan los seis, que es lo correcto.
+- **Un solo cálculo, dos usos.** El mismo script lo usan el workflow y quien despliega a mano,
+  para que nunca discrepen. `desplegar-apps.sh` exige que los Jobs estén desplegados con esas
+  mismas etiquetas: son los que aplican las migraciones que la revisión nueva da por hechas.
+- **Se construye sólo lo que falta.** El workflow pregunta al registro si ya existe cada
+  imagen con su etiqueta; si nadie tocó nada, no construye ninguna.
+- **Se migra sólo lo que cambió.** `servicios-a-migrar.sh` compara las etiquetas desplegadas
+  con las nuevas. Vale porque una migración viaja siempre dentro de su servicio:
+  `database/<esquema>` es una de sus rutas. Al revés no siempre, y entonces el Job corre y no
+  aplica nada, que es inocuo.
+- **La SPA se republica sólo si cambió.** Lo publicado queda anotado en las etiquetas del
+  recurso —el commit de `apps/web` y la URL de la API—; si ninguno cambió, recompilar daría
+  exactamente lo mismo. `FORZAR=si` lo rehace igual.
+- **Desplegar sigue siendo idempotente.** No se despliegan «sólo las apps que cambiaron»: se
+  despliegan las seis siempre, con etiquetas que no cambiaron. Así, si alguien tocó algo a mano
+  en el portal, el despliegue lo devuelve a su sitio; con despliegues selectivos, esa deriva
+  sobreviviría hasta que alguien tocara ese servicio.
+
 ## Mediciones del corte 1 (local, Docker Desktop)
 
 | Imagen | Compose hoy | `produccion` en disco | `produccion` a descargar |

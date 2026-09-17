@@ -67,8 +67,22 @@ fi
 URL_GATEWAY="$(az deployment group show -g "$GRUPO" -n apps \
   --query properties.outputs.urlGateway.value -o tsv 2>/dev/null || true)"
 if [ -z "$URL_GATEWAY" ]; then
-  echo "No hay apps desplegadas: ejecuta antes infra/azure/desplegar-apps.sh <etiqueta>" >&2
+  echo "No hay apps desplegadas: ejecuta antes infra/azure/desplegar-apps.sh" >&2
   exit 1
+fi
+
+# Lo publicado queda anotado en las etiquetas del recurso: el commit que compiló la SPA y
+# contra qué API. Si no cambió ninguno de los dos, recompilar daría exactamente lo mismo.
+source "$DIR/etiquetas.sh"
+ETIQUETA_WEB="$(etiqueta_de web)"
+API="$URL_GATEWAY/api"
+PUBLICADO="$(az staticwebapp show -n "$NOMBRE_SPA" -g "$GRUPO" --query "tags.etiquetaWeb" -o tsv 2>/dev/null || true)"
+API_PUBLICADA="$(az staticwebapp show -n "$NOMBRE_SPA" -g "$GRUPO" --query "tags.urlApi" -o tsv 2>/dev/null || true)"
+if [ "$PUBLICADO" = "$ETIQUETA_WEB" ] && [ "$API_PUBLICADA" = "$API" ] && [ "${FORZAR:-}" != "si" ]; then
+  echo
+  echo "La SPA publicada ya es ${ETIQUETA_WEB:0:9} contra $API: no se recompila."
+  echo "SPA: $URL_SPA"
+  exit 0
 fi
 
 # Sin dependencias no hay build: `npx` bajaría react-scripts pero no `react`. Pasa en el
@@ -94,6 +108,11 @@ SWA_CLI_DEPLOYMENT_TOKEN="$(az staticwebapp secrets list -n "$NOMBRE_SPA" -g "$G
 export SWA_CLI_DEPLOYMENT_TOKEN
 npx --yes @azure/static-web-apps-cli@2 deploy "$(ruta "$RAIZ/apps/web/build")" --env production
 unset SWA_CLI_DEPLOYMENT_TOKEN
+
+# Queda anotado qué se publicó, para no recompilar lo mismo en el siguiente despliegue.
+az resource tag --is-incremental \
+  --ids "$(az staticwebapp show -n "$NOMBRE_SPA" -g "$GRUPO" --query id -o tsv)" \
+  --tags etiquetaWeb="$ETIQUETA_WEB" urlApi="$API" -o none
 
 echo
 echo "SPA: $URL_SPA"

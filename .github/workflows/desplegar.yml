@@ -94,6 +94,10 @@ jobs:
       CONFIRMADO: si
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Los scripts calculan la etiqueta de cada servicio con `git log`: sin historia, no
+          # saben qué cambió.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -119,15 +123,30 @@ jobs:
       - name: Sitio de la SPA
         run: PASO=sitio bash infra/azure/desplegar-spa.sh
 
-      - name: Jobs de migración y seed
-        run: bash infra/azure/desplegar-trabajos.sh "${{ github.sha }}"
+      # Va ANTES de mover los Jobs: la comparación es contra las etiquetas que hay desplegadas,
+      # y `desplegar-trabajos.sh` las reemplaza.
+      - name: Qué esquemas migrar
+        run: |
+          {
+            echo 'MIGRAR<<FIN'
+            bash infra/azure/servicios-a-migrar.sh
+            echo FIN
+          } >> "$GITHUB_ENV"
 
-      # Antes de publicar las revisiones nuevas: en Azure los servicios no migran al
-      # arrancar, y con una migración pendiente se niegan a arrancar.
+      - name: Jobs de migración y seed
+        run: bash infra/azure/desplegar-trabajos.sh
+
+      # En Azure los servicios no migran al arrancar y con una migración pendiente se niegan a
+      # arrancar, así que esto va antes de publicar las revisiones nuevas. Sólo los esquemas
+      # de los servicios que cambiaron: los demás no tienen nada que aplicar.
       - name: Aplicar migraciones
         run: |
-          for servicio in identidad inmuebles contratos financiero notificaciones; do
-            bash infra/azure/ejecutar-trabajo.sh "migrar-$servicio"
+          if [ -z "${MIGRAR// /}" ]; then
+            echo "Ningún servicio cambió: no hay migraciones que aplicar."
+            exit 0
+          fi
+          for esquema in $MIGRAR; do
+            bash infra/azure/ejecutar-trabajo.sh "migrar-$esquema"
           done
 
       - name: Datos de demostración
@@ -135,7 +154,7 @@ jobs:
         run: bash infra/azure/ejecutar-trabajo.sh seed-identidad
 
       - name: Apps y Job del motor
-        run: bash infra/azure/desplegar-apps.sh "${{ github.sha }}"
+        run: bash infra/azure/desplegar-apps.sh
 
       - name: Contenido de la SPA
         run: PASO=contenido bash infra/azure/desplegar-spa.sh

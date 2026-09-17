@@ -45,13 +45,14 @@ Desde Cloud Shell o Git Bash con `az login` hecho. `CONFIRMADO=si` delante de un
 `desplegar-*` evita la pregunta tras el what-if.
 
 ```bash
-gh workflow run imagenes.yml --ref main          # publica las imágenes; la etiqueta es el commit
+gh workflow run imagenes.yml --ref main          # publica sólo las imágenes que cambiaron
 bash infra/azure/desplegar-base.sh               # Log Analytics, PostgreSQL, Storage, entorno
 PASO=sitio bash infra/azure/desplegar-spa.sh     # crea el Static Web App
-bash infra/azure/desplegar-trabajos.sh <commit>  # Jobs de migración y seed
-bash infra/azure/verificar-trabajos.sh           # aplica las migraciones y comprueba
-bash infra/azure/desplegar-apps.sh <commit>      # las seis apps y el Job del motor
-PASO=contenido bash infra/azure/desplegar-spa.sh # compila la SPA y sube el build
+bash infra/azure/servicios-a-migrar.sh           # qué esquemas cambiaron (ANTES del siguiente)
+bash infra/azure/desplegar-trabajos.sh           # Jobs de migración y seed
+bash infra/azure/ejecutar-trabajo.sh migrar-<esquema>   # uno por cada esquema que salió arriba
+bash infra/azure/desplegar-apps.sh               # las seis apps y el Job del motor
+PASO=contenido bash infra/azure/desplegar-spa.sh # compila la SPA y sube el build, si cambió
 bash infra/azure/humo.sh                         # ¿quedó en pie?
 ```
 

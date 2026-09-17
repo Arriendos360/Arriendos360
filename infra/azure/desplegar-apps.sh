@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Despliega las seis Container Apps y el Job del motor (infra/azure/apps.bicep, corte 4).
 #
-#   bash infra/azure/desplegar-apps.sh <etiqueta>
+#   bash infra/azure/desplegar-apps.sh
 #
-# Antes, con LA MISMA etiqueta: desplegar-trabajos.sh y las cinco migraciones ejecutadas
-# (verificar-trabajos.sh lo hace). En Azure los servicios no migran al arrancar: con una
-# migración pendiente la revisión nueva no arranca.
+# Cada app usa la imagen de su servicio con la etiqueta que calcula `etiquetas.sh`. La app de
+# un servicio que no cambió queda con la plantilla idéntica y Container Apps NO le crea
+# revisión: eso es lo que hace el despliegue independiente por servicio.
+#
+# Antes, con LAS MISMAS etiquetas: desplegar-trabajos.sh y las migraciones de los servicios
+# que cambiaron —`servicios-a-migrar.sh` dice cuáles—. En Azure los servicios no migran al
+# arrancar: con una migración pendiente la revisión nueva no arranca.
 #
 # Opcionales, hasta el corte 5: URL_APP (enlace del correo de recuperación) y CORS_ORIGENES.
 # Muestra el what-if y pide confirmación; con CONFIRMADO=si no pregunta.
@@ -17,18 +21,20 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$DIR/comun.sh"
 
-ETIQUETA="${1:-}"
-if [ -z "$ETIQUETA" ]; then
-  echo "Uso: bash infra/azure/desplegar-apps.sh <etiqueta>" >&2
-  echo "  <etiqueta>: el commit de main que publicó el workflow «Imágenes»." >&2
-  exit 1
-fi
+source "$DIR/etiquetas.sh"
 
-ETIQUETA_TRABAJOS="$(az deployment group show -g "$GRUPO" -n trabajos \
-  --query properties.outputs.etiqueta.value -o tsv 2>/dev/null || true)"
-if [ "$ETIQUETA_TRABAJOS" != "$ETIQUETA" ]; then
-  echo "Los Jobs de migración están desplegados con «${ETIQUETA_TRABAJOS:-nada}», no con «$ETIQUETA»." >&2
-  echo "Antes: bash infra/azure/desplegar-trabajos.sh $ETIQUETA y ejecuta las migraciones." >&2
+ETIQUETAS="$(etiquetas_json)"
+
+# Los Jobs tienen que llevar las mismas etiquetas: son los que aplican las migraciones que
+# estas revisiones dan por hechas.
+ESPERADAS="$(printf '%s' "$ETIQUETAS" | etiquetas_canonicas)"
+EN_TRABAJOS="$(az deployment group show -g "$GRUPO" -n trabajos \
+  --query properties.outputs.etiquetas.value -o json 2>/dev/null | etiquetas_canonicas || true)"
+if [ "$EN_TRABAJOS" != "$ESPERADAS" ]; then
+  echo "Los Jobs de migración no están desplegados con estas etiquetas." >&2
+  echo "  aquí:     $ESPERADAS" >&2
+  echo "  en Azure: ${EN_TRABAJOS:-nada}" >&2
+  echo "Antes: bash infra/azure/desplegar-trabajos.sh y ejecuta lo que diga servicios-a-migrar.sh." >&2
   exit 1
 fi
 
@@ -47,14 +53,14 @@ URL_APP="${URL_APP:-$URL_SPA}"
 CORS_ORIGENES="${CORS_ORIGENES:-$URL_SPA}"
 
 PLANTILLA="$(ruta "$DIR/apps.bicep")"
-PARAMETROS=(sufijo="$SUFIJO" etiqueta="$ETIQUETA" usuarioRegistro="$USUARIO_GHCR")
+PARAMETROS=(sufijo="$SUFIJO" etiquetas="$ETIQUETAS" usuarioRegistro="$USUARIO_GHCR")
 [ -n "${URL_APP:-}" ] && PARAMETROS+=(urlApp="$URL_APP")
 [ -n "${CORS_ORIGENES:-}" ] && PARAMETROS+=(corsOrigenes="$CORS_ORIGENES")
 
 az deployment group what-if -g "$GRUPO" -n apps -f "$PLANTILLA" -p "${PARAMETROS[@]}"
 
 if [ "${CONFIRMADO:-}" != "si" ]; then
-  read -rp "¿Desplegar las apps y el motor con la etiqueta $ETIQUETA? (s/N) " respuesta
+  read -rp "¿Desplegar las apps y el motor con estas etiquetas? (s/N) " respuesta
   if [ "$respuesta" != "s" ]; then
     echo "Cancelado."
     exit 1
