@@ -1,18 +1,22 @@
-# Construye las seis imágenes de producción y las publica en GHCR (corte 3, docs/adr/0022).
+# Publica en GHCR sólo las imágenes que hagan falta (docs/adr/0022).
 #
-# Manual y sólo desde `main`: a Azure llega lo que pasó por un PR. La etiqueta de cada imagen
-# es el commit; es la que recibe infra/azure/desplegar-trabajos.sh.
+# La etiqueta de cada imagen es **el último commit que tocó ese servicio**, no el de la rama.
+# Si sólo cambió ms-inmuebles, las otras cinco ya están publicadas con su etiqueta y no se
+# reconstruyen; si no cambió ninguno, no se construye nada. Qué rutas componen cada imagen lo
+# decide `infra/azure/etiquetas.sh`, el mismo cálculo que usan los scripts de despliegue.
 #
-# No toca Azure ni usa secretos guardados: publica con el GITHUB_TOKEN que Actions crea para
-# cada ejecución. Por eso no pasa por el entorno `produccion` ni pide aprobación; eso llega
-# con el pipeline de despliegue del corte 6.
+# Manual, o llamado por «Desplegar». Publica con el GITHUB_TOKEN de la ejecución: sin secretos
+# guardados y sin tocar Azure.
 
 name: Imágenes
 
 on:
   workflow_dispatch:
-  # Lo llama «Desplegar» para no tener dos definiciones de cómo se construyen las imágenes.
   workflow_call:
+    outputs:
+      etiquetas:
+        description: 'Etiqueta publicada de cada servicio, como {"gateway":"<commit>", …}.'
+        value: ${{ jobs.etiquetas.outputs.etiquetas }}
 
 permissions:
   contents: read
@@ -23,26 +27,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  etiquetas:
+    name: Qué hay que construir
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      etiquetas: ${{ steps.calcular.outputs.etiquetas }}
+      matriz: ${{ steps.calcular.outputs.matriz }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Sin historia no hay `git log`, y sin `git log` no hay etiqueta por servicio.
+          fetch-depth: 0
+
+      # Para preguntarle al registro si una imagen ya existe.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: calcular
+        run: bash infra/azure/etiquetas-pendientes.sh >> "$GITHUB_OUTPUT"
+
   imagen:
     name: ${{ matrix.nombre }}
-    if: github.ref == 'refs/heads/main'
+    needs: etiquetas
+    if: needs.etiquetas.outputs.matriz != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - nombre: gateway
-            dockerfile: apps/gateway/Dockerfile
-          - nombre: ms-identidad
-            dockerfile: services/ms-identidad/Dockerfile
-          - nombre: ms-inmuebles
-            dockerfile: services/ms-inmuebles/Dockerfile
-          - nombre: ms-contratos
-            dockerfile: services/ms-contratos/Dockerfile
-          - nombre: ms-financiero
-            dockerfile: services/ms-financiero/Dockerfile
-          - nombre: ms-notificaciones
-            dockerfile: services/ms-notificaciones/Dockerfile
+        include: ${{ fromJSON(needs.etiquetas.outputs.matriz) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -63,26 +79,11 @@ jobs:
           # Sin atestación de procedencia: la imagen queda como un manifiesto simple, el
           # formato más compatible con el registro de Container Apps.
           provenance: false
-          tags: ghcr.io/arriendos360/${{ matrix.nombre }}:${{ github.sha }}
+          tags: ghcr.io/arriendos360/${{ matrix.nombre }}:${{ matrix.etiqueta }}
           # `source` enlaza el paquete con el repositorio: quien puede leer el repositorio
           # puede descargar la imagen, incluido el token de Container Apps.
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ matrix.etiqueta }}
           cache-from: type=gha,scope=${{ matrix.nombre }}
           cache-to: type=gha,mode=max,scope=${{ matrix.nombre }}
-
-  resumen:
-    needs: imagen
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          {
-            echo "### Imágenes publicadas"
-            echo
-            echo "Etiqueta: \`${GITHUB_SHA}\`"
-            echo
-            echo '```bash'
-            echo "bash infra/azure/desplegar-trabajos.sh ${GITHUB_SHA}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"

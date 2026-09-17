@@ -19,9 +19,8 @@
 @maxLength(6)
 param sufijo string
 
-@description('Etiqueta de las imágenes en GHCR: el commit de `main` que publicó el workflow Imágenes.')
-@minLength(7)
-param etiqueta string
+@description('Etiqueta de cada imagen en GHCR: {"gateway":"<commit>","ms-identidad":"<commit>",…}. La calcula infra/azure/etiquetas.sh con el último commit que tocó cada servicio, así que una app cuya etiqueta no cambió no estrena revisión.')
+param etiquetas object
 
 @description('Usuario de GitHub dueño del token `ghcr-token`.')
 param usuarioRegistro string
@@ -148,7 +147,7 @@ module gateway 'modulos/app.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'gateway'
-    imagen: '${registro}/gateway:${etiqueta}'
+    imagen: '${registro}/gateway:${etiquetas.gateway}'
     puerto: 3001
     externo: true
     secretos: [
@@ -216,7 +215,7 @@ module identidad 'modulos/app.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'ms-identidad'
-    imagen: '${registro}/ms-identidad:${etiqueta}'
+    imagen: '${registro}/ms-identidad:${etiquetas['ms-identidad']}'
     puerto: 3011
     externo: false
     secretos: [
@@ -242,7 +241,7 @@ module inmuebles 'modulos/app.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'ms-inmuebles'
-    imagen: '${registro}/ms-inmuebles:${etiqueta}'
+    imagen: '${registro}/ms-inmuebles:${etiquetas['ms-inmuebles']}'
     puerto: 3012
     externo: false
     secretos: [
@@ -270,7 +269,7 @@ module contratos 'modulos/app.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'ms-contratos'
-    imagen: '${registro}/ms-contratos:${etiqueta}'
+    imagen: '${registro}/ms-contratos:${etiquetas['ms-contratos']}'
     puerto: 3013
     externo: false
     secretos: [
@@ -319,7 +318,7 @@ module financiero 'modulos/app.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'ms-financiero'
-    imagen: '${registro}/ms-financiero:${etiqueta}'
+    imagen: '${registro}/ms-financiero:${etiquetas['ms-financiero']}'
     puerto: 3014
     externo: false
     secretos: [
@@ -360,7 +359,7 @@ module notificaciones 'modulos/app.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'ms-notificaciones'
-    imagen: '${registro}/ms-notificaciones:${etiqueta}'
+    imagen: '${registro}/ms-notificaciones:${etiquetas['ms-notificaciones']}'
     puerto: 3015
     externo: false
     // Sin JWT_SECRET: no tiene endpoints públicos (regla 7 por vacío).
@@ -429,7 +428,7 @@ module motor 'modulos/trabajo.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     usuarioRegistro: usuarioRegistro
     nombre: 'motor-financiero'
-    imagen: '${registro}/ms-financiero:${etiqueta}'
+    imagen: '${registro}/ms-financiero:${etiquetas['ms-financiero']}'
     comando: [
       'node'
       'dist/scripts/motor.js'
@@ -477,4 +476,4 @@ output apps array = [
   notificaciones.outputs.fqdn
 ]
 output trabajoMotor string = motor.outputs.nombre
-output etiqueta string = etiqueta
+output etiquetas object = etiquetas

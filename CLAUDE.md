@@ -488,8 +488,8 @@ mediciones, en `docs/adr/0022`. Aquí queda lo que hay que saber sin abrir nada 
 
 **Cómo se despliega:** Actions → **Desplegar**, manual y sólo desde `main`. Entra a Azure por
 OIDC con `id-arriendos360-despliegue`; no hay ninguna credencial guardada en GitHub. Encadena
-pruebas, imágenes a GHCR etiquetadas con el commit, y los scripts de `infra/azure`: base,
-sitio de la SPA, migraciones, apps, contenido de la SPA y `humo.sh`. Repetirlo no cambia nada.
+pruebas, imágenes a GHCR y los scripts de `infra/azure`: base, sitio de la SPA, migraciones,
+apps, contenido de la SPA y `humo.sh`. Repetirlo no cambia nada.
 Antes de una sustentación, **Calentar** evita los 37 s del primer login.
 
 **Las decisiones que siguen mandando:**
@@ -497,8 +497,14 @@ Antes de una sustentación, **Calentar** evita los 37 s del primer login.
 - **El entorno declara `workloadProfiles` explícito.** Sin eso Azure lo crea en modo Express,
   que no admite Jobs, ni referencias a Key Vault, ni descubrimiento interno, y no se revierte
   sin recrearlo.
+- **Cada servicio se despliega solo si cambió.** La etiqueta de su imagen es el último commit
+  que tocó sus rutas (`infra/azure/etiquetas.sh`), no el de la rama: el que no cambió conserva
+  su etiqueta, su plantilla queda idéntica y Container Apps no le crea revisión. Tocar
+  `packages/shared` sí mueve a los seis, y es correcto: el contrato compartido cambió para
+  todos.
 - **Las migraciones no corren al arrancar** (`MIGRACIONES_AL_ARRANCAR=no`): las aplica un Job
-  por servicio antes de publicar revisiones, y con una pendiente el servicio no arranca.
+  por servicio antes de publicar revisiones, y con una pendiente el servicio no arranca. Sólo
+  se ejecutan las de los servicios que cambiaron (`servicios-a-migrar.sh`).
 - **El motor es un Job programado**, no un cron dentro del proceso: con escala a cero, un
   contenedor dormido no dispara nada (`docs/adr/0021`).
 - **Ningún secreto en el repositorio ni en GitHub.** Key Vault por referencia, resuelta con

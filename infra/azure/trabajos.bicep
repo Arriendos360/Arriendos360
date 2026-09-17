@@ -18,9 +18,8 @@
 @maxLength(6)
 param sufijo string
 
-@description('Etiqueta de las imágenes en GHCR: el commit de `main` que publicó el workflow Imágenes.')
-@minLength(7)
-param etiqueta string
+@description('Etiqueta de cada imagen en GHCR: {"gateway":"<commit>","ms-identidad":"<commit>",…}. La calcula infra/azure/etiquetas.sh con el último commit que tocó cada servicio.')
+param etiquetas object
 
 @description('Usuario de GitHub dueño del token `ghcr-token`.')
 param usuarioRegistro string
@@ -99,7 +98,7 @@ module migrar 'modulos/trabajo.bicep' = [
       entornoId: entorno.id
       identidadId: identidadApps.id
       keyVaultUri: keyVault.properties.vaultUri
-      imagen: '${registro}/ms-${servicio}:${etiqueta}'
+      imagen: '${registro}/ms-${servicio}:${etiquetas['ms-${servicio}']}'
       comando: [
         'node'
         'dist/database/aplicar.js'
@@ -121,7 +120,7 @@ module seedIdentidad 'modulos/trabajo.bicep' = {
     entornoId: entorno.id
     identidadId: identidadApps.id
     keyVaultUri: keyVault.properties.vaultUri
-    imagen: '${registro}/ms-identidad:${etiqueta}'
+    imagen: '${registro}/ms-identidad:${etiquetas['ms-identidad']}'
     comando: [
       'node'
       'dist/database/seed.js'
@@ -137,4 +136,6 @@ module seedIdentidad 'modulos/trabajo.bicep' = {
 output trabajos array = concat(map(servicios, servicio => 'migrar-${servicio}'), [
   seedIdentidad.outputs.nombre
 ])
-output etiqueta string = etiqueta
+// Las etiquetas desplegadas: `servicios-a-migrar.sh` las compara con las nuevas para saber
+// qué esquemas hay que migrar.
+output etiquetas object = etiquetas
