@@ -3,6 +3,10 @@
  *
  * Aplica sus migraciones antes de escuchar: el esquema `inmuebles` es suyo y de
  * nadie mas, asi que nadie mas puede prepararlo.
+ *
+ * En Azure no: alli `MIGRACIONES_AL_ARRANCAR=no` y las aplica el Job `migrar-inmuebles`
+ * antes de publicar la revision; este proceso solo comprueba que no quede ninguna
+ * pendiente, y se niega a arrancar si la hay. Ver `docs/adr/0022`.
  */
 
 import { app } from './app';
