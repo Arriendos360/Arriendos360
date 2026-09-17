@@ -486,10 +486,13 @@ mediciones, en `docs/adr/0022`. Aquí queda lo que hay que saber sin abrir nada 
 | Datos y secretos | `psql-arriendos360-8b4d5b` (PostgreSQL 15 B1ms, base `arriendos360_db`), `kv-arriendos360-8b4d5b` (siete secretos), `starriendos3608b4d5b` (contenedor `anexos`), `log-arriendos360`. |
 | Entorno | `cae-arriendos360`, modo `WorkloadProfiles` con perfil `Consumption`. |
 
-**Cómo se despliega:** Actions → **Desplegar**, manual y sólo desde `main`. Entra a Azure por
-OIDC con `id-arriendos360-despliegue`; no hay ninguna credencial guardada en GitHub. Encadena
-pruebas, imágenes a GHCR y los scripts de `infra/azure`: base, sitio de la SPA, migraciones,
-apps, contenido de la SPA y `humo.sh`. Repetirlo no cambia nada.
+**Cómo se despliega:** solo, con cada push a `main`: **fusionar un PR es desplegarlo**. Un push
+que sólo toca `.md` o `docs/` no dispara nada, y el disparo manual (Actions → **Desplegar**)
+queda para repetir un despliegue o sembrar. Entra a Azure por OIDC con
+`id-arriendos360-despliegue`; no hay ninguna credencial guardada en GitHub. Encadena pruebas
+—las mismas que corren en cada PR—, imágenes a GHCR y los scripts de `infra/azure`: base, sitio
+de la SPA, migraciones, apps, contenido de la SPA y `humo.sh`. Repetirlo no cambia nada; para
+volver atrás, `docs/despliegue.md` § «Revertir un despliegue».
 Antes de una sustentación, **Calentar** evita los 37 s del primer login.
 
 **Las decisiones que siguen mandando:**
@@ -505,6 +508,10 @@ Antes de una sustentación, **Calentar** evita los 37 s del primer login.
 - **Las migraciones no corren al arrancar** (`MIGRACIONES_AL_ARRANCAR=no`): las aplica un Job
   por servicio antes de publicar revisiones, y con una pendiente el servicio no arranca. Sólo
   se ejecutan las de los servicios que cambiaron (`servicios-a-migrar.sh`).
+- **Volver atrás es un `git revert`**, no un botón: el revert vuelve a tocar las rutas del
+  servicio, cambia su etiqueta y el push redespliega esa app sola. Lo que no vuelve atrás son
+  las migraciones —no hay `down`—, así que una migración tiene que ser compatible con la
+  versión anterior del servicio.
 - **El motor es un Job programado**, no un cron dentro del proceso: con escala a cero, un
   contenedor dormido no dispara nada (`docs/adr/0021`).
 - **Ningún secreto en el repositorio ni en GitHub.** Key Vault por referencia, resuelta con

@@ -4,9 +4,15 @@
 # `infra/azure`: pruebas → imágenes → base → sitio de la SPA → migraciones → apps → contenido
 # de la SPA → humo.
 #
-# Sólo manual y sólo desde `main`. El trabajo que toca Azure vive en el entorno `produccion`,
-# que exige aprobación y es el sujeto exacto de la credencial federada
-# (`repo:Arriendos360/Arriendos360:environment:produccion`): con otro nombre, OIDC no entra.
+# Se dispara con cada push a `main` —fusionar un PR es desplegarlo— y a mano cuando haya que
+# repetirlo o sembrar. Un push que sólo toca documentación no despliega nada. Lo que no cambió
+# no se redespliega: la etiqueta de cada imagen es el último commit que tocó ese servicio, así
+# que su plantilla queda idéntica y Container Apps no le crea revisión.
+#
+# El trabajo que toca Azure vive en el entorno `produccion`, que es el sujeto exacto de la
+# credencial federada (`repo:Arriendos360/Arriendos360:environment:produccion`): con otro
+# nombre, OIDC no entra. Ahí se pone una aprobación obligatoria si se quiere una puerta humana
+# entre el push y Azure.
 #
 # NINGÚN SECRETO EN GITHUB: la sesión de Azure se abre con OIDC contra
 # `id-arriendos360-despliegue`, las imágenes se publican con el GITHUB_TOKEN de la ejecución
@@ -14,11 +20,19 @@
 # variables que no son secretas: AZURE_CLIENT_ID, AZURE_TENANT_ID y AZURE_SUBSCRIPTION_ID.
 #
 # Repetirlo sin cambios es inocuo: el Bicep converge, las migraciones ya aplicadas se saltan
-# y el seed no repite usuarios.
+# y el seed no repite usuarios. Para volver atrás, `docs/despliegue.md` § «Revertir un
+# despliegue».
 
 name: Desplegar
 
 on:
+  push:
+    branches: [main]
+    # Un cambio de documentación no toca ninguna imagen ni ningún Bicep: no hay nada que
+    # desplegar. Si el push trae además código, sí corre.
+    paths-ignore:
+      - '**.md'
+      - docs/**
   workflow_dispatch:
     inputs:
       sembrar:
@@ -38,41 +52,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Las mismas que corren en cada PR, para no mantener dos copias de la receta.
   pruebas:
     name: Pruebas
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_PASSWORD: pruebas
-          POSTGRES_DB: arriendos360_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-    env:
-      # Las suites cargan dotenv, y en el runner no hay `.env`: se las damos aquí. Las
-      # `MS_*_URL` no, porque cada suite levanta sus dobles y las fija ella misma.
-      DB_HOST: localhost
-      DB_PORT: '5432'
-      DB_USER: postgres
-      DB_PASSWORD: pruebas
-      DB_NAME_TEST: arriendos360_test
-      JWT_SECRET: pruebas-jwt-secreto
-      SERVICIO_JWT_SECRET: pruebas-servicio-secreto
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: npm
-      - run: npm ci
-      - run: npm test --workspaces --if-present
+    permissions:
+      contents: read
+    uses: ./.github/workflows/pruebas.yml
 
   imagenes:
     name: Imágenes
@@ -86,7 +72,7 @@ jobs:
     name: Desplegar en Azure
     needs: imagenes
     runs-on: ubuntu-latest
-    # Aprobación humana: la pide GitHub antes de ejecutar este trabajo.
+    # Da la sesión de Azure (OIDC) y, si el entorno tiene revisores, la aprobación humana.
     environment: produccion
     env:
       # Los scripts preguntan antes de crear o cambiar; en un workflow no hay quien conteste,
@@ -149,8 +135,9 @@ jobs:
             bash infra/azure/ejecutar-trabajo.sh "migrar-$esquema"
           done
 
+      # Sólo a mano: en un push nadie lo pide e `inputs` viene vacío.
       - name: Datos de demostración
-        if: inputs.sembrar
+        if: github.event_name == 'workflow_dispatch' && inputs.sembrar
         run: bash infra/azure/ejecutar-trabajo.sh seed-identidad
 
       - name: Apps y Job del motor
