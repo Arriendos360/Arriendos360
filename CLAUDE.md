@@ -196,7 +196,7 @@ packages/contracts/    DTOs en TS; los catálogos cerrados emiten JS
 packages/shared/       JWT y revocados, auth entre servicios, errores, cliente HTTP,
                        bus (eventos, salida, entrega, entrada) y calendario (fechas.ts)
 database/<esquema>/    Migraciones SQL versionadas (docs/adr/0003)
-infra/                 Dockerfiles, docker-compose, Bicep
+infra/                 Dockerfiles, docker-compose, Bicep, sembrador de la demostración
 docs/                  ADRs, ERD, Postman. docs/erd/schema-legacy.sql: NO usar
 ```
 
@@ -409,6 +409,7 @@ npm run motor --workspace=services/ms-financiero          # motor: demostracione
 npm run enviar --workspace=services/ms-notificaciones     # barrido manual de los envios
 npm run test:integracion                                  # caminos criticos, stack arriba
 npm run seed --workspace=services/ms-identidad            # usuarios de prueba
+npm run demo                                              # cartera de demostracion (stack arriba)
 ```
 
 ---
@@ -526,9 +527,14 @@ despierto; imágenes de producción de 188 a 261 MB, frente a 354–437 MB de la
 un despliegue completo, con pruebas e imágenes, ~18 min.
 
 **Datos de prueba en Azure:** los tres usuarios del seed (`propietario@`, `inquilino@` y
-`ambos@arriendos360.test`, contraseña `Prueba123`) y un propietario con el correo real del
-usuario, creado para probar la recuperación. **Ninguna dirección personal va en el
-repositorio**; el remitente vive en el secreto `email-usuario`. Borrar esa cuenta al terminar.
+`ambos@arriendos360.test`, contraseña `Prueba123`), la cartera de demostración que siembra
+`infra/demo/sembrar-demo.js` sobre la propietaria —cinco inmuebles, cuatro contratos y su
+historial de cobros, con un caso de cada estado— y un propietario con el correo real del
+usuario, creado para probar la recuperación. El sembrador entra por el gateway como una
+persona más: no escribe en ninguna base, así que los eventos y las cuentas de cobro los
+genera el sistema. **Ninguna dirección personal va en el repositorio**; el remitente vive en
+el secreto `email-usuario` y el correo del inquilino moroso se pasa por `CORREO_MOROSO`.
+Borrar esa cuenta al terminar.
 
 **Riesgos vivos:**
 
