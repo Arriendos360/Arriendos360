@@ -20,6 +20,12 @@
  * el contrato por su inmueble, la cuenta por su periodo, los pagos por su cuenta—, así
  * que repetirlo no duplica nada y completa lo que haya quedado a medias.
  *
+ * DESPUÉS HAY QUE CORRER EL MOTOR, que es lo que marca la mora y avisa de ella. Lo dice
+ * al terminar. No se hace desde aquí porque no hay API que lo dispare —es un Job en
+ * Azure y un cron en Compose (`docs/adr/0021`)— y porque el atajo tentador,
+ * `POST /api/pagos/verificar-mora`, marca la mora sin avisar a nadie y deja las cuentas
+ * fuera del alcance del motor para siempre.
+ *
  * Requisitos: Node 18 (sólo usa `fetch`, sin dependencias) y el seed de ms-identidad ya
  * ejecutado —en Azure, el Job `seed-identidad`—, porque entra como su propietaria.
  *
@@ -412,8 +418,9 @@ const CARTERA = [
     // de cobro y de mora llegan a un correo que se puede abrir delante del jurado. Los
     // demás inquilinos son ficticios a propósito y sus correos rebotan.
     inquilino: 'buzon',
-    contrato: { mesesDeAntiguedad: 2, meses: 12, canon: 2100000 },
+    contrato: { mesesDeAntiguedad: 3, meses: 12, canon: 2100000 },
     historial: [
+      { hace: 3, pagos: [] },
       { hace: 2, pagos: [] },
       { hace: 1, pagos: [] },
       { hace: 0, pagos: [] },
@@ -536,12 +543,11 @@ const sembrar = async () => {
     console.log('·', ficha.finalizar ? 'finalizado' : 'arrendado');
   }
 
-  // Al final, y no por contrato: marca de una vez lo vencido sin pagar. Es lo mismo que
-  // hace el motor cada noche, pero sin esperar a la noche.
-  process.stdout.write('Verificando la mora ');
-  const mora = await exigir('POST', '/api/pagos/verificar-mora', { token }, [200]);
-  console.log('·', `${mora.pagos_actualizados} cuentas en mora`);
-
+  // La mora NO se marca aquí. `POST /api/pagos/verificar-mora` la marcaría, pero no
+  // avisa a nadie: el aviso lo emite el motor, en la misma transacción que el cambio de
+  // estado. Marcarla desde aquí dejaría las cuentas en mora y sin correo, y además ya no
+  // habría forma de que el motor avisara después, porque sólo mira las PENDIENTE y
+  // PARCIAL. Se deja vencido y sin pagar, y lo cierra el motor. Ver `docs/adr/0021`.
   console.log('\nCartera sembrada:');
   console.table(resumen);
 
@@ -553,6 +559,12 @@ const sembrar = async () => {
     { quien: 'Inquilino moroso (Diego)', usuario: MOROSO.email, contrasena: moroso.contrasena },
     { quien: 'Inquilina con buzón (Elena)', usuario: CON_BUZON.email, contrasena: conBuzon.contrasena },
   ]);
+
+  console.log(
+    '\nFalta la mora: la marca el motor, que además avisa por correo a las dos partes.\n' +
+      '  local:  npm run motor --workspace=services/ms-financiero\n' +
+      '  Azure:  bash infra/azure/ejecutar-trabajo.sh motor-financiero',
+  );
 
   if (!process.env.CORREO_DEMO) {
     console.log(

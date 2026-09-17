@@ -126,6 +126,12 @@ URL_GATEWAY=https://gateway-...azurecontainerapps.io npm run demo   # contra Azu
 CORREO_DEMO=tu@correo.com npm run demo                              # avisos a un buzón real
 ```
 
+Al terminar **hay que correr el motor**, que es lo que marca la mora y, en la misma
+transacción, avisa por correo a las dos partes: `npm run motor --workspace=services/ms-financiero`
+en local y `bash infra/azure/ejecutar-trabajo.sh motor-financiero` en Azure. El atajo
+`POST /api/pagos/verificar-mora` no sirve para esto: marca la mora sin avisar, y deja las
+cuentas fuera del alcance del motor, que sólo mira las `PENDIENTE` y `PARCIAL`.
+
 Antes hay que tener aplicado el seed de ms-identidad —en Azure, el Job `seed-identidad`—,
 porque el sembrador entra como su propietaria. Es idempotente: repetirlo no duplica nada y
 completa lo que haya quedado a medias. Contra Azure tarda unos minutos, porque las apps están

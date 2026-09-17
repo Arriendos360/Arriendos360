@@ -529,7 +529,8 @@ un despliegue completo, con pruebas e imágenes, ~18 min.
 **Datos de prueba en Azure:** los tres usuarios del seed (`propietario@`, `inquilino@` y
 `ambos@arriendos360.test`, contraseña `Prueba123`), la cartera de demostración que siembra
 `infra/demo/sembrar-demo.js` sobre la propietaria —seis inmuebles, cinco contratos y su
-historial de cobros, con un caso de cada estado— y un propietario con el correo real del
+historial de cobros, con un caso de cada estado, y la mora la cierra el motor— y un
+propietario con el correo real del
 usuario, creado para probar la recuperación. El sembrador entra por el gateway como una
 persona más: no escribe en ninguna base, así que los eventos y las cuentas de cobro los
 genera el sistema. **Ninguna dirección personal va en el repositorio**; el remitente vive en
