@@ -25,9 +25,10 @@
  *
  * Variables:
  *   URL_GATEWAY     por defecto `http://localhost:3001`.
- *   CORREO_MOROSO   correo real del inquilino moroso, para enseñar en vivo los avisos
- *                   de cobro. Sin ella se usa una dirección `@arriendos360.test`, que
- *                   no existe y rebota. Ninguna dirección personal entra al repositorio.
+ *   CORREO_DEMO     buzón real de la inquilina del sexto inmueble. Sus avisos de cobro y
+ *                   de mora llegan de verdad, que es lo que hay que poder enseñar. Sin
+ *                   ella se usa una dirección `@arriendos360.test`, que no existe y
+ *                   rebota. Ninguna dirección personal entra al repositorio.
  */
 
 const GATEWAY = (process.env.URL_GATEWAY || 'http://localhost:3001').replace(/\/$/, '');
@@ -177,8 +178,22 @@ const altaDeInquilino = async (token, definicion) => {
     return { id: existente.datos.id, contrasena: 'la que ya tenía' };
   }
 
-  const datos = await exigir('POST', '/api/usuarios/inquilinos', { token, cuerpo: definicion }, [201]);
-  return { id: datos.usuario.id, contrasena: datos.contrasena_temporal };
+  const alta = await pedir('POST', '/api/usuarios/inquilinos', { token, cuerpo: definicion });
+
+  // El correo es único en el sistema, así que una dirección ya usada por otra cuenta
+  // —la del propietario con el que se probó la recuperación, por ejemplo— aborta el
+  // sembrado con un 400 que por sí solo no dice qué hacer.
+  if (alta.estado === 400 && /email ya está registrado/i.test(alta.datos?.mensaje || '')) {
+    throw new Error(
+      `${definicion.email} ya pertenece a otra cuenta. Siembra con CORREO_DEMO=<otra dirección>.`,
+    );
+  }
+
+  if (alta.estado !== 201) {
+    throw new Error(`No pude dar de alta a ${definicion.nombres}: ${JSON.stringify(alta.datos)}`);
+  }
+
+  return { id: alta.datos.usuario.id, contrasena: alta.datos.contrasena_temporal };
 };
 
 /** Crea el inmueble si no hay ya uno con esa dirección. */
@@ -380,6 +395,31 @@ const CARTERA = [
     historial: [{ hace: 14, pagos: [{ monto: 3100000, medio_pago: 'Transferencia', enDias: 3 }] }],
   },
   {
+    alias: 'Apartamento de Cedritos',
+    inmueble: {
+      direccion: 'Calle 140 # 11-52 Apto 802',
+      barrio: 'Cedritos',
+      municipio: 'Bogotá D.C.',
+      departamento: 'Cundinamarca',
+      tipo: 'apartamento',
+      habitaciones: 2,
+      banos: 2,
+      area_m2: 64,
+      estrato: 4,
+      parqueaderos: 1,
+    },
+    // La única inquilina con buzón real (`CORREO_DEMO`). No paga nada, así que sus avisos
+    // de cobro y de mora llegan a un correo que se puede abrir delante del jurado. Los
+    // demás inquilinos son ficticios a propósito y sus correos rebotan.
+    inquilino: 'buzon',
+    contrato: { mesesDeAntiguedad: 2, meses: 12, canon: 2100000 },
+    historial: [
+      { hace: 2, pagos: [] },
+      { hace: 1, pagos: [] },
+      { hace: 0, pagos: [] },
+    ],
+  },
+  {
     alias: 'Local de Kennedy',
     inmueble: {
       direccion: 'Avenida 1 de Mayo # 42-18 Local 3',
@@ -400,9 +440,25 @@ const CARTERA = [
 const MOROSO = {
   nombres: 'Diego',
   apellidos: 'Moroso',
-  email: process.env.CORREO_MOROSO || 'moroso@arriendos360.test',
+  email: 'moroso@arriendos360.test',
   telefono: '3004444444',
   documento: '10000004',
+};
+
+/**
+ * La inquilina del sexto inmueble: la única cuyos correos llegan a un buzón de verdad.
+ *
+ * Es otra persona y no el mismo moroso con otra dirección porque la API no permite
+ * cambiarle el correo a un usuario ya creado, y el aviso no lo lleva el evento: lo
+ * resuelve ms-notificaciones preguntándole a ms-identidad al manejarlo. Sembrar con
+ * `CORREO_DEMO` después de haber sembrado sin ella tiene que poder arreglarlo.
+ */
+const CON_BUZON = {
+  nombres: 'Elena',
+  apellidos: 'Correa',
+  email: process.env.CORREO_DEMO || 'buzon@arriendos360.test',
+  telefono: '3005555555',
+  documento: '10000005',
 };
 
 // ── Sembrado ────────────────────────────────────────────────────────────────
@@ -419,6 +475,8 @@ const sembrar = async () => {
   };
   const moroso = await altaDeInquilino(token, MOROSO);
   inquilinos.moroso = moroso.id;
+  const conBuzon = await altaDeInquilino(token, CON_BUZON);
+  inquilinos.buzon = conBuzon.id;
 
   const resumen = [];
 
@@ -493,12 +551,13 @@ const sembrar = async () => {
     { quien: 'Inquilino (Bruno)', usuario: 'inquilino@arriendos360.test', contrasena: CONTRASENA },
     { quien: 'Los dos roles (Carmen)', usuario: 'ambos@arriendos360.test', contrasena: CONTRASENA },
     { quien: 'Inquilino moroso (Diego)', usuario: MOROSO.email, contrasena: moroso.contrasena },
+    { quien: 'Inquilina con buzón (Elena)', usuario: CON_BUZON.email, contrasena: conBuzon.contrasena },
   ]);
 
-  if (!process.env.CORREO_MOROSO) {
+  if (!process.env.CORREO_DEMO) {
     console.log(
-      '\nAviso: los correos de la demostración van a direcciones @arriendos360.test, que no\n' +
-        'existen y rebotan. Para enseñarlos llegando de verdad, siembra con CORREO_MOROSO=<tu correo>.',
+      '\nAviso: todos los correos van a direcciones @arriendos360.test, que no existen y\n' +
+        'rebotan. Siembra con CORREO_DEMO=<tu correo> para que los de Elena lleguen de verdad.',
     );
   }
 };

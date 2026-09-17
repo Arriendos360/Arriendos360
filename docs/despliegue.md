@@ -116,14 +116,14 @@ a PostgreSQL, que sólo admite servicios de Azure.
 
 Los tres usuarios del seed no alcanzan para enseñar nada: la cartera la siembra
 `infra/demo/sembrar-demo.js`, que entra por el gateway como una persona —no escribe en
-ninguna base— y deja cinco inmuebles con un caso de cada estado: contratos activos y uno
+ninguna base— y deja seis inmuebles con un caso de cada estado: contratos activos y uno
 finalizado, cuentas `PAGADA`, `PENDIENTE`, `PARCIAL` y `EN_MORA`, y una transacción anulada
 junto a la buena que la reemplazó.
 
 ```bash
 npm run demo                                                        # contra el Compose local
 URL_GATEWAY=https://gateway-...azurecontainerapps.io npm run demo   # contra Azure
-CORREO_MOROSO=tu@correo.com npm run demo                            # avisos de mora a un buzón real
+CORREO_DEMO=tu@correo.com npm run demo                              # avisos a un buzón real
 ```
 
 Antes hay que tener aplicado el seed de ms-identidad —en Azure, el Job `seed-identidad`—,
@@ -132,8 +132,9 @@ completa lo que haya quedado a medias. Contra Azure tarda unos minutos, porque l
 dormidas y él las despierta esperando.
 
 Los correos van a direcciones `@arriendos360.test`, que no existen y rebotan. Con
-`CORREO_MOROSO` el inquilino moroso recibe de verdad los avisos de cobro, que es lo que
-conviene enseñar en vivo. Ninguna dirección personal entra al repositorio.
+`CORREO_DEMO`, la inquilina del sexto inmueble —que no paga nada— recibe de verdad sus avisos
+de cobro y de mora, que es lo que conviene poder abrir delante del jurado. Ninguna dirección
+personal entra al repositorio.
 
 ## Antes de una sustentación
 
