@@ -1,389 +1,361 @@
-import React, { useState, useEffect } from 'react';
-import api from '../services/api';
-import { Plus, Home as HomeIcon, X, MapPin, Pencil, Trash2, User, Calendar, ChevronDown, ChevronUp, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
-import { colombiaData } from '../data/colombia';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Home, Pencil, Plus, Trash2 } from 'lucide-react';
 import { TIPOS_INMUEBLE } from 'arriendos360-contracts';
 
+import { colombiaData } from '../data/colombia';
+import { listarContratos } from '../features/contratos/api';
+import { actualizarInmueble, crearInmueble, eliminarInmueble, listarInmuebles } from '../features/inmuebles/api';
+import { listarCuentasCobro } from '../features/pagos/api';
+import { Badge, Button, EmptyState, FormError, Input, Modal, Select, formatearDinero } from '../ui';
+
 /**
- * Etiquetas del catálogo cerrado de tipos.
+ * UI de Inmuebles (mockup docs/mockups/inmuebles.png): KPIs, lista y el alta,
+ * edición y borrado.
  *
- * Los VALORES vienen de `packages/contracts`, que es la misma lista contra la
- * que valida ms-inmuebles y contra la que hay un CHECK en la base. Aquí solo se
- * decide cómo se escriben en pantalla: el catálogo va en minúsculas porque es un
- * dato, y la mayúscula inicial es presentación.
+ * Los campos son los del endpoint de ms-inmuebles, no los del Capítulo 2 (ver
+ * `features/inmuebles/api.js`). El canon y el estado del cobro sólo
+ * DECORAN la fila: si Contratos o Financiero no responden, la fila sale sin
+ * ellos y la lista sigue en pie. Los inmuebles sí son el contenido: si fallan,
+ * se dice.
  *
- * Antes esta lista estaba escrita a mano aquí e incluía «Finca», que no existe
- * en el modelo canónico y que la API ahora rechaza.
+ * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
+ * a Tailwind hasta el paso 6.
  */
-const etiquetaDeTipo = (tipo) => tipo.charAt(0).toUpperCase() + tipo.slice(1);
+
+/** El catálogo va en minúsculas porque es un dato; la mayúscula es presentación. */
+const etiquetaDeTipo = (tipo) => (tipo ? tipo.charAt(0).toUpperCase() + tipo.slice(1) : '');
+
+const OPCIONES_TIPO = TIPOS_INMUEBLE.map((tipo) => ({ valor: tipo, texto: etiquetaDeTipo(tipo) }));
+const DEPARTAMENTOS = Object.keys(colombiaData);
 
 const FORM_VACIO = {
-    direccion: '', departamento: '', municipio: '', barrio: '',
-    tipo: 'apartamento', area_m2: '', estrato: 3,
-    habitaciones: 2, banos: 1, deposito: 0, parqueaderos: 0,
-    precio: ''
+    direccion: '', tipo: 'apartamento', departamento: '', municipio: '', barrio: '',
+    area_m2: '', habitaciones: '', banos: '', parqueaderos: '', deposito: '', estrato: ''
 };
 
-const estadoPagoConfig = {
-    2: { label: 'Pagado',       color: '#15803d', bg: '#dcfce7', icon: <CheckCircle size={13} /> },
-    1: { label: 'Pendiente',    color: '#a16207', bg: '#fef9c3', icon: <Clock size={13} /> },
-    4: { label: 'Pago Parcial', color: '#a16207', bg: '#fef9c3', icon: <Clock size={13} /> },
-    3: { label: 'En Mora',      color: '#b91c1c', bg: '#fee2e2', icon: <AlertTriangle size={13} /> },
-};
+const aTexto = (valor) => (valor === null || valor === undefined ? '' : String(valor));
 
-const Inmuebles = () => {
-    const [inmuebles, setInmuebles]   = useState([]);
-    const [contratos, setContratos]   = useState([]);
-    const [pagos, setPagos]           = useState([]);
-    const [loading, setLoading]       = useState(true);
-    const [showModal, setShowModal]   = useState(false);
-    const [editando, setEditando]     = useState(null);
-    const [expandido, setExpandido]   = useState(null);
-    const [formData, setFormData]     = useState(FORM_VACIO);
+const formDeInmueble = (inmueble) =>
+    Object.fromEntries(Object.keys(FORM_VACIO).map((campo) => [campo, aTexto(inmueble[campo])]));
 
-    const fetchData = async () => {
-        try {
-            const [inm, con, pag] = await Promise.all([
-                api.get('/inmuebles'),
-                api.get('/contratos'),
-                api.get('/pagos'),
-            ]);
-            setInmuebles(inm.data);
-            setContratos(con.data);
-            setPagos(pag.data);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
+/**
+ * Errores por campo, o `{}` si el formulario se puede enviar. El servicio sólo
+ * valida `direccion` y `tipo`; un entero mal escrito le llegaría como 500, así
+ * que la forma se revisa aquí.
+ */
+function validar(form) {
+    const errores = {};
+    if (!form.direccion.trim()) errores.direccion = 'La dirección es obligatoria.';
+    if (!TIPOS_INMUEBLE.includes(form.tipo)) errores.tipo = 'Elige un tipo.';
+    if (form.area_m2.trim() && !/^\d{1,8}([.,]\d{1,2})?$/.test(form.area_m2.trim())) {
+        errores.area_m2 = 'Escribe el área en m², con hasta dos decimales.';
+    }
+    for (const campo of ['habitaciones', 'banos', 'parqueaderos', 'deposito']) {
+        if (form[campo].trim() && !/^\d{1,3}$/.test(form[campo].trim())) errores[campo] = 'Un número entero.';
+    }
+    if (form.estrato.trim() && !/^[1-6]$/.test(form.estrato.trim())) errores.estrato = 'De 1 a 6.';
+    return errores;
+}
 
-    useEffect(() => { fetchData(); }, []);
+/** La coma decimal se escribe en Colombia; NUMERIC la espera con punto. */
+const paraEnviar = (form) => ({ ...form, area_m2: form.area_m2.trim().replace(',', '.') });
 
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        if (name === 'departamento') setFormData({ ...formData, [name]: value, municipio: '' });
-        else setFormData({ ...formData, [name]: value });
-    };
+/**
+ * La cuenta que resume el cobro de cada contrato: la más antigua en mora si hay
+ * alguna, y si no la más reciente. Mirar sólo la última escondería una mora de
+ * agosto detrás del «Pendiente» de septiembre. `inicio` es YYYY-MM-DD y ordena
+ * como texto.
+ */
+function cuentaQueResumePorContrato(cuentas) {
+    const porContrato = new Map();
+    for (const cuenta of cuentas) {
+        const actual = porContrato.get(cuenta.id_contrato);
+        const enMora = cuenta.estado === 'EN_MORA';
+        const actualEnMora = actual?.estado === 'EN_MORA';
+        const gana =
+            !actual ||
+            (enMora && !actualEnMora) ||
+            (enMora && actualEnMora && String(cuenta.inicio) < String(actual.inicio)) ||
+            (!enMora && !actualEnMora && String(cuenta.inicio) > String(actual.inicio));
+        if (gana) porContrato.set(cuenta.id_contrato, cuenta);
+    }
+    return porContrato;
+}
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        try {
-            if (editando) await api.put(`/inmuebles/${editando}`, formData);
-            else          await api.post('/inmuebles', formData);
-            setShowModal(false); setEditando(null); setFormData(FORM_VACIO);
-            fetchData();
-        } catch (err) {
-            alert('Error: ' + (err.response?.data?.mensaje || err.message));
-        }
-    };
-
-    const handleEditar = (inm) => {
-        setEditando(inm.id_inmueble);
-        setFormData({
-            direccion: inm.direccion || '', departamento: inm.departamento || '',
-            municipio: inm.municipio || '', barrio: inm.barrio || '',
-            tipo: inm.tipo || 'apartamento', area_m2: inm.area_m2 || '',
-            estrato: inm.estrato || 3, habitaciones: inm.habitaciones || 2,
-            banos: inm.banos || 1, deposito: inm.deposito || 0,
-            parqueaderos: inm.parqueaderos || 0, precio: ''
-        });
-        setShowModal(true);
-    };
-
-    const handleEliminar = async (id) => {
-        if (!window.confirm('¿Eliminar este inmueble?')) return;
-        try { await api.delete(`/inmuebles/${id}`); fetchData(); }
-        catch (err) { alert('Error: ' + (err.response?.data?.mensaje || err.message)); }
-    };
-
-    const getContratoActivo = (id_inmueble) =>
-        contratos.find(c => c.id_inmueble === id_inmueble && c.estado === 'activo');
-
-    const getUltimoPago = (id_contrato) =>
-        pagos
-            .filter(p => p.id_contrato === id_contrato)
-            .sort((a, b) => new Date(b.inicio) - new Date(a.inicio))[0];
-
-    if (loading) return <div className="loading">Cargando inmuebles...</div>;
-
-    const disponibles  = inmuebles.filter(i => i.estado === 'disponible').length;
-    const arrendados   = inmuebles.filter(i => i.estado !== 'disponible').length;
-
+function Kpi({ etiqueta, valor }) {
     return (
-        <div className="fade-in">
-
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
-                <div>
-                    <h2 style={{ fontSize: '1.875rem', fontWeight: '800', color: '#0f172a', letterSpacing: '-0.02em' }}>Mis Inmuebles</h2>
-                    <p style={{ color: '#64748b', marginTop: '0.25rem' }}>Gestiona tus propiedades y sus contratos de arrendamiento.</p>
-                </div>
-                <button className="btn btn-primary" onClick={() => { setEditando(null); setFormData(FORM_VACIO); setShowModal(true); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem' }}>
-                    <Plus size={18} /> Registrar Propiedad
-                </button>
-            </div>
-
-            {/* Mini KPIs */}
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
-                {[
-                    { label: 'Total propiedades', value: inmuebles.length, color: '#2563eb', bg: '#dbeafe' },
-                    { label: 'Arrendadas',         value: arrendados,       color: '#15803d', bg: '#dcfce7' },
-                    { label: 'Disponibles',        value: disponibles,      color: '#92400e', bg: '#fef3c7' },
-                ].map((k, i) => (
-                    <div key={i} style={{ flex: 1, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '0.875rem', padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                            <p style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k.label}</p>
-                            <p style={{ fontSize: '1.75rem', fontWeight: '800', color: k.color, marginTop: '0.1rem' }}>{k.value}</p>
-                        </div>
-                        <div style={{ background: k.bg, padding: '0.6rem', borderRadius: '0.6rem' }}>
-                            <HomeIcon size={22} color={k.color} />
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Sin inmuebles */}
-            {inmuebles.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '1rem', border: '1px dashed #e2e8f0' }}>
-                    <HomeIcon size={48} color="#cbd5e1" style={{ margin: '0 auto 1rem' }} />
-                    <p style={{ color: '#64748b' }}>No tienes inmuebles registrados todavía.</p>
-                </div>
-            )}
-
-            {/* Lista de inmuebles */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {inmuebles.map((inm) => {
-                    const contrato    = getContratoActivo(inm.id_inmueble);
-                    const ultimoPago  = contrato ? getUltimoPago(contrato.id_contrato) : null;
-                    const estadoPago  = ultimoPago ? estadoPagoConfig[ultimoPago.estado] : null;
-                    const abierto     = expandido === inm.id_inmueble;
-                    const disponible  = inm.estado === 'disponible';
-
-                    return (
-                        <div key={inm.id_inmueble} style={{
-                            background: '#fff', borderRadius: '1rem',
-                            border: '1px solid #e2e8f0', overflow: 'hidden',
-                            boxShadow: abierto ? '0 4px 24px rgba(37,99,235,0.1)' : '0 1px 4px rgba(0,0,0,0.04)',
-                            transition: 'box-shadow 0.2s'
-                        }}>
-                            {/* Fila principal — clickeable */}
-                            <div
-                                onClick={() => setExpandido(abierto ? null : inm.id_inmueble)}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: '1rem',
-                                    padding: '1rem 1.25rem', cursor: 'pointer',
-                                    borderBottom: abierto ? '1px solid #f1f5f9' : 'none'
-                                }}>
-
-                                {/* Icono estado */}
-                                <div style={{
-                                    width: '44px', height: '44px', flexShrink: 0, borderRadius: '0.75rem',
-                                    background: disponible ? '#dbeafe' : '#dcfce7',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                }}>
-                                    <HomeIcon size={22} color={disponible ? '#2563eb' : '#15803d'} />
-                                </div>
-
-                                {/* Dirección */}
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: '700', fontSize: '0.95rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {inm.direccion}
-                                    </div>
-                                    <div style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.1rem' }}>
-                                        <MapPin size={11} />
-                                        {[inm.barrio, inm.municipio].filter(Boolean).join(', ')}
-                                        {inm.tipo && <span style={{ marginLeft: '0.25rem' }}>· {etiquetaDeTipo(inm.tipo)}</span>}
-                                        {inm.estrato && <span>· E{inm.estrato}</span>}
-                                    </div>
-                                </div>
-
-                                {/* Specs rápidos */}
-                                <div style={{ display: 'flex', gap: '1.25rem', flexShrink: 0 }}>
-                                    {[
-                                        { l: 'Hab.', v: inm.habitaciones },
-                                        { l: 'Baños', v: inm.banos },
-                                        inm.area_m2 ? { l: 'Área', v: `${inm.area_m2}m²` } : null,
-                                    ].filter(Boolean).map((s, i) => (
-                                        <div key={i} style={{ textAlign: 'center' }}>
-                                            <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>{s.l}</div>
-                                            <div style={{ fontWeight: '700', fontSize: '0.9rem', color: '#475569' }}>{s.v ?? '--'}</div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {/* Canon (si tiene contrato) */}
-                                {contrato && (
-                                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                        <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>Canon/mes</div>
-                                        <div style={{ fontWeight: '800', fontSize: '1rem', color: '#0f172a' }}>
-                                            ${parseFloat(contrato.canon).toLocaleString()}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Estado pago */}
-                                {estadoPago ? (
-                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: estadoPago.bg, color: estadoPago.color, padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700', flexShrink: 0 }}>
-                                        {estadoPago.icon} {estadoPago.label}
-                                    </div>
-                                ) : (
-                                    <span style={{ background: '#f1f5f9', color: '#94a3b8', padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '600', flexShrink: 0 }}>
-                                        {disponible ? 'Disponible' : 'Sin cobro'}
-                                    </span>
-                                )}
-
-                                {/* Acciones */}
-                                <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                                    <button onClick={() => handleEditar(inm)} title="Editar"
-                                        style={{ border: 'none', background: '#eff6ff', color: '#2563eb', borderRadius: '0.5rem', padding: '0.4rem 0.55rem', cursor: 'pointer' }}>
-                                        <Pencil size={15} />
-                                    </button>
-                                    <button onClick={() => handleEliminar(inm.id_inmueble)} title="Eliminar"
-                                        style={{ border: 'none', background: '#fee2e2', color: '#ef4444', borderRadius: '0.5rem', padding: '0.4rem 0.55rem', cursor: 'pointer' }}>
-                                        <Trash2 size={15} />
-                                    </button>
-                                </div>
-
-                                {/* Chevron */}
-                                <div style={{ color: '#cbd5e1', flexShrink: 0 }}>
-                                    {abierto ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                                </div>
-                            </div>
-
-                            {/* Panel expandido — detalle del contrato */}
-                            {abierto && (
-                                <div style={{ padding: '1.25rem', background: '#f8fafc', display: 'grid', gridTemplateColumns: contrato ? '1fr 1fr' : '1fr', gap: '1rem', animation: 'fadeIn 0.2s ease' }}>
-                                    {contrato ? (
-                                        <>
-                                            {/* Info contrato */}
-                                            <div style={{ background: '#fff', borderRadius: '0.75rem', padding: '1rem', border: '1px solid #e2e8f0' }}>
-                                                <p style={{ fontSize: '0.7rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Contrato Activo</p>
-                                                {[
-                                                    { icon: <User size={13} />,      label: 'Inquilino',   value: contrato.id_inquilino },
-                                                    { icon: <Calendar size={13} />,  label: 'Inicio',      value: new Date(contrato.inicio).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }) },
-                                                    { icon: <Calendar size={13} />,  label: 'Vencimiento', value: new Date(contrato.fin).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }) },
-                                                ].map((r, i) => (
-                                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: i < 2 ? '1px solid #f1f5f9' : 'none' }}>
-                                                        <span style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{r.icon}{r.label}</span>
-                                                        <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#0f172a' }}>{r.value}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-
-                                            {/* Último cobro */}
-                                            <div style={{ background: '#fff', borderRadius: '0.75rem', padding: '1rem', border: '1px solid #e2e8f0' }}>
-                                                <p style={{ fontSize: '0.7rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Último Cobro</p>
-                                                {ultimoPago ? (
-                                                    <>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #f1f5f9' }}>
-                                                            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Mes</span>
-                                                            <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#0f172a' }}>
-                                                                {new Date(ultimoPago.inicio).toLocaleDateString('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
-                                                            </span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #f1f5f9' }}>
-                                                            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Monto</span>
-                                                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#0f172a' }}>${parseFloat(ultimoPago.valor).toLocaleString()}</span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0' }}>
-                                                            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Saldo pendiente</span>
-                                                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: parseFloat(ultimoPago.saldo_pendiente) > 0 ? '#ef4444' : '#15803d' }}>
-                                                                ${parseFloat(ultimoPago.saldo_pendiente).toLocaleString()}
-                                                            </span>
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    <p style={{ color: '#94a3b8', fontSize: '0.85rem', textAlign: 'center', padding: '1rem 0' }}>Sin cobros registrados</p>
-                                                )}
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8' }}>
-                                            <p style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Sin contrato activo</p>
-                                            <p style={{ fontSize: '0.85rem' }}>Este inmueble está disponible para arrendar.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-
-            {/* Modal crear/editar */}
-            {showModal && (
-                <div className="modal-overlay">
-                    <div className="card modal-content" style={{ width: '95%', maxWidth: '600px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                            <div>
-                                <h3 style={{ fontSize: '1.1rem', fontWeight: '700' }}>{editando ? 'Editar Propiedad' : 'Registrar Nueva Propiedad'}</h3>
-                                <p style={{ fontSize: '0.8rem', color: '#64748b' }}>Completa los datos del inmueble.</p>
-                            </div>
-                            <button className="btn-icon" onClick={() => { setShowModal(false); setEditando(null); }}><X size={20} /></button>
-                        </div>
-
-                        <form onSubmit={handleSubmit}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                <div style={{ gridColumn: 'span 2' }}>
-                                    <label className="form-label">Dirección Exacta</label>
-                                    <input className="form-control" name="direccion" placeholder="Ej: Calle 10 # 45-20" value={formData.direccion} onChange={handleChange} required />
-                                </div>
-                                <div>
-                                    <label className="form-label">Departamento</label>
-                                    <select className="form-control" name="departamento" value={formData.departamento} onChange={handleChange}>
-                                        <option value="">-- Seleccione --</option>
-                                        {Object.keys(colombiaData).map(d => <option key={d} value={d}>{d}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="form-label">Municipio</label>
-                                    <select className="form-control" name="municipio" value={formData.municipio} onChange={handleChange} disabled={!formData.departamento}>
-                                        <option value="">-- Seleccione --</option>
-                                        {(colombiaData[formData.departamento] || []).map(m => <option key={m} value={m}>{m}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="form-label">Barrio</label>
-                                    <input className="form-control" name="barrio" placeholder="Ej: Chapinero" value={formData.barrio} onChange={handleChange} />
-                                </div>
-                                <div>
-                                    <label className="form-label">Tipo</label>
-                                    <select className="form-control" name="tipo" value={formData.tipo} onChange={handleChange}>
-                                        {TIPOS_INMUEBLE.map(t => <option key={t} value={t}>{etiquetaDeTipo(t)}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="form-label">Área (m²)</label>
-                                    <input className="form-control" type="number" name="area_m2" value={formData.area_m2} onChange={handleChange} />
-                                </div>
-                                <div>
-                                    <label className="form-label">Estrato</label>
-                                    <input className="form-control" type="number" name="estrato" min="1" max="6" value={formData.estrato} onChange={handleChange} />
-                                </div>
-                                <div>
-                                    <label className="form-label">Habitaciones</label>
-                                    <input className="form-control" type="number" name="habitaciones" min="0" value={formData.habitaciones} onChange={handleChange} />
-                                </div>
-                                <div>
-                                    <label className="form-label">Baños</label>
-                                    <input className="form-control" type="number" name="banos" min="0" value={formData.banos} onChange={handleChange} />
-                                </div>
-                                <div>
-                                    <label className="form-label">Parqueaderos</label>
-                                    <input className="form-control" type="number" name="parqueaderos" min="0" value={formData.parqueaderos} onChange={handleChange} />
-                                </div>
-                            </div>
-                            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1.5rem', padding: '0.75rem' }}>
-                                {editando ? 'Guardar Cambios' : 'Registrar Inmueble'}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            )}
+        <div className="box-border flex-1 min-w-[10rem] bg-superficie border border-solid border-borde rounded-tarjeta px-5 py-4">
+            <p className="m-0 text-xs font-medium uppercase tracking-label text-texto-label">{etiqueta}</p>
+            <p className="m-0 mt-2 text-2xl font-medium text-indigo-medio tabular-nums">{valor}</p>
         </div>
     );
-};
+}
 
-export default Inmuebles;
+function FilaInmueble({ inmueble, contrato, cuenta, onEditar, onEliminar }) {
+    const ubicacion = [inmueble.barrio, inmueble.municipio].filter(Boolean).join(', ');
+    const subtitulo = [ubicacion, etiquetaDeTipo(inmueble.tipo)].filter(Boolean).join(' · ');
+
+    return (
+        <li className="box-border flex flex-wrap items-center gap-4 bg-superficie border border-solid border-borde rounded-tarjeta px-4 py-3">
+            <span className="flex items-center justify-center shrink-0 w-10 h-10 rounded-control bg-chip text-indigo-medio">
+                <Home size={18} aria-hidden="true" />
+            </span>
+            <div className="flex-1 min-w-[12rem]">
+                <p className="m-0 text-sm font-medium text-texto break-words">{inmueble.direccion}</p>
+                {subtitulo && <p className="m-0 mt-0.5 text-xs text-texto-suave">{subtitulo}</p>}
+            </div>
+            {contrato && (
+                <div className="text-right">
+                    <p className="m-0 text-xs font-medium uppercase tracking-label text-texto-label">Canon/mes</p>
+                    <p className="m-0 mt-0.5 text-sm font-medium text-texto tabular-nums">{formatearDinero(contrato.canon)}</p>
+                </div>
+            )}
+            {/* Con contrato, cómo va el cobro (ver cuentaQueResumePorContrato); sin cobros aún, o sin
+                datos de Financiero, el estado del inmueble. */}
+            <Badge estado={cuenta ? cuenta.estado : inmueble.estado} />
+            <div className="flex items-center gap-1">
+                <Button variante="fantasma" tamano="pequeno" icono={Pencil} onClick={() => onEditar(inmueble)}
+                    aria-label={`Editar ${inmueble.direccion}`} title="Editar" />
+                <Button variante="fantasma" tamano="pequeno" icono={Trash2} onClick={() => onEliminar(inmueble)}
+                    aria-label={`Eliminar ${inmueble.direccion}`} title="Eliminar" />
+            </div>
+        </li>
+    );
+}
+
+/** Dos o tres campos en fila en pantallas anchas, apilados en las angostas. */
+const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
+
+/** El botón de envío vive en el pie del modal, fuera del <form>: `form={idFormulario}` lo enlaza. */
+function FormularioInmueble({ inicial, error, onEnviar, idFormulario }) {
+    const [form, setForm] = useState(inicial);
+    const [errores, setErrores] = useState({});
+
+    const cambiar = (evento) => {
+        const { name, value } = evento.target;
+        setForm((actual) => (name === 'departamento' ? { ...actual, departamento: value, municipio: '' } : { ...actual, [name]: value }));
+        setErrores((actuales) => ({ ...actuales, [name]: undefined }));
+    };
+
+    const enviar = (evento) => {
+        evento.preventDefault();
+        const encontrados = validar(form);
+        setErrores(encontrados);
+        if (Object.keys(encontrados).length === 0) onEnviar(paraEnviar(form));
+    };
+
+    const municipios = colombiaData[form.departamento] || [];
+    // Un municipio guardado que no está en la lista (datos viejos) se sigue ofreciendo.
+    const opcionesMunicipio = form.municipio && !municipios.includes(form.municipio) ? [form.municipio, ...municipios] : municipios;
+    const campo = (nombre) => ({ name: nombre, value: form[nombre], onChange: cambiar, error: errores[nombre] });
+
+    return (
+        <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-4">
+            <FormError error={error} />
+            <Input etiqueta="Dirección" placeholder="Calle 100 # 15-20" required autoFocus {...campo('direccion')} />
+            <Fila>
+                <Select etiqueta="Tipo" opciones={OPCIONES_TIPO} {...campo('tipo')} />
+                <Input etiqueta="Barrio" placeholder="Chicó" {...campo('barrio')} />
+            </Fila>
+            <Fila>
+                <Select etiqueta="Departamento" vacio="Selecciona…" opciones={DEPARTAMENTOS} {...campo('departamento')} />
+                <Select etiqueta="Municipio" vacio="Selecciona…" opciones={opcionesMunicipio}
+                    disabled={!form.departamento && !form.municipio} {...campo('municipio')} />
+            </Fila>
+            <Fila>
+                <Input etiqueta="Área (m²)" inputMode="decimal" placeholder="78" {...campo('area_m2')} />
+                <Input etiqueta="Estrato" inputMode="numeric" placeholder="1 a 6" {...campo('estrato')} />
+            </Fila>
+            <Fila>
+                <Input etiqueta="Habitaciones" inputMode="numeric" {...campo('habitaciones')} />
+                <Input etiqueta="Baños" inputMode="numeric" {...campo('banos')} />
+            </Fila>
+            <Fila>
+                <Input etiqueta="Parqueaderos" inputMode="numeric" {...campo('parqueaderos')} />
+                <Input etiqueta="Depósitos" inputMode="numeric" {...campo('deposito')} />
+            </Fila>
+        </form>
+    );
+}
+
+const ID_FORMULARIO = 'formulario-inmueble';
+
+export default function Inmuebles() {
+    const [inmuebles, setInmuebles] = useState([]);
+    // `null` = no se pudo decorar; la fila sale sin canon ni cobro.
+    const [contratos, setContratos] = useState(null);
+    const [cuentas, setCuentas] = useState(null);
+    const [cargando, setCargando] = useState(true);
+    const [errorCarga, setErrorCarga] = useState(null);
+    const [aviso, setAviso] = useState('');
+
+    // { modo: 'crear' } | { modo: 'editar', inmueble } | { modo: 'eliminar', inmueble } | null
+    const [dialogo, setDialogo] = useState(null);
+    const [enviando, setEnviando] = useState(false);
+    const [errorDialogo, setErrorDialogo] = useState(null);
+
+    const cargar = useCallback(async () => {
+        setErrorCarga(null);
+        const [inm, con, cue] = await Promise.allSettled([listarInmuebles(), listarContratos(), listarCuentasCobro()]);
+        if (inm.status === 'fulfilled') setInmuebles(inm.value);
+        else setErrorCarga(inm.reason);
+        setContratos(con.status === 'fulfilled' ? con.value : null);
+        setCuentas(cue.status === 'fulfilled' ? cue.value : null);
+        setCargando(false);
+    }, []);
+
+    useEffect(() => { cargar(); }, [cargar]);
+
+    const contratoActivoPorInmueble = useMemo(
+        () => new Map((contratos || []).filter((c) => c.estado === 'activo').map((c) => [c.id_inmueble, c])),
+        [contratos]
+    );
+    const cuentaPorContrato = useMemo(() => cuentaQueResumePorContrato(cuentas || []), [cuentas]);
+
+    const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
+    const cerrar = () => { if (!enviando) setDialogo(null); };
+
+    const terminar = async (mensaje) => {
+        setDialogo(null);
+        setAviso(mensaje);
+        await cargar();
+    };
+
+    const guardar = async (datos) => {
+        setEnviando(true);
+        setErrorDialogo(null);
+        try {
+            if (dialogo.modo === 'editar') {
+                await actualizarInmueble(dialogo.inmueble.id_inmueble, datos);
+                await terminar('Inmueble actualizado.');
+            } else {
+                await crearInmueble(datos);
+                await terminar('Inmueble registrado.');
+            }
+        } catch (error) {
+            setErrorDialogo(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    /** Con un contrato activo el gateway responde 409 y su `mensaje` dice qué hacer: se muestra tal cual. */
+    const eliminar = async () => {
+        setEnviando(true);
+        setErrorDialogo(null);
+        try {
+            await eliminarInmueble(dialogo.inmueble.id_inmueble);
+            await terminar('Inmueble eliminado.');
+        } catch (error) {
+            setErrorDialogo(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    const arrendados = inmuebles.filter((i) => i.estado === 'arrendado').length;
+    const disponibles = inmuebles.filter((i) => i.estado === 'disponible').length;
+    const formularioAbierto = dialogo?.modo === 'crear' || dialogo?.modo === 'editar';
+
+    return (
+        <div className="flex flex-col gap-6">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h1 className="m-0 text-2xl font-medium text-texto">Mis inmuebles</h1>
+                    <p className="m-0 mt-1 text-sm text-texto-suave">Gestiona tus propiedades y sus contratos de arrendamiento.</p>
+                </div>
+                <Button icono={Plus} onClick={() => abrir({ modo: 'crear' })}>Registrar propiedad</Button>
+            </header>
+
+            <p aria-live="polite" className="m-0 text-sm text-texto-suave empty:hidden">{aviso}</p>
+
+            {cargando ? (
+                <p className="m-0 text-sm text-texto-suave">Cargando inmuebles…</p>
+            ) : errorCarga ? (
+                <div className="flex flex-col items-start gap-3">
+                    <FormError error={errorCarga} className="w-full box-border" />
+                    <Button variante="secundario" onClick={() => { setCargando(true); cargar(); }}>Reintentar</Button>
+                </div>
+            ) : (
+                <>
+                    <div className="flex flex-wrap gap-4">
+                        <Kpi etiqueta="Total propiedades" valor={inmuebles.length} />
+                        <Kpi etiqueta="Arrendadas" valor={arrendados} />
+                        <Kpi etiqueta="Disponibles" valor={disponibles} />
+                    </div>
+
+                    {inmuebles.length === 0 ? (
+                        <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                            <EmptyState
+                                icono={Home}
+                                titulo="Aún no tienes inmuebles"
+                                descripcion="Registra tu primera propiedad para poder arrendarla."
+                                accion={<Button icono={Plus} onClick={() => abrir({ modo: 'crear' })}>Registrar propiedad</Button>}
+                            />
+                        </div>
+                    ) : (
+                        <ul className="flex flex-col gap-3 list-none m-0 p-0">
+                            {inmuebles.map((inmueble) => {
+                                const contrato = contratoActivoPorInmueble.get(inmueble.id_inmueble);
+                                return (
+                                    <FilaInmueble
+                                        key={inmueble.id_inmueble}
+                                        inmueble={inmueble}
+                                        contrato={contrato}
+                                        cuenta={contrato ? cuentaPorContrato.get(contrato.id_contrato) : undefined}
+                                        onEditar={(i) => abrir({ modo: 'editar', inmueble: i })}
+                                        onEliminar={(i) => abrir({ modo: 'eliminar', inmueble: i })}
+                                    />
+                                );
+                            })}
+                        </ul>
+                    )}
+                </>
+            )}
+
+            <Modal
+                abierto={formularioAbierto}
+                onCerrar={cerrar}
+                titulo={dialogo?.modo === 'editar' ? 'Editar propiedad' : 'Registrar propiedad'}
+                ancho="max-w-2xl"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button type="submit" form={ID_FORMULARIO} cargando={enviando}>
+                            {dialogo?.modo === 'editar' ? 'Guardar cambios' : 'Registrar'}
+                        </Button>
+                    </>
+                }
+            >
+                {formularioAbierto && (
+                    <FormularioInmueble
+                        key={dialogo.inmueble?.id_inmueble || 'nuevo'}
+                        idFormulario={ID_FORMULARIO}
+                        inicial={dialogo.inmueble ? formDeInmueble(dialogo.inmueble) : FORM_VACIO}
+                        error={errorDialogo}
+                        onEnviar={guardar}
+                    />
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'eliminar'}
+                onCerrar={cerrar}
+                titulo="Eliminar propiedad"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button onClick={eliminar} cargando={enviando} icono={Trash2}>Eliminar</Button>
+                    </>
+                }
+            >
+                <div className="flex flex-col gap-3">
+                    <FormError error={errorDialogo} />
+                    <p className="m-0 text-sm text-texto">
+                        ¿Eliminar <span className="font-medium">{dialogo?.inmueble?.direccion}</span>? Esta acción no se puede deshacer.
+                    </p>
+                </div>
+            </Modal>
+        </div>
+    );
+}
