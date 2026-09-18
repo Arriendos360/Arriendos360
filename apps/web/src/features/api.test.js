@@ -116,6 +116,11 @@ test('un pago lleva tipo INGRESO aparte del medio de pago', async () => {
     });
 });
 
+test('un día de pago viaja como mediodía de Bogotá, no como medianoche UTC', async () => {
+    await registrarPago({ id_cuenta_cobro: 'cc1', monto: '1', fecha_pago: '2026-09-01' });
+    expect(api.post.mock.calls[0][1].fecha_pago).toBe('2026-09-01T17:00:00Z');
+});
+
 test('el cobro manual manda el valor como número', async () => {
     await crearCuentaCobro({ id_contrato: 'c1', valor: '1500000', detalle: 'Canon octubre' });
     expect(api.post).toHaveBeenCalledWith('/pagos/cuentas-cobro', { id_contrato: 'c1', detalle: 'Canon octubre', valor: 1500000 });

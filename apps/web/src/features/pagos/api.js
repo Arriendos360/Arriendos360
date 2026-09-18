@@ -18,6 +18,22 @@ export { MEDIOS_PAGO_CONOCIDOS };
 
 const [TIPO_INGRESO] = TIPOS_TRANSACCION;
 
+/**
+ * Lo que leen `registrarPago` y `crearCuentaCobro` en el controlador de
+ * ms-financiero. `tipo` y `monto` / `valor` no están: los pone esta capa.
+ * Anular no lleva cuerpo: el endpoint no lee ninguno (docs/adr/0016).
+ */
+export const CAMPOS_PAGO = ['id_cuenta_cobro', 'medio_pago', 'fecha_pago', 'observaciones'];
+export const CAMPOS_CUENTA_COBRO = ['id_contrato', 'detalle', 'inicio', 'fin'];
+
+/**
+ * `fecha_pago` es un instante (`new Date()` en el servicio). Un día de
+ * calendario suelto se leería como medianoche UTC, que en Bogotá es la víspera:
+ * se manda a mediodía de Bogotá. Sin fecha, el servicio toma el momento actual.
+ */
+const fechaPagoParaEnviar = (valor) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(valor ?? '') ? `${valor}T17:00:00Z` : valor;
+
 // ── Lectura ───────────────────────────────────────────────────────────────
 
 /** `GET /api/pagos`: las cuentas de cobro de los contratos donde el usuario es parte. */
@@ -38,11 +54,11 @@ export const historialTransacciones = () => cuerpo(api.get('/pagos/historial-tra
 
 /**
  * `POST /api/pagos`: registra un abono o el pago completo.
- * `fecha_pago` es opcional (fecha y hora ISO; sin ella, ahora) y `observaciones`
- * es la referencia que imprime el comprobante (docs/adr/0015).
+ * `fecha_pago` es opcional (`YYYY-MM-DD` o ISO con hora; sin ella, ahora) y
+ * `observaciones` es la referencia que imprime el comprobante (docs/adr/0015).
  */
 export const registrarPago = (datos) => {
-    const cuerpoPago = soloCampos(datos, ['id_cuenta_cobro', 'medio_pago', 'fecha_pago', 'observaciones']);
+    const cuerpoPago = soloCampos({ ...datos, fecha_pago: fechaPagoParaEnviar(datos.fecha_pago) }, CAMPOS_PAGO);
     return cuerpo(api.post('/pagos', { ...cuerpoPago, tipo: TIPO_INGRESO, monto: montoParaEnviar(datos.monto) }));
 };
 
@@ -52,7 +68,7 @@ export const registrarPago = (datos) => {
  * día de corte del contrato. Notifica al inquilino (docs/adr/0019).
  */
 export const crearCuentaCobro = (datos) => {
-    const cuerpoCuenta = soloCampos(datos, ['id_contrato', 'detalle', 'inicio', 'fin']);
+    const cuerpoCuenta = soloCampos(datos, CAMPOS_CUENTA_COBRO);
     return cuerpo(api.post('/pagos/cuentas-cobro', { ...cuerpoCuenta, valor: montoParaEnviar(datos.valor) }));
 };
 

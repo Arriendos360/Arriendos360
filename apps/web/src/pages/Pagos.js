@@ -1,436 +1,576 @@
-import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, AlertTriangle, Ban, Download, History, X, Receipt, Search, Calendar, MapPin } from 'lucide-react';
-
-import { ESTADOS_CUENTA_COBRO, MEDIOS_PAGO_CONOCIDOS } from 'arriendos360-contracts';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, FileText, Plus, Receipt, ShieldAlert } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
-import api from '../services/api';
-import { abrirPdf } from '../services/descargas';
+import { listarContratos } from '../features/contratos/api';
+import { AreaTexto, actuaComoPropietario, ubicacionDe } from '../features/contratos/piezas';
+import {
+    MEDIOS_PAGO_CONOCIDOS, abrirComprobante, abrirRecibo, anularTransaccion, crearCuentaCobro,
+    listarCuentasCobro, registrarPago, transaccionesDeCuenta, verificarMora
+} from '../features/pagos/api';
+import {
+    Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table,
+    aDecimal, formatearDinero, formatearFecha, formatearFechaHora, hoyEnBogota
+} from '../ui';
+import { unir } from '../ui/clases';
 
 /**
- * Los cuatro estados de una cuenta de cobro, del catalogo compartido.
+ * UI de Pagos (mockup docs/mockups/pagos.png): las cuentas de cobro, sus
+ * transacciones y sus PDF.
  *
- * Hasta el paso 6c esta pantalla traducia los enteros 1, 2, 3 y 4 con un
- * `switch` propio, que era una de las cuatro copias del mapa repartidas por el
- * proyecto. Ahora la lista viene de `packages/contracts`, que es la misma que
- * valida el modelo y la que declara el `CHECK` de la migracion.
+ * - El saldo es `saldo_pendiente` tal como llega: lo deriva ms-financiero y aquí
+ *   no se suma ni se resta nada. Después de escribir se vuelve a pedir.
+ * - Registrar, cobrar a mano y anular son del propietario (docs/adr/0006), y no
+ *   basta el rol: quien tiene los dos es inquilino en algunos contratos
+ *   (`actuaComoPropietario`). Una cuenta cuyo contrato no llegó decorado no
+ *   ofrece acciones: sin contrato no se sabe de quién es.
+ * - Anular no borra ni reescribe `saldo_restante_momento`: el comprobante ya
+ *   emitido sigue diciendo lo que decía (docs/adr/0016). El endpoint no recibe
+ *   cuerpo, así que no se pide un motivo que se perdería.
+ * - Los PDF salen por blob con el token (services/descargas.js).
+ *
+ * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
+ * a Tailwind hasta el paso 6.
  */
-const [PENDIENTE, PAGADA, PARCIAL, EN_MORA] = ESTADOS_CUENTA_COBRO;
 
-const Pagos = () => {
-    const { esPropietario } = useSesion();
+const MESES_LARGOS = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+];
 
-    const [tab, setTab] = useState('cobros');
-    const [pagos, setPagos] = useState([]);
-    const [transacciones, setTransacciones] = useState([]);
-    const [historial, setHistorial] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [filtro, setFiltro] = useState('');
-    const [filtroEstado, setFiltroEstado] = useState('todos');
-    const [filtroHistorial, setFiltroHistorial] = useState('');
-    const [selectedPago, setSelectedPago] = useState(null);
-    const [showAbonosModal, setShowAbonosModal] = useState(false);
-    const [showPayModal, setShowPayModal] = useState(false);
-    // Los nombres son los del cuerpo que fija el Capitulo 2 para
-    // `POST /api/pagos`: `monto` y `medio_pago`, no `monto_pagado` ni
-    // `tipo_transaccion`. `tipo` lo pone el envio, que hoy solo tiene un valor.
-    const [payFormData, setPayFormData] = useState({
-        monto: '', medio_pago: MEDIOS_PAGO_CONOCIDOS[0], observaciones: ''
-    });
-
-    useEffect(() => {
-        const fetchAll = async () => {
-            try {
-                const [pagosRes, historialRes] = await Promise.all([
-                    api.get('/pagos'),
-                    api.get('/pagos/historial-transacciones').catch(() => ({ data: [] }))
-                ]);
-                setPagos(pagosRes.data);
-                setHistorial(historialRes.data);
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchAll();
-    }, []);
-
-    const formatDate = (dateString, options = { month: 'long', year: 'numeric' }) => {
-        if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('es-CO', { ...options, timeZone: 'UTC' });
-    };
-
-    const recargar = async () => {
-        const [pagosRes, histRes] = await Promise.all([
-            api.get('/pagos'),
-            api.get('/pagos/historial-transacciones').catch(() => ({ data: [] }))
-        ]);
-        setPagos(pagosRes.data);
-        setHistorial(histRes.data);
-    };
-
-    const fetchTransacciones = async (id_cuenta_cobro) => {
-        try {
-            const res = await api.get(`/pagos/${id_cuenta_cobro}/transacciones`);
-            setTransacciones(res.data);
-            setShowAbonosModal(true);
-        } catch { alert('Error al cargar transacciones'); }
-    };
-
-    const handleRegistrarPago = async (e) => {
-        e.preventDefault();
-        try {
-            await api.post('/pagos', {
-                id_cuenta_cobro: selectedPago.id_cuenta_cobro,
-                tipo: 'INGRESO',
-                ...payFormData
-            });
-            setShowPayModal(false);
-            setPayFormData({ monto: '', medio_pago: MEDIOS_PAGO_CONOCIDOS[0], observaciones: '' });
-            await recargar();
-        } catch (err) {
-            alert('Error: ' + (err.response?.data?.mensaje || err.message));
-        }
-    };
-
-    /**
-     * Anula una transaccion registrada por error.
-     *
-     * No la borra: el servidor le cambia el estado y el saldo de la cuenta se
-     * corrige solo, porque la suma que lo deriva deja de contarla. Por eso hay
-     * que recargar las listas y el detalle en vez de tocarlos en memoria.
-     */
-    const handleAnular = async (id_transaccion) => {
-        if (!window.confirm('Anular esta transaccion? El saldo de la cuenta de cobro se recalculara.')) return;
-        try {
-            await api.post(`/pagos/transacciones/${id_transaccion}/anular`);
-            await recargar();
-            await fetchTransacciones(selectedPago.id_cuenta_cobro);
-        } catch (err) {
-            alert('Error: ' + (err.response?.data?.mensaje || err.message));
-        }
-    };
-
-    const getStatusInfo = (estado) => ({
-        [PENDIENTE]: { label: 'Pendiente',    class: 'badge-pending', icon: <Clock size={13} /> },
-        [PAGADA]:    { label: 'Pagado',       class: 'badge-success', icon: <CheckCircle size={13} /> },
-        [EN_MORA]:   { label: 'En Mora',      class: 'badge-error',   icon: <AlertTriangle size={13} /> },
-        [PARCIAL]:   { label: 'Pago Parcial', class: 'badge-warning', icon: <Clock size={13} /> },
-    }[estado] || { label: '—', class: '', icon: null });
-
-    const pagosFiltrados = pagos.filter(p => {
-        const q = filtro.toLowerCase();
-        const matchTexto = !filtro
-            || p.Contrato?.Inmueble?.direccion?.toLowerCase().includes(q)
-            || (p.Contrato?.id_inquilino || '').toLowerCase().includes(q)
-            || String(p.id_contrato).includes(q);
-        const matchEstado = filtroEstado === 'todos'
-            || (filtroEstado === 'pendiente' && (p.estado === PENDIENTE || p.estado === PARCIAL))
-            || (filtroEstado === 'pagado'    && p.estado === PAGADA)
-            || (filtroEstado === 'mora'      && p.estado === EN_MORA);
-        return matchTexto && matchEstado;
-    });
-
-    const historialFiltrado = historial.filter(a =>
-        !filtroHistorial
-        || a.CuentaCobro?.Contrato?.Inmueble?.direccion?.toLowerCase().includes(filtroHistorial.toLowerCase())
-        || a.medio_pago?.toLowerCase().includes(filtroHistorial.toLowerCase())
-    );
-
-    const totalHistorial = historialFiltrado.reduce((s, a) => s + parseFloat(a.monto || 0), 0);
-
-    if (loading) return <div className="loading">Cargando gestión financiera...</div>;
-
-    const TABS = [
-        { key: 'cobros',    label: 'Cobros',               count: pagos.length },
-        { key: 'historial', label: 'Historial de Pagos',   count: historial.length },
-    ];
-
-    return (
-        <div className="fade-in">
-            {/* Header */}
-            <div style={{ marginBottom: '1.5rem' }}>
-                <h2 style={{ fontSize: '1.875rem', fontWeight: '800', color: '#0f172a' }}>Gestión Financiera</h2>
-                <p style={{ color: '#64748b' }}>Control de cobros, pagos y comprobantes de transacciones.</p>
-            </div>
-
-            {/* Tab switcher */}
-            <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '1.5rem', gap: '0.25rem' }}>
-                {TABS.map(t => (
-                    <button key={t.key} onClick={() => setTab(t.key)} style={{
-                        padding: '0.65rem 1.25rem', border: 'none', background: 'transparent',
-                        cursor: 'pointer', fontSize: '0.9rem', fontWeight: tab === t.key ? '700' : '500',
-                        color: tab === t.key ? '#2563eb' : '#64748b',
-                        borderBottom: tab === t.key ? '2px solid #2563eb' : '2px solid transparent',
-                        marginBottom: '-2px', transition: 'all 0.15s',
-                        display: 'flex', alignItems: 'center', gap: '0.5rem'
-                    }}>
-                        {t.label}
-                        <span style={{
-                            fontSize: '0.72rem', fontWeight: '700', padding: '0.1rem 0.4rem',
-                            borderRadius: '999px', background: tab === t.key ? '#eff6ff' : '#f1f5f9',
-                            color: tab === t.key ? '#2563eb' : '#94a3b8'
-                        }}>{t.count}</span>
-                    </button>
-                ))}
-            </div>
-
-            {/* ── TAB COBROS ── */}
-            {tab === 'cobros' && (
-                <>
-                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <div className="card" style={{ flex: 1, minWidth: '220px', padding: '0.65rem 1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <Search size={16} color="#94a3b8" />
-                            <input type="text" placeholder="Buscar por dirección, cédula o # contrato..."
-                                value={filtro} onChange={e => setFiltro(e.target.value)}
-                                style={{ border: 'none', outline: 'none', flex: 1, fontSize: '0.875rem', background: 'transparent' }} />
-                            {filtro && <button onClick={() => setFiltro('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}>✕</button>}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                            {[
-                                { key: 'todos',     label: 'Todos',      color: '#475569', bg: '#f1f5f9', count: pagos.length },
-                                { key: 'pendiente', label: 'Pendientes', color: '#854d0e', bg: '#fef9c3', count: pagos.filter(p => p.estado === PENDIENTE || p.estado === PARCIAL).length },
-                                { key: 'pagado',    label: 'Pagados',    color: '#166534', bg: '#dcfce7', count: pagos.filter(p => p.estado === PAGADA).length },
-                                { key: 'mora',      label: 'En Mora',    color: '#991b1b', bg: '#fee2e2', count: pagos.filter(p => p.estado === EN_MORA).length },
-                            ].map(t => (
-                                <button key={t.key} onClick={() => setFiltroEstado(t.key)} style={{
-                                    padding: '0.4rem 0.8rem', borderRadius: '999px', cursor: 'pointer', fontSize: '0.82rem',
-                                    border: filtroEstado === t.key ? `2px solid ${t.color}` : '2px solid transparent',
-                                    background: filtroEstado === t.key ? t.bg : '#f8fafc',
-                                    color: filtroEstado === t.key ? t.color : '#64748b',
-                                    fontWeight: filtroEstado === t.key ? '700' : '400', transition: 'all 0.15s'
-                                }}>
-                                    {t.label} <span style={{ fontSize: '0.72rem' }}>({t.count})</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Mes de Cobro</th>
-                                    <th>Inmueble</th>
-                                    {esPropietario && <th>Arrendatario</th>}
-                                    <th>Monto</th>
-                                    <th>Saldo</th>
-                                    <th>Estado</th>
-                                    <th>Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {pagosFiltrados.length === 0 && (
-                                    <tr><td colSpan="7" style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Sin resultados.</td></tr>
-                                )}
-                                {pagosFiltrados.map(pago => {
-                                    const st = getStatusInfo(pago.estado);
-                                    return (
-                                        <tr key={pago.id_cuenta_cobro}>
-                                            <td style={{ fontWeight: '600' }}>
-                                                {formatDate(pago.inicio)}
-                                            </td>
-                                            <td>
-                                                <div style={{ fontWeight: '500', fontSize: '0.875rem' }}>{pago.Contrato?.Inmueble?.direccion || `#${pago.id_contrato}`}</div>
-                                                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{pago.Contrato?.Inmueble?.municipio}</div>
-                                            </td>
-                                            {esPropietario && <td style={{ color: '#64748b', fontSize: '0.875rem' }}>{pago.Contrato?.id_inquilino || '--'}</td>}
-                                            <td style={{ fontWeight: '600' }}>${parseFloat(pago.valor).toLocaleString()}</td>
-                                            <td style={{ color: parseFloat(pago.saldo_pendiente) > 0 ? '#ef4444' : '#10b981', fontWeight: '700' }}>
-                                                ${parseFloat(pago.saldo_pendiente).toLocaleString()}
-                                            </td>
-                                            <td>
-                                                <span className={`badge ${st.class}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                                                    {st.icon} {st.label}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                    {esPropietario && pago.estado !== PAGADA && (
-                                                        <button className="btn btn-primary"
-                                                            onClick={() => { setSelectedPago(pago); setShowPayModal(true); }}
-                                                            style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem' }}>
-                                                            Registrar Pago
-                                                        </button>
-                                                    )}
-                                                    {!esPropietario && pago.estado !== PAGADA && (
-                                                        <span style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: '600', background: '#fef9c3', padding: '0.3rem 0.6rem', borderRadius: '0.375rem', whiteSpace: 'nowrap' }}>
-                                                            ⏳ Pendiente
-                                                        </span>
-                                                    )}
-                                                    {parseFloat(pago.saldo_pendiente) < parseFloat(pago.valor) && (
-                                                        <>
-                                                            <button className="btn-icon-subtle" title="Ver transacciones" onClick={() => { setSelectedPago(pago); fetchTransacciones(pago.id_cuenta_cobro); }}>
-                                                                <History size={16} />
-                                                            </button>
-                                                            <button className="btn-icon-subtle" title="Recibo" onClick={() => abrirPdf(`/pagos/${pago.id_cuenta_cobro}/recibo`, `Recibo_${pago.id_cuenta_cobro}.pdf`)}>
-                                                                <Download size={16} />
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </>
-            )}
-
-            {/* ── TAB HISTORIAL ── */}
-            {tab === 'historial' && (
-                <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
-                        <div className="card" style={{ flex: 1, minWidth: '220px', padding: '0.65rem 1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <Search size={16} color="#94a3b8" />
-                            <input type="text" placeholder="Buscar por dirección o método de pago..."
-                                value={filtroHistorial} onChange={e => setFiltroHistorial(e.target.value)}
-                                style={{ border: 'none', outline: 'none', flex: 1, fontSize: '0.875rem', background: 'transparent' }} />
-                            {filtroHistorial && <button onClick={() => setFiltroHistorial('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}>✕</button>}
-                        </div>
-                        {historial.length > 0 && (
-                            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.75rem', padding: '0.6rem 1.1rem', textAlign: 'right' }}>
-                                <p style={{ fontSize: '0.7rem', color: '#166534', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total pagado</p>
-                                <p style={{ fontSize: '1.25rem', fontWeight: '800', color: '#15803d' }}>${totalHistorial.toLocaleString()}</p>
-                            </div>
-                        )}
-                    </div>
-
-                    {historialFiltrado.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '1rem', border: '1px solid #e2e8f0' }}>
-                            <Receipt size={40} color="#cbd5e1" style={{ margin: '0 auto 1rem' }} />
-                            <p style={{ color: '#94a3b8' }}>No hay transacciones registradas.</p>
-                        </div>
-                    ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                            {historialFiltrado.map((abono, idx) => {
-                                const saldado = parseFloat(abono.saldo_restante_momento) === 0;
-                                // Una transaccion anulada sigue en la lista a
-                                // proposito: esconderla seria esconder que el
-                                // movimiento se registro y se corrigio.
-                                const anulada = abono.estado === 'ANULADA';
-                                return (
-                                    <div key={abono.id_transaccion} style={{ background: '#fff', borderRadius: '0.875rem', border: '1px solid #e2e8f0', overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'box-shadow 0.15s' }}
-                                        onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
-                                        onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)'}>
-                                        <div style={{ width: '4px', background: anulada ? '#94a3b8' : (saldado ? '#22c55e' : '#f59e0b'), flexShrink: 0 }} />
-                                        <div style={{ padding: '0.875rem 1rem', borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minWidth: '52px', background: '#fafafa' }}>
-                                            <span style={{ fontSize: '0.6rem', color: '#94a3b8', textTransform: 'uppercase' }}>#</span>
-                                            <span style={{ fontWeight: '700', color: '#475569' }}>{String(idx + 1).padStart(2, '0')}</span>
-                                        </div>
-                                        <div style={{ flex: 1, padding: '0.875rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                                            <div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                                                    <span style={{ fontWeight: '700', fontSize: '0.9rem', color: '#0f172a' }}>Abono a Canon</span>
-                                                    <span style={{ fontSize: '0.68rem', fontWeight: '700', padding: '0.1rem 0.45rem', borderRadius: '999px', background: anulada ? '#f1f5f9' : (saldado ? '#dcfce7' : '#fef9c3'), color: anulada ? '#64748b' : (saldado ? '#15803d' : '#a16207') }}>
-                                                        {anulada ? 'Anulada' : (saldado ? '✓ Saldado' : 'Parcial')}
-                                                    </span>
-                                                </div>
-                                                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                                                    <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><MapPin size={11} />{abono.CuentaCobro?.Contrato?.Inmueble?.direccion}</span>
-                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Calendar size={11} />{formatDate(abono.fecha_pago, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{abono.medio_pago}</span>
-                                                </div>
-                                            </div>
-                                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                                <div style={{ fontSize: '1.25rem', fontWeight: '800', color: anulada ? '#94a3b8' : '#15803d', letterSpacing: '-0.02em', textDecoration: anulada ? 'line-through' : 'none' }}>${parseFloat(abono.monto).toLocaleString()}</div>
-                                                {!saldado && <div style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '600' }}>Saldo: ${parseFloat(abono.saldo_restante_momento).toLocaleString()}</div>}
-                                            </div>
-                                        </div>
-                                        <div style={{ padding: '0.875rem', display: 'flex', alignItems: 'center', borderLeft: '1px solid #f1f5f9' }}>
-                                            <button onClick={() => abrirPdf(`/pagos/transacciones/${abono.id_transaccion}/comprobante`, `Comprobante_${abono.id_transaccion}.pdf`)}
-                                                style={{ background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', border: 'none', borderRadius: '0.5rem', padding: '0.5rem 0.875rem', cursor: 'pointer', fontWeight: '600', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', boxShadow: '0 2px 6px rgba(37,99,235,0.25)' }}>
-                                                <Download size={13} /> Descargar
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </>
-            )}
-
-            {/* Modal registrar pago */}
-            {showPayModal && (
-                <div className="modal-overlay">
-                    <div className="card modal-content" style={{ maxWidth: '400px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-                            <div>
-                                <h4 style={{ fontWeight: '700' }}>Registrar Abono</h4>
-                                <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.25rem' }}>Saldo pendiente: <strong style={{ color: '#ef4444' }}>${parseFloat(selectedPago?.saldo_pendiente).toLocaleString()}</strong></p>
-                            </div>
-                            <button className="btn-icon" onClick={() => setShowPayModal(false)}><X size={20} /></button>
-                        </div>
-                        <form onSubmit={handleRegistrarPago}>
-                            <label className="form-label">Monto a pagar</label>
-                            <input type="number" className="form-control" value={payFormData.monto}
-                                onChange={e => setPayFormData({...payFormData, monto: e.target.value})}
-                                max={selectedPago?.saldo_pendiente} required />
-                            <label className="form-label" style={{ marginTop: '1rem' }}>Método de pago</label>
-                            {/* Catálogo ABIERTO: la lista es una sugerencia del
-                                desplegable, no un valor que la API valide. */}
-                            <select className="form-control" value={payFormData.medio_pago}
-                                onChange={e => setPayFormData({...payFormData, medio_pago: e.target.value})}>
-                                {MEDIOS_PAGO_CONOCIDOS.map(m => <option key={m}>{m}</option>)}
-                            </select>
-                            <label className="form-label" style={{ marginTop: '1rem' }}>Observaciones</label>
-                            <textarea className="form-control" value={payFormData.observaciones}
-                                onChange={e => setPayFormData({...payFormData, observaciones: e.target.value})} rows={3} />
-                            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1.5rem', padding: '0.75rem' }}>
-                                Confirmar Transacción
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal historial abonos */}
-            {showAbonosModal && (
-                <div className="modal-overlay">
-                    <div className="card modal-content" style={{ maxWidth: '520px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-                            <h4>Transacciones — Cobro #{selectedPago?.id_cuenta_cobro}</h4>
-                            <button className="btn-icon" onClick={() => setShowAbonosModal(false)}><X size={20} /></button>
-                        </div>
-                        <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
-                            {transacciones.length === 0
-                                ? <p style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>Sin transacciones registradas.</p>
-                                : transacciones.map(a => {
-                                    const anulada = a.estado === 'ANULADA';
-                                    return (
-                                    <div key={a.id_transaccion} style={{ padding: '0.875rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div>
-                                            <p style={{ fontWeight: '700', color: anulada ? '#94a3b8' : '#15803d', textDecoration: anulada ? 'line-through' : 'none' }}>${parseFloat(a.monto).toLocaleString()}</p>
-                                            <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{new Date(a.fecha_pago).toLocaleString('es-CO')}</p>
-                                            <p style={{ fontSize: '0.8rem', color: '#64748b' }}>{a.medio_pago}{anulada && ' · Anulada'}</p>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                            <button className="btn-icon-subtle" title="Comprobante"
-                                                onClick={() => abrirPdf(`/pagos/transacciones/${a.id_transaccion}/comprobante`, `Comprobante_${a.id_transaccion}.pdf`)}>
-                                                <Receipt size={16} />
-                                            </button>
-                                            {esPropietario && !anulada && (
-                                                <button className="btn-icon-subtle" title="Anular transacción"
-                                                    onClick={() => handleAnular(a.id_transaccion)}>
-                                                    <Ban size={16} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                    );
-                                })
-                            }
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
+/** «agosto 2026», leído del texto `YYYY-MM-DD`: `new Date()` lo correría a la víspera. */
+const mesDe = (fecha) => {
+    const partes = /^(\d{4})-(\d{2})-\d{2}$/.exec(fecha || '');
+    return partes ? `${MESES_LARGOS[Number(partes[2]) - 1]} ${partes[1]}` : '—';
 };
 
-export default Pagos;
+const FILTROS = [
+    { clave: 'todos', texto: 'Todos', estados: null, tono: 'text-texto-suave' },
+    { clave: 'pendientes', texto: 'Pendientes', estados: ['PENDIENTE', 'PARCIAL'], tono: 'text-ambar-texto' },
+    { clave: 'pagados', texto: 'Pagados', estados: ['PAGADA'], tono: 'text-verde-texto' },
+    { clave: 'mora', texto: 'En mora', estados: ['EN_MORA'], tono: 'text-rojo-texto' }
+];
+
+const cumple = (filtro, cuenta) => !filtro.estados || filtro.estados.includes(cuenta.estado);
+
+/** ¿Queda algo por pagar? Se lee del texto decimal, sin operar. */
+const tieneSaldo = (cuenta) => {
+    const saldo = aDecimal(cuenta.saldo_pendiente);
+    return saldo !== null && saldo !== '0' && !saldo.startsWith('-');
+};
+
+const esPropia = (cuenta, sesion) => actuaComoPropietario(cuenta.Contrato, sesion);
+
+const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
+
+/** Una cifra del resumen de la cuenta en el detalle. */
+const Dato = ({ titulo, children }) => (
+    <div className="flex flex-col gap-1 min-w-[8rem]">
+        <span className="text-xs font-medium uppercase tracking-label text-texto-label">{titulo}</span>
+        <span className="text-sm text-texto">{children}</span>
+    </div>
+);
+
+function Saldo({ cuenta }) {
+    const saldo = aDecimal(cuenta.saldo_pendiente);
+    if (saldo === null) return <span className="text-texto-suave">—</span>;
+    return (
+        <span className={unir('font-medium whitespace-nowrap', tieneSaldo(cuenta) ? 'text-rojo-texto' : 'text-verde-texto')}>
+            {formatearDinero(saldo)}
+        </span>
+    );
+}
+
+function Inmueble({ cuenta }) {
+    const inmueble = cuenta.Contrato?.Inmueble;
+    return (
+        <div className="min-w-[10rem]">
+            <p className="m-0 text-sm font-medium text-texto">{inmueble?.direccion || 'Inmueble sin datos'}</p>
+            {ubicacionDe(inmueble) && <p className="m-0 mt-0.5 text-xs text-texto-suave">{ubicacionDe(inmueble)}</p>}
+        </div>
+    );
+}
+
+// ── Formularios ───────────────────────────────────────────────────────────
+
+const ID_PAGO = 'formulario-pago';
+const ID_COBRO = 'formulario-cobro';
+
+/**
+ * `POST /api/pagos`. El monto se propone con el saldo (se copia, no se calcula) y
+ * el tope lo hace cumplir el servicio: «Monto inválido o superior al saldo».
+ * `medio_pago` es un catálogo abierto; `tipo` lo pone la capa de datos.
+ */
+function FormularioPago({ cuenta, error, onEnviar }) {
+    const hoy = hoyEnBogota();
+    const [form, setForm] = useState({
+        monto: aDecimal(cuenta.saldo_pendiente), medio_pago: MEDIOS_PAGO_CONOCIDOS[0], fecha_pago: hoy, observaciones: ''
+    });
+    const [errores, setErrores] = useState({});
+
+    const poner = (nombre, valor) => {
+        setForm((actual) => ({ ...actual, [nombre]: valor }));
+        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+    };
+
+    const enviar = (evento) => {
+        evento.preventDefault();
+        const encontrados = {};
+        if (form.monto === null || !(Number(form.monto) > 0)) encontrados.monto = 'Escribe un monto mayor que cero.';
+        if (!form.fecha_pago) encontrados.fecha_pago = 'Indica la fecha del pago.';
+        else if (form.fecha_pago > hoy) encontrados.fecha_pago = 'No puede ser posterior a hoy.';
+        setErrores(encontrados);
+        if (Object.keys(encontrados).length > 0) return;
+        // Hoy no viaja: el servicio registra el momento exacto.
+        onEnviar({
+            ...form,
+            id_cuenta_cobro: cuenta.id_cuenta_cobro,
+            fecha_pago: form.fecha_pago === hoy ? undefined : form.fecha_pago
+        });
+    };
+
+    return (
+        <form id={ID_PAGO} onSubmit={enviar} noValidate className="flex flex-col gap-4">
+            <FormError error={error} />
+            <div className="flex flex-wrap gap-6 bg-lavanda rounded-control p-4">
+                <Dato titulo="Periodo">{mesDe(cuenta.inicio)}</Dato>
+                <Dato titulo="Valor">{formatearDinero(cuenta.valor)}</Dato>
+                <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>
+            </div>
+            <Fila>
+                <MoneyField etiqueta="Monto recibido" value={form.monto} error={errores.monto}
+                    ayuda="Puede ser un abono: el resto queda pendiente." onChange={(valor) => poner('monto', valor)} />
+                <DateField etiqueta="Fecha del pago" name="fecha_pago" value={form.fecha_pago} max={hoy}
+                    error={errores.fecha_pago} onChange={(valor) => poner('fecha_pago', valor)} />
+            </Fila>
+            <Select etiqueta="Medio de pago" opciones={MEDIOS_PAGO_CONOCIDOS} value={form.medio_pago}
+                onChange={(evento) => poner('medio_pago', evento.target.value)} />
+            <AreaTexto etiqueta="Referencia (opcional)" name="observaciones" value={form.observaciones}
+                ayuda="Número de transferencia o consignación. Sale en el comprobante."
+                onChange={(evento) => poner('observaciones', evento.target.value)} />
+        </form>
+    );
+}
+
+/**
+ * `POST /api/pagos/cuentas-cobro`. Sin `inicio` el servicio cobra el periodo en
+ * curso; el `fin` lo calcula siempre él con el día de corte del contrato.
+ */
+function FormularioCobro({ contratos, error, onEnviar }) {
+    const [form, setForm] = useState({ id_contrato: '', valor: null, detalle: '', inicio: '' });
+    const [errores, setErrores] = useState({});
+
+    const poner = (nombre, valor) => {
+        setForm((actual) => ({ ...actual, [nombre]: valor }));
+        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+    };
+
+    /** El valor se propone con el canon del contrato elegido. */
+    const elegirContrato = (evento) => {
+        const id = evento.target.value;
+        const contrato = contratos.find((c) => c.id_contrato === id);
+        setForm((actual) => ({ ...actual, id_contrato: id, valor: contrato ? aDecimal(contrato.canon) : actual.valor }));
+        setErrores({});
+    };
+
+    const enviar = (evento) => {
+        evento.preventDefault();
+        const encontrados = {};
+        if (!form.id_contrato) encontrados.id_contrato = 'Elige el contrato.';
+        if (form.valor === null || !(Number(form.valor) > 0)) encontrados.valor = 'Escribe un valor mayor que cero.';
+        setErrores(encontrados);
+        if (Object.keys(encontrados).length === 0) onEnviar(form);
+    };
+
+    const opciones = contratos.map((c) => ({
+        valor: c.id_contrato, texto: [c.Inmueble?.direccion || 'Inmueble sin datos', ubicacionDe(c.Inmueble)].filter(Boolean).join(' · ')
+    }));
+
+    return (
+        <form id={ID_COBRO} onSubmit={enviar} noValidate className="flex flex-col gap-4">
+            <FormError error={error} />
+            <Select etiqueta="Contrato" vacio={contratos.length ? 'Selecciona…' : 'No tienes contratos activos'}
+                opciones={opciones} disabled={!contratos.length} value={form.id_contrato}
+                error={errores.id_contrato} onChange={elegirContrato} />
+            <Fila>
+                <MoneyField etiqueta="Valor" value={form.valor} error={errores.valor} onChange={(valor) => poner('valor', valor)} />
+                <DateField etiqueta="Inicio del periodo (opcional)" name="inicio" value={form.inicio}
+                    ayuda="Vacío: el periodo en curso." onChange={(valor) => poner('inicio', valor)} />
+            </Fila>
+            <Input etiqueta="Concepto (opcional)" name="detalle" value={form.detalle}
+                placeholder="Canon de arrendamiento del periodo"
+                onChange={(evento) => poner('detalle', evento.target.value)} />
+            <p className="m-0 text-xs text-texto-suave">El inquilino recibirá un aviso por correo con el cobro.</p>
+        </form>
+    );
+}
+
+// ── Pantalla ──────────────────────────────────────────────────────────────
+
+export default function Pagos() {
+    const sesion = useSesion();
+    const { esPropietario } = sesion;
+
+    const [cuentas, setCuentas] = useState([]);
+    const [cargando, setCargando] = useState(true);
+    const [errorCarga, setErrorCarga] = useState(null);
+    const [filtro, setFiltro] = useState('todos');
+    // { texto, idComprobante? }
+    const [aviso, setAviso] = useState(null);
+    const [errorDescarga, setErrorDescarga] = useState(null);
+
+    // { modo: 'pagar' | 'detalle', cuenta } | { modo: 'anular', cuenta, transaccion } | { modo: 'cobro' } | null
+    const [dialogo, setDialogo] = useState(null);
+    const [enviando, setEnviando] = useState(false);
+    const [errorDialogo, setErrorDialogo] = useState(null);
+    // Las del detalle abierto: `null` mientras cargan.
+    const [transacciones, setTransacciones] = useState(null);
+    // Contratos activos propios, para el cobro manual. `null` = no se pudieron cargar.
+    const [contratosPropios, setContratosPropios] = useState([]);
+
+    const cargar = useCallback(async () => {
+        setErrorCarga(null);
+        try {
+            const lista = await listarCuentasCobro();
+            // El servicio no ordena `GET /api/pagos`: el periodo más reciente primero.
+            setCuentas([...lista].sort((a, b) => String(b.inicio).localeCompare(String(a.inicio))));
+        } catch (error) {
+            setErrorCarga(error);
+        } finally {
+            setCargando(false);
+        }
+    }, []);
+
+    useEffect(() => { cargar(); }, [cargar]);
+
+    const filtroActivo = FILTROS.find((f) => f.clave === filtro);
+    const visibles = useMemo(() => cuentas.filter((c) => cumple(filtroActivo, c)), [cuentas, filtroActivo]);
+
+    const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
+    const cerrar = () => { if (!enviando) setDialogo(null); };
+
+    const descargar = async (accion) => {
+        setErrorDescarga(null);
+        try {
+            await accion();
+        } catch (error) {
+            setErrorDescarga(error);
+        }
+    };
+
+    const cargarTransacciones = async (cuenta) => {
+        setTransacciones(null);
+        try {
+            setTransacciones(await transaccionesDeCuenta(cuenta.id_cuenta_cobro));
+        } catch (error) {
+            setTransacciones([]);
+            setErrorDialogo(error);
+        }
+    };
+
+    const verDetalle = (cuenta) => {
+        abrir({ modo: 'detalle', cuenta });
+        cargarTransacciones(cuenta);
+    };
+
+    const abrirCobro = async () => {
+        abrir({ modo: 'cobro' });
+        try {
+            const contratos = await listarContratos();
+            setContratosPropios(contratos.filter((c) => c.estado === 'activo' && actuaComoPropietario(c, sesion)));
+        } catch (error) {
+            setContratosPropios(null);
+        }
+    };
+
+    /** Envuelve una escritura: bloquea el diálogo, recarga la lista y deja el error en el diálogo. */
+    const escribir = async (operacion) => {
+        setEnviando(true);
+        setErrorDialogo(null);
+        try {
+            await operacion();
+            await cargar();
+        } catch (error) {
+            setErrorDialogo(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    const pagar = (datos) => escribir(async () => {
+        const respuesta = await registrarPago(datos);
+        setDialogo(null);
+        setAviso({ texto: respuesta.mensaje || 'Pago registrado.', idComprobante: respuesta.transaccion?.id_transaccion });
+    });
+
+    const cobrar = (datos) => escribir(async () => {
+        await crearCuentaCobro(datos);
+        setDialogo(null);
+        setAviso({ texto: 'Cobro registrado. Se avisará al inquilino por correo.' });
+    });
+
+    /** Tras anular se vuelve al detalle con la cuenta que devuelve el servicio (su saldo, no uno calculado aquí). */
+    const anular = () => escribir(async () => {
+        const { cuenta, transaccion } = dialogo;
+        const respuesta = await anularTransaccion(transaccion.id_transaccion);
+        const actualizada = { ...cuenta, ...respuesta.cuenta_cobro };
+        setAviso({ texto: 'Transacción anulada. El saldo de la cuenta se recalculó.' });
+        setDialogo({ modo: 'detalle', cuenta: actualizada });
+        cargarTransacciones(actualizada);
+    });
+
+    const revisarMora = async () => {
+        setEnviando(true);
+        setErrorDescarga(null);
+        try {
+            const { pagos_actualizados: cuantas } = await verificarMora();
+            setAviso({ texto: cuantas ? `${cuantas} cuenta(s) pasaron a «En mora».` : 'Ninguna cuenta nueva en mora.' });
+            await cargar();
+        } catch (error) {
+            setErrorDescarga(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    const columnas = [
+        {
+            clave: 'mes', titulo: 'Mes',
+            render: (c) => (
+                <div className="whitespace-nowrap">
+                    <p className="m-0 text-sm text-texto first-letter:uppercase">{mesDe(c.inicio)}</p>
+                    <p className="m-0 mt-0.5 text-xs text-texto-suave">{formatearFecha(c.inicio)} – {formatearFecha(c.fin)}</p>
+                </div>
+            )
+        },
+        { clave: 'inmueble', titulo: 'Inmueble', render: (c) => <Inmueble cuenta={c} /> },
+        { clave: 'valor', titulo: 'Monto', alinear: 'derecha', render: (c) => formatearDinero(c.valor) },
+        { clave: 'saldo', titulo: 'Saldo', alinear: 'derecha', render: (c) => <Saldo cuenta={c} /> },
+        { clave: 'estado', titulo: 'Estado', render: (c) => <Badge estado={c.estado} /> },
+        {
+            clave: 'acciones', titulo: 'Acciones', alinear: 'derecha',
+            render: (c) => (
+                <div className="flex justify-end gap-1">
+                    {esPropia(c, sesion) && tieneSaldo(c) && (
+                        <Button tamano="pequeno" onClick={() => abrir({ modo: 'pagar', cuenta: c })}>Registrar</Button>
+                    )}
+                    <Button variante="fantasma" tamano="pequeno" onClick={() => verDetalle(c)}>
+                        {tieneSaldo(c) ? 'Detalle' : 'Ver comprobantes'}
+                    </Button>
+                </div>
+            )
+        }
+    ];
+
+    const columnasTransacciones = (cuenta) => [
+        { clave: 'fecha', titulo: 'Fecha', render: (t) => <span className="whitespace-nowrap">{formatearFechaHora(t.fecha_pago)}</span> },
+        {
+            clave: 'medio', titulo: 'Medio',
+            render: (t) => (
+                <div>
+                    <p className="m-0">{t.medio_pago || '—'}</p>
+                    {t.observaciones && <p className="m-0 mt-0.5 text-xs text-texto-suave break-all">{t.observaciones}</p>}
+                </div>
+            )
+        },
+        { clave: 'monto', titulo: 'Monto', alinear: 'derecha', render: (t) => <span className="whitespace-nowrap">{formatearDinero(t.monto)}</span> },
+        {
+            clave: 'saldo', titulo: 'Saldo impreso', alinear: 'derecha',
+            render: (t) => <span className="whitespace-nowrap text-texto-suave">{formatearDinero(t.saldo_restante_momento)}</span>
+        },
+        { clave: 'estado', titulo: 'Estado', render: (t) => <Badge estado={t.estado} /> },
+        {
+            clave: 'acciones', titulo: '', alinear: 'derecha',
+            render: (t) => (
+                <div className="flex justify-end gap-1">
+                    <Button variante="fantasma" tamano="pequeno" icono={Download}
+                        onClick={() => descargar(() => abrirComprobante(t.id_transaccion))}>Comprobante</Button>
+                    {esPropia(cuenta, sesion) && t.estado === 'CONFIRMADA' && (
+                        <Button variante="fantasma" tamano="pequeno"
+                            onClick={() => abrir({ modo: 'anular', cuenta, transaccion: t })}>Anular</Button>
+                    )}
+                </div>
+            )
+        }
+    ];
+
+    const titulo = esPropietario ? 'Gestión financiera' : 'Mis pagos';
+    const subtitulo = esPropietario
+        ? 'Control de cobros, pagos y comprobantes de transacciones.'
+        : 'Consulta tus cobros y descarga tus recibos y comprobantes.';
+
+    const cuenta = dialogo?.cuenta;
+
+    return (
+        <div className="flex flex-col gap-6">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h1 className="m-0 text-2xl font-medium text-texto">{titulo}</h1>
+                    <p className="m-0 mt-1 text-sm text-texto-suave">{subtitulo}</p>
+                </div>
+                {esPropietario && (
+                    <div className="flex flex-wrap gap-2">
+                        <Button variante="secundario" icono={ShieldAlert} onClick={revisarMora} cargando={enviando && !dialogo}>
+                            Verificar mora
+                        </Button>
+                        <Button icono={Plus} onClick={abrirCobro}>Nuevo cobro</Button>
+                    </div>
+                )}
+            </header>
+
+            {aviso && (
+                <div aria-live="polite" className="flex flex-wrap items-center gap-3 text-sm text-texto-suave">
+                    <span>{aviso.texto}</span>
+                    {aviso.idComprobante && (
+                        <Button variante="secundario" tamano="pequeno" icono={Download}
+                            onClick={() => descargar(() => abrirComprobante(aviso.idComprobante))}>
+                            Descargar comprobante
+                        </Button>
+                    )}
+                </div>
+            )}
+            <FormError error={errorDescarga} />
+
+            <div role="tablist" aria-label="Filtrar por estado" className="flex flex-wrap gap-2">
+                {FILTROS.map((f) => {
+                    const activo = f.clave === filtro;
+                    return (
+                        <button key={f.clave} type="button" role="tab" aria-selected={activo} onClick={() => setFiltro(f.clave)}
+                            className={unir(
+                                'h-8 px-3 m-0 text-xs font-medium font-sans rounded-control border border-solid cursor-pointer',
+                                activo ? 'bg-indigo-medio border-indigo-medio text-white' : unir('bg-superficie border-borde', f.tono)
+                            )}>
+                            {f.texto} ({cuentas.filter((c) => cumple(f, c)).length})
+                        </button>
+                    );
+                })}
+            </div>
+
+            {errorCarga ? (
+                <div className="flex flex-col items-start gap-3">
+                    <FormError error={errorCarga} className="w-full box-border" />
+                    <Button variante="secundario" onClick={() => { setCargando(true); cargar(); }}>Reintentar</Button>
+                </div>
+            ) : (
+                <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                    <Table
+                        columnas={columnas}
+                        filas={visibles}
+                        claveFila="id_cuenta_cobro"
+                        cargando={cargando}
+                        vacio={
+                            <EmptyState
+                                icono={Receipt}
+                                titulo={filtro === 'todos' ? 'Aún no hay cobros' : `No hay cobros en «${filtroActivo.texto}»`}
+                                descripcion={filtro === 'todos'
+                                    ? (esPropietario
+                                        ? 'El primer cobro de un contrato se genera al firmarlo; los siguientes, cada mes.'
+                                        : 'Cuando tu arrendador genere un cobro, aparecerá aquí.')
+                                    : 'Prueba con otro filtro.'}
+                            />
+                        }
+                    />
+                </div>
+            )}
+
+            <Modal
+                abierto={dialogo?.modo === 'pagar'}
+                onCerrar={cerrar}
+                titulo="Registrar pago"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button type="submit" form={ID_PAGO} cargando={enviando}>Registrar pago</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'pagar' && <FormularioPago cuenta={cuenta} error={errorDialogo} onEnviar={pagar} />}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'cobro'}
+                onCerrar={cerrar}
+                titulo="Nuevo cobro"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button type="submit" form={ID_COBRO} cargando={enviando}>Registrar cobro</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'cobro' && (
+                    <div className="flex flex-col gap-4">
+                        {contratosPropios === null && <FormError error="No se pudieron cargar tus contratos. Cierra e inténtalo de nuevo." />}
+                        <FormularioCobro contratos={contratosPropios || []} error={errorDialogo} onEnviar={cobrar} />
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'detalle'}
+                onCerrar={cerrar}
+                titulo="Detalle del cobro"
+                ancho="max-w-5xl"
+                acciones={
+                    <>
+                        <Button variante="secundario" icono={FileText}
+                            onClick={() => descargar(() => abrirRecibo(cuenta.id_cuenta_cobro))}>Recibo</Button>
+                        {cuenta && esPropia(cuenta, sesion) && tieneSaldo(cuenta) && (
+                            <Button onClick={() => abrir({ modo: 'pagar', cuenta })}>Registrar pago</Button>
+                        )}
+                    </>
+                }
+            >
+                {dialogo?.modo === 'detalle' && (
+                    <div className="flex flex-col gap-4">
+                        <FormError error={errorDialogo || errorDescarga} />
+                        <div className="flex flex-wrap gap-6 bg-lavanda rounded-control p-4">
+                            <Dato titulo="Inmueble">{cuenta.Contrato?.Inmueble?.direccion || '—'}</Dato>
+                            <Dato titulo="Periodo">{formatearFecha(cuenta.inicio)} – {formatearFecha(cuenta.fin)}</Dato>
+                            <Dato titulo="Valor">{formatearDinero(cuenta.valor)}</Dato>
+                            <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>
+                            <Dato titulo="Estado"><Badge estado={cuenta.estado} /></Dato>
+                        </div>
+                        {cuenta.detalle && <p className="m-0 text-sm text-texto-suave">{cuenta.detalle}</p>}
+                        <Table
+                            columnas={columnasTransacciones(cuenta)}
+                            filas={transacciones || []}
+                            claveFila="id_transaccion"
+                            cargando={transacciones === null}
+                            vacio={<p className="m-0 py-6 text-center text-sm text-texto-suave">Aún no hay pagos registrados en este cobro.</p>}
+                        />
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'anular'}
+                onCerrar={() => { if (!enviando) setDialogo({ modo: 'detalle', cuenta }); }}
+                titulo="Anular transacción"
+                acciones={
+                    <>
+                        <Button variante="secundario" disabled={enviando}
+                            onClick={() => setDialogo({ modo: 'detalle', cuenta })}>Volver</Button>
+                        <Button onClick={anular} cargando={enviando}>Anular</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'anular' && (
+                    <div className="flex flex-col gap-3 text-sm text-texto">
+                        <FormError error={errorDialogo} />
+                        <p className="m-0">
+                            ¿Anular el pago de <span className="font-medium">{formatearDinero(dialogo.transaccion.monto)}</span> del{' '}
+                            {formatearFechaHora(dialogo.transaccion.fecha_pago)}
+                            {dialogo.transaccion.medio_pago ? ` (${dialogo.transaccion.medio_pago})` : ''}?
+                        </p>
+                        <p className="m-0 text-texto-suave">
+                            No se borra: queda marcado como anulado y el saldo del cobro se recalcula. El comprobante
+                            ya emitido conserva el saldo que imprimió. Esta acción no se puede deshacer.
+                        </p>
+                    </div>
+                )}
+            </Modal>
+        </div>
+    );
+}
+
