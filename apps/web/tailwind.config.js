@@ -44,8 +44,9 @@ module.exports = {
       app: 'var(--radio-app)',
       full: '9999px',
     },
-    // Sin sombras ni degradados: no se generan las utilidades.
-    boxShadow: {},
+    // Sin sombras ni degradados. La única utilidad es `shadow-none`, que anula
+    // la sombra heredada de App.css.
+    boxShadow: { none: 'none' },
     backgroundImage: {},
     extend: {
       letterSpacing: { label: '0.45px' },
