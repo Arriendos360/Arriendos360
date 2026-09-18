@@ -29,7 +29,9 @@ const Logo = () => (
  * Armazón de las pantallas autenticadas: barra lateral y contenido.
  *
  * La barra se arma con `roles` del claim (ver `navegacion.js`). En pantallas
- * angostas se pliega bajo un botón de menú.
+ * angostas se pliega bajo un botón de menú. En las anchas la barra es `sticky`
+ * y el contenedor NO recorta (`overflow-hidden`): recortar ocultaba las tablas
+ * anchas y anulaba el `sticky`; lo ancho se desplaza dentro de `main`.
  */
 export default function Layout({ children }) {
     const navigate = useNavigate();
@@ -60,8 +62,8 @@ export default function Layout({ children }) {
 
     return (
         <div className="box-border min-h-screen bg-lavanda font-sans text-texto md:p-4">
-            <div className="flex flex-col md:flex-row min-h-screen md:min-h-[calc(100vh-2rem)] bg-lavanda md:border md:border-solid md:border-borde md:rounded-app overflow-hidden">
-                <aside className="flex flex-col shrink-0 md:w-60 bg-indigo-profundo px-4 py-4 md:py-6">
+            <div className="flex flex-col md:flex-row min-h-screen md:min-h-[calc(100vh-2rem)] bg-lavanda md:border md:border-solid md:border-borde md:rounded-app">
+                <aside className="flex flex-col shrink-0 md:w-60 bg-indigo-profundo px-4 py-4 md:py-6 md:sticky md:top-4 md:self-start md:h-[calc(100vh-2rem)] md:box-border md:overflow-y-auto md:rounded-l-app">
                     <div className="flex items-center justify-between">
                         <Logo />
                         <button
@@ -110,7 +112,7 @@ export default function Layout({ children }) {
                     </div>
                 </aside>
 
-                <main className="flex-1 min-w-0 p-4 md:p-8">{children}</main>
+                <main className="flex-1 min-w-0 overflow-x-auto p-4 md:p-8">{children}</main>
             </div>
         </div>
     );
