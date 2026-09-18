@@ -1,0 +1,118 @@
+/**
+ * Lo que estas pruebas cuidan son los cuerpos: que cada capa hable con los
+ * nombres y tipos del Capítulo 2. El cliente HTTP se sustituye entero —la red y
+ * la seguridad de `services/api.js` no son de esta capa—.
+ */
+
+import { crearInmueble, eliminarInmueble } from './inmuebles/api';
+import { crearContrato, subirAnexo } from './contratos/api';
+import { anularTransaccion, crearCuentaCobro, registrarPago } from './pagos/api';
+import { buscarPorDocumento, crearInquilino } from './usuarios/api';
+import { montoParaEnviar, soloCampos } from './comun';
+import api from '../services/api';
+
+jest.mock('../services/api', () => ({
+    __esModule: true,
+    default: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() }
+}));
+
+jest.mock('../services/descargas', () => ({ abrirPdf: jest.fn(), descargarPdf: jest.fn() }));
+
+beforeEach(() => {
+    jest.clearAllMocks();
+    for (const metodo of ['get', 'post', 'put', 'delete']) api[metodo].mockResolvedValue({ data: { ok: true } });
+});
+
+describe('comun', () => {
+    test('montoParaEnviar convierte el texto decimal justo al enviar', () => {
+        expect(montoParaEnviar('1500000.5')).toBe(1500000.5);
+        expect(montoParaEnviar('1500000')).toBe(1500000);
+        expect(montoParaEnviar('')).toBeUndefined();
+        expect(montoParaEnviar('abc')).toBeUndefined();
+    });
+
+    test('soloCampos recorta, quita vacíos y lo que no está en la lista', () => {
+        expect(soloCampos({ a: ' x ', b: '', c: null, d: 0, e: 'fuera' }, ['a', 'b', 'c', 'd'])).toEqual({ a: 'x', d: 0 });
+    });
+});
+
+test('devuelve el cuerpo, no la respuesta de axios', async () => {
+    await expect(eliminarInmueble('i1')).resolves.toEqual({ ok: true });
+});
+
+test('inmuebles manda sólo los campos canónicos', async () => {
+    await crearInmueble({
+        alias: 'Apto 301', direccion: 'Calle 10 # 45-20', ciudad: 'Bogotá D.C.', tipo: 'apartamento',
+        descripcion: '', id_propietario: 'otro', estado: 'arrendado', municipio: 'viejo'
+    });
+
+    expect(api.post).toHaveBeenCalledWith('/inmuebles', {
+        alias: 'Apto 301', direccion: 'Calle 10 # 45-20', ciudad: 'Bogotá D.C.', tipo: 'apartamento'
+    });
+});
+
+test('el contrato va en JSON, con el día límite entero y el canon numérico', async () => {
+    await crearContrato({
+        id_inmueble: 'i1', id_inquilino: 'u1', inicio: '2026-10-01', fin: '2027-09-30',
+        fecha_inicio_corte: '2026-10-01', fecha_limite_pago: '5', canon: '1500000',
+        nombre_deudor_solidario: '', documento_deudor_solidario: ''
+    });
+
+    const [ruta, enviado] = api.post.mock.calls[0];
+    expect(ruta).toBe('/contratos');
+    expect(enviado).not.toBeInstanceOf(FormData);
+    expect(enviado).toEqual({
+        id_inmueble: 'i1', id_inquilino: 'u1', inicio: '2026-10-01', fin: '2027-09-30',
+        fecha_inicio_corte: '2026-10-01', fecha_limite_pago: 5, canon: 1500000
+    });
+});
+
+test('sin día límite, no se manda: lo deriva el servicio', async () => {
+    await crearContrato({ id_inmueble: 'i1', id_inquilino: 'u1', inicio: '2026-10-01', fin: '2027-09-30', canon: '1', fecha_limite_pago: '' });
+    expect(api.post.mock.calls[0][1]).not.toHaveProperty('fecha_limite_pago');
+});
+
+test('el anexo va en multipart con `file` y `tipo`', async () => {
+    const archivo = new File(['%PDF-1.4'], 'firmado.pdf', { type: 'application/pdf' });
+    await subirAnexo('c1', { archivo, tipo: ' OTROSI ' });
+
+    const [ruta, formulario] = api.post.mock.calls[0];
+    expect(ruta).toBe('/contratos/c1/anexos');
+    expect(formulario.get('file')).toBeInstanceOf(File);
+    expect(formulario.get('tipo')).toBe('OTROSI');
+});
+
+test('un pago lleva tipo INGRESO aparte del medio de pago', async () => {
+    await registrarPago({ id_cuenta_cobro: 'cc1', monto: '750000', medio_pago: 'TRANSFERENCIA', observaciones: 'Ref 123', tipo: 'EGRESO' });
+
+    expect(api.post).toHaveBeenCalledWith('/pagos', {
+        id_cuenta_cobro: 'cc1', medio_pago: 'TRANSFERENCIA', observaciones: 'Ref 123', tipo: 'INGRESO', monto: 750000
+    });
+});
+
+test('el cobro manual manda el valor como número', async () => {
+    await crearCuentaCobro({ id_contrato: 'c1', valor: '1500000', detalle: 'Canon octubre' });
+    expect(api.post).toHaveBeenCalledWith('/pagos/cuentas-cobro', { id_contrato: 'c1', detalle: 'Canon octubre', valor: 1500000 });
+});
+
+test('anular no manda cuerpo', async () => {
+    await anularTransaccion('t1');
+    expect(api.post).toHaveBeenCalledWith('/pagos/transacciones/t1/anular');
+});
+
+describe('usuarios', () => {
+    test('un documento sin dueño es null, no un error', async () => {
+        api.get.mockRejectedValueOnce({ response: { status: 404 } });
+        await expect(buscarPorDocumento('123')).resolves.toBeNull();
+    });
+
+    test('otros errores suben', async () => {
+        api.get.mockRejectedValueOnce({ response: { status: 502 } });
+        await expect(buscarPorDocumento('123')).rejects.toEqual({ response: { status: 502 } });
+    });
+
+    test('el alta de inquilino no manda contraseña', async () => {
+        await crearInquilino({ nombres: 'Ana', apellidos: 'Ruiz', email: 'a@b.co', documento: '1', contrasena: 'x' });
+        expect(api.post.mock.calls[0][1]).not.toHaveProperty('contrasena');
+    });
+});
