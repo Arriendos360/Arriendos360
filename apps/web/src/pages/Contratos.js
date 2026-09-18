@@ -378,10 +378,11 @@ export default function Contratos() {
         }
     ].filter(Boolean);
 
-    const titulo = esPropietario ? 'Contratos de arrendamiento' : 'Mis contratos';
+    // Mismo nombre que la entrada del menú (shell/navegacion.js): «Mi contrato» sólo para quien es sólo inquilino.
+    const titulo = esPropietario ? 'Contratos de arrendamiento' : 'Mi contrato';
     const subtitulo = esPropietario
         ? 'Gestiona los contratos de tus inmuebles.'
-        : 'Consulta tus contratos y descarga sus anexos.';
+        : 'Consulta tu contrato y descarga sus anexos.';
 
     return (
         <div className="flex flex-col gap-6">

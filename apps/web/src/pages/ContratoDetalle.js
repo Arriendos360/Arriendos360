@@ -264,7 +264,7 @@ export default function ContratoDetalle() {
 
     const volver = (
         <Link to="/contratos" className="inline-flex items-center gap-1 text-sm text-indigo-medio no-underline hover:underline">
-            <ArrowLeft size={16} aria-hidden="true" /> Contratos
+            <ArrowLeft size={16} aria-hidden="true" /> {sesion.esPropietario ? 'Contratos' : 'Mi contrato'}
         </Link>
     );
 
