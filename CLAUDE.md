@@ -38,7 +38,7 @@ Azure**, con su despliegue automatizado. Ver «Despliegue en Azure» y `docs/des
 | `ms-financiero` | Core | 3014 | `financiero`: Cuentas_cobro, Transacciones | `/api/pagos` (comprobantes, anulación) y el motor. Consume y produce. |
 | `ms-notificaciones` | Genérico | 3015 | `notificaciones`: ninguna (sólo `envios`, outbox de correos) | Sin API pública: sólo `POST /interno/eventos`. **Único que habla SMTP.** |
 | `gateway` | — | 3001 | **ninguna** | Todo `/api/*`; atiende él mismo `/api/dashboard`. |
-| `web` | — | 3000 | — | React 18 con CRA, sin Tailwind. |
+| `web` | — | 3000 | — | React 18 con CRA y Tailwind v3; marca en `src/ui/marca.md`. |
 
 Servicios en TypeScript `strict`. Cada productor tiene su tabla de salida y cada
 consumidor su `eventos_procesados`, en su esquema.
@@ -588,8 +588,8 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
   despliegue: el token vive en memoria (Capa 1, `apps/web/src/auth/sesion.js`). Lo que el
   corte 5 arregló es otra cosa —que la recarga diera 404 en Static Web Apps—, y ya no pasa.
 - **CRA** ya no recibe mantenimiento: migrar a Vite es barato, no urgente.
-- **Tailwind está en el PMP pero no instalado**: instálalo si rehaces estilos, o registra
-  el cambio en control de configuración.
+- **Tailwind v3 convive con `App.css`** hasta el revamp: su *preflight* está apagado en
+  `apps/web/tailwind.config.js` para no desarmar las páginas viejas. Encenderlo al borrarlas.
 
 ## Qué no hacer
 
