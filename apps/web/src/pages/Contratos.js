@@ -1,522 +1,480 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Plus, X, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
+import { FileText, Plus, Search, UserPlus } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
-import api from '../services/api';
+import { crearContrato, finalizarContrato, listarContratos } from '../features/contratos/api';
+import {
+    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, ubicacionDe, vigencia
+} from '../features/contratos/piezas';
+import { listarInmuebles } from '../features/inmuebles/api';
+import { buscarPorDocumento, crearInquilino } from '../features/usuarios/api';
+import {
+    Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table, formatearDinero
+} from '../ui';
 
 /**
- * Estados de contrato.
+ * UI de Contratos (mockup docs/mockups/contratos.png): la lista, el alta y la
+ * finalización.
  *
- * Eran los enteros 1, 2 y 3, traducidos aqui con un ternario anidado que
- * duplicaba un mapa que tambien vivia en el backend. Ahora la API devuelve el
- * valor del catalogo y esto solo pone la etiqueta que se pinta.
+ * El alta sigue el endpoint real (ver `features/contratos/api.js`): el inquilino
+ * se busca por documento porque `id_inquilino` es un UUID que nadie teclea, y si
+ * no existe se le da de alta aquí mismo. Su contraseña temporal sale una sola vez
+ * (docs/adr/0007) y se muestra al terminar.
+ *
+ * Las acciones de propietario dependen del contrato y no sólo del rol: quien
+ * tiene los dos roles es inquilino en algunos (`actuaComoPropietario`).
+ *
+ * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
+ * a Tailwind hasta el paso 6.
  */
-const ESTADO_ACTIVO = 'activo';
 
-const ETIQUETA_ESTADO = {
-    activo: 'Activo',
-    finalizado: 'Finalizado',
-    cancelado: 'Cancelado'
+const FORM_VACIO = {
+    id_inmueble: '', documento: '', inicio: '', fin: '', canon: null, fecha_limite_pago: '',
+    fecha_inicio_corte: '', info_contrato: '', nombre_deudor_solidario: '', documento_deudor_solidario: ''
 };
 
+const ALTA_VACIA = { nombres: '', apellidos: '', email: '', telefono: '' };
+
+/** Día del mes de una fecha `YYYY-MM-DD`, leído del texto: `new Date()` lo correría a la víspera. */
+const diaDe = (fecha) => (/^\d{4}-\d{2}-\d{2}$/.test(fecha) ? String(Number(fecha.slice(8, 10))) : '');
+
 /**
- * Dia del mes que sugiere una fecha `YYYY-MM-DD`, como cadena para el <input>.
- *
- * Se corta la cadena en vez de usar `new Date(valor).getDate()`: eso ultimo
- * interpreta la fecha como medianoche UTC y en Bogota devuelve el dia anterior.
+ * Errores por campo, o `{}`. El servicio valida fechas, canon y día límite, pero
+ * responde uno a la vez; aquí se señalan todos juntos.
  */
-const diaLimiteSugerido = (fecha) => (fecha ? String(Number(fecha.slice(8, 10))) : '');
+function validar(form, inquilino) {
+    const errores = {};
+    if (!form.id_inmueble) errores.id_inmueble = 'Elige el inmueble.';
+    if (!inquilino) errores.documento = 'Busca al inquilino por su documento.';
+    if (!form.inicio) errores.inicio = 'Indica la fecha de inicio.';
+    if (!form.fin) errores.fin = 'Indica la fecha de fin.';
+    else if (form.inicio && form.fin <= form.inicio) errores.fin = 'Debe ser posterior al inicio.';
+    if (form.canon === null || !(Number(form.canon) > 0)) errores.canon = 'Escribe un canon mayor que cero.';
+    const dia = form.fecha_limite_pago.trim();
+    if (dia && !(/^\d{1,2}$/.test(dia) && Number(dia) >= 1 && Number(dia) <= 31)) {
+        errores.fecha_limite_pago = 'Un día del mes, de 1 a 31.';
+    }
+    return errores;
+}
 
-const Contratos = () => {
-    const { esPropietario } = useSesion();
-    const [contratos, setContratos] = useState([]);
-    const [inmuebles, setInmuebles] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showForm, setShowForm] = useState(false);
-    
-    // Toast state
-    const [toast, setToast] = useState(null);
+function validarAlta(alta) {
+    const errores = {};
+    if (!alta.nombres.trim()) errores.nombres = 'Obligatorio.';
+    if (!alta.apellidos.trim()) errores.apellidos = 'Obligatorio.';
+    if (!/^\S+@\S+\.\S+$/.test(alta.email.trim())) errores.email = 'Escribe un correo válido.';
+    return errores;
+}
 
-    // Form state
-    const [idInmueble, setIdInmueble] = useState('');
-    // Lo que el propietario teclea es la CÉDULA. El contrato necesita el UUID
-    // del usuario, así que hay que traducirlo antes de enviar.
-    const [documentoInquilino, setDocumentoInquilino] = useState('');
-    const [inicio, setInicio] = useState('');
-    const [fin, setFin] = useState('');
-    const [canon, setCanon] = useState('');
-    // Dia del mes en que vence el pago. Se sugiere desde el inicio y se puede
-    // cambiar: el ciclo de facturacion no tiene por que coincidir con la firma.
-    // Cadena y no numero porque es el valor de un <input>.
-    const [diaLimitePago, setDiaLimitePago] = useState('');
-    const [nombreDeudor, setNombreDeudor] = useState('');
-    const [documentoDeudor, setDocumentoDeudor] = useState('');
+const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
 
-    // Tenant Modal state
-    const [showTenantModal, setShowTenantModal] = useState(false);
-    // La temporal que devuelve ms-identidad, para mostrarla UNA vez.
-    const [contrasenaTemporal, setContrasenaTemporal] = useState(null);
-    const [tenantData, setTenantData] = useState({
-        nombres: '',
-        apellidos: '',
-        email: '',
-        telefono: ''
+const Seccion = ({ titulo, children }) => (
+    <fieldset className="flex flex-col gap-4 m-0 p-0 border-0">
+        <legend className="p-0 mb-3 text-sm font-medium text-texto">{titulo}</legend>
+        {children}
+    </fieldset>
+);
+
+/**
+ * El botón de envío vive en el pie del modal: `form={idFormulario}` lo enlaza.
+ * El alta del inquilino no es un <form> anidado sino botones sueltos.
+ */
+function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormulario }) {
+    const [form, setForm] = useState(FORM_VACIO);
+    const [errores, setErrores] = useState({});
+    // null | { id, nombre }
+    const [inquilino, setInquilino] = useState(null);
+    // 'inicial' | 'buscando' | 'no-existe' | 'registrando'
+    const [busqueda, setBusqueda] = useState('inicial');
+    const [errorInquilino, setErrorInquilino] = useState(null);
+    const [alta, setAlta] = useState(ALTA_VACIA);
+    const [erroresAlta, setErroresAlta] = useState({});
+    const [contrasena, setContrasena] = useState(null);
+
+    const poner = (nombre, valor) => {
+        setForm((actual) => ({ ...actual, [nombre]: valor }));
+        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+    };
+    const campo = (nombre) => ({
+        name: nombre, value: form[nombre], error: errores[nombre],
+        onChange: (evento) => poner(nombre, evento.target.value)
     });
 
-    // Carga una vez al montar; `fetchData` se recrea en cada render.
-    useEffect(() => {
-        fetchData();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const showNotify = (mensaje, tipo = 'error') => {
-        setToast({ mensaje, tipo });
-        setTimeout(() => setToast(null), 4000);
-    };
-
-    /**
-     * Carga lo que esta pantalla necesita, que NO es lo mismo para los dos roles.
-     *
-     * El listado de inmuebles disponibles sólo alimenta el formulario de alta de
-     * contrato, y ese formulario únicamente se renderiza para el propietario. Un
-     * inquilino no tiene por qué pedirlo — y de hecho no puede: la matriz RBAC
-     * declara todo `/api/inmuebles` como PROPIETARIO y responde 403.
-     *
-     * Pedirlo igualmente rompía la pantalla entera. Al ir dentro de un
-     * `Promise.all`, el 403 rechazaba la promesa combinada, así que el inquilino
-     * veía «Error al cargar datos del servidor» y una lista vacía, aunque su
-     * contrato se hubiera cargado correctamente. El problema no era el 403: era
-     * pedir algo que no le corresponde y dejar que su denegación se llevara por
-     * delante lo que sí.
-     */
-    const fetchData = async () => {
-        setLoading(true);
-        try {
-            const contratosRes = await api.get('/contratos');
-            setContratos(contratosRes.data);
-
-            if (esPropietario) {
-                const inmueblesRes = await api.get('/inmuebles');
-                setInmuebles(inmueblesRes.data.filter(i => i.estado === 'disponible'));
-            }
-        } catch (error) {
-            showNotify('Error al cargar datos del servidor');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    /**
-     * Traduce la cédula tecleada al UUID del usuario.
-     *
-     * Con identificadores enteros la cédula ERA la clave del inquilino y se
-     * mandaba tal cual. Ahora `Contratos.id_inquilino` guarda un UUID que nadie
-     * teclea, así que hace falta este paso intermedio. Devuelve `null` si esa
-     * persona todavía no está registrada, que es la señal para abrir el modal.
-     */
-    const buscarInquilino = async (documento) => {
-        try {
-            const respuesta = await api.get('/usuarios', { params: { documento } });
-            return respuesta.data.id;
-        } catch (error) {
-            if (error.response?.status === 404) return null;
-            throw error;
-        }
-    };
-
-    const enviarContrato = async (idInquilino) => {
-        const formData = new FormData();
-        formData.append('id_inmueble', idInmueble);
-        formData.append('id_inquilino', idInquilino);
-        formData.append('inicio', inicio);
-        formData.append('fin', fin);
-        formData.append('canon', canon);
-        if (diaLimitePago) formData.append('fecha_limite_pago', diaLimitePago);
-        // Los del codeudor solo se mandan si se llenaron: no todo arriendo lo tiene,
-        // y mandar cadenas vacias guardaria un codeudor sin nombre.
-        if (nombreDeudor.trim()) formData.append('nombre_deudor_solidario', nombreDeudor.trim());
-        if (documentoDeudor.trim()) {
-            formData.append('documento_deudor_solidario', documentoDeudor.trim());
-        }
-
-        await api.post('/contratos', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-        });
-
-        setShowForm(false);
-        resetForm();
-        fetchData();
-        showNotify('Contrato creado exitosamente', 'success');
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-
-        if (new Date(fin) <= new Date(inicio)) {
-            showNotify('La fecha de fin debe ser posterior a la de inicio');
-            return;
-        }
-
-        if (parseFloat(canon) <= 0) {
-            showNotify('El canon debe ser mayor a cero');
-            return;
-        }
-
-        try {
-            const idInquilino = await buscarInquilino(documentoInquilino);
-
-            if (!idInquilino) {
-                // No existe: se pide el alta antes de poder firmar.
-                setShowTenantModal(true);
-                return;
-            }
-
-            await enviarContrato(idInquilino);
-        } catch (error) {
-            showNotify(error.response?.data?.mensaje || 'Error al procesar el contrato');
-        }
-    };
-
-    const handleCreateTenant = async (e) => {
-        e.preventDefault();
-        try {
-            // Alta de inquilino: ruta propia y autenticada. La contraseña NO se
-            // manda: la genera ms-identidad y la devuelve una sola vez, para que
-            // el propietario se la entregue al inquilino por fuera del sistema.
-            // Antes se usaba la cédula, que no es un secreto. Ver docs/adr/0007.
-            const respuesta = await api.post('/usuarios/inquilinos', {
-                ...tenantData,
-                documento: documentoInquilino
-            });
-
-            setShowTenantModal(false);
-            setContrasenaTemporal(respuesta.data.contrasena_temporal);
-
-            // Ya tenemos su UUID, así que el contrato sale sin volver a buscar.
-            await enviarContrato(respuesta.data.usuario.id);
-        } catch (error) {
-            showNotify(error.response?.data?.mensaje || 'Error al registrar inquilino');
-        }
-    };
-
-    /**
-     * Cambiar el inicio sugiere el dia limite de pago.
-     *
-     * Solo SUGIERE: en cuanto el propietario escribe uno propio, deja de
-     * pisarselo. La alternativa —recalcularlo siempre— haria imposible pactar
-     * un dia distinto del de la firma, que es justamente lo que la columna
-     * permite ahora que existe.
-     *
-     * El dia se lee de la cadena `YYYY-MM-DD`, no de `new Date(...).getDate()`:
-     * eso ultimo interpreta la fecha como medianoche UTC y en Bogota devolveria
-     * el dia anterior.
-     */
+    /** El día límite se sugiere desde el inicio hasta que el propietario escribe otro. */
     const cambiarInicio = (valor) => {
-        setInicio(valor);
+        setForm((actual) => {
+            const sugeridoAntes = diaDe(actual.inicio);
+            const limite = !actual.fecha_limite_pago || actual.fecha_limite_pago === sugeridoAntes
+                ? diaDe(valor) : actual.fecha_limite_pago;
+            return { ...actual, inicio: valor, fecha_limite_pago: limite };
+        });
+        setErrores((actuales) => ({ ...actuales, inicio: undefined, fecha_limite_pago: undefined }));
+    };
 
-        const sugerido = diaLimiteSugerido(inicio);
-        if (!diaLimitePago || diaLimitePago === sugerido) {
-            setDiaLimitePago(diaLimiteSugerido(valor));
+    const cambiarDocumento = (evento) => {
+        poner('documento', evento.target.value);
+        if (!contrasena) {
+            setInquilino(null);
+            setBusqueda('inicial');
+        }
+        setErrorInquilino(null);
+    };
+
+    const buscar = async () => {
+        const documento = form.documento.trim();
+        if (!documento) {
+            setErrores((actuales) => ({ ...actuales, documento: 'Escribe el documento.' }));
+            return;
+        }
+        setBusqueda('buscando');
+        setErrorInquilino(null);
+        try {
+            const persona = await buscarPorDocumento(documento);
+            if (persona) {
+                setInquilino({ id: persona.id, nombre: nombreDe(persona) });
+                setBusqueda('inicial');
+            } else {
+                setInquilino(null);
+                setBusqueda('no-existe');
+            }
+        } catch (fallo) {
+            setErrorInquilino(fallo);
+            setBusqueda('inicial');
         }
     };
 
-    const resetForm = () => {
-        setIdInmueble('');
-        setDocumentoInquilino('');
-        setInicio('');
-        setFin('');
-        setCanon('');
-        setDiaLimitePago('');
-        setNombreDeudor('');
-        setDocumentoDeudor('');
+    const registrar = async () => {
+        const encontrados = validarAlta(alta);
+        setErroresAlta(encontrados);
+        if (Object.keys(encontrados).length > 0) return;
+        setBusqueda('registrando');
+        setErrorInquilino(null);
+        try {
+            const respuesta = await crearInquilino({ ...alta, documento: form.documento });
+            const nombre = nombreDe(respuesta.usuario);
+            setInquilino({ id: respuesta.usuario.id, nombre });
+            setContrasena({ contrasena: respuesta.contrasena_temporal, persona: nombre });
+            onContrasena({ contrasena: respuesta.contrasena_temporal, persona: nombre });
+            setBusqueda('inicial');
+        } catch (fallo) {
+            setErrorInquilino(fallo);
+            setBusqueda('no-existe');
+        }
     };
 
-    const formatDate = (dateString) => {
-        if (!dateString) return 'N/A';
-        // Forzamos que la fecha se interprete en UTC para evitar saltos de día por zona horaria
-        const date = new Date(dateString);
-        return date.toLocaleDateString('es-CO', { timeZone: 'UTC' });
+    const enviar = (evento) => {
+        evento.preventDefault();
+        const encontrados = validar(form, inquilino);
+        setErrores(encontrados);
+        // `documento` no viaja: la capa de datos recorta a `CAMPOS_CONTRATO`.
+        if (Object.keys(encontrados).length === 0) onEnviar({ ...form, id_inquilino: inquilino.id });
     };
 
-    if (loading) return <div style={{ padding: '2rem', textAlign: 'center' }}>Cargando datos...</div>;
+    const campoAlta = (nombre) => ({
+        name: nombre, value: alta[nombre], error: erroresAlta[nombre],
+        onChange: (evento) => {
+            setAlta((actual) => ({ ...actual, [nombre]: evento.target.value }));
+            setErroresAlta((actuales) => ({ ...actuales, [nombre]: undefined }));
+        }
+    });
+
+    const opcionesInmueble = inmuebles.map((i) => ({
+        valor: i.id_inmueble, texto: [i.direccion, ubicacionDe(i)].filter(Boolean).join(' · ')
+    }));
 
     return (
-        <div style={{ position: 'relative' }}>
-            {/* Toast System */}
-            {toast && (
-                <div style={{
-                    position: 'fixed', top: '20px', right: '20px', zIndex: 9999,
-                    background: toast.tipo === 'success' ? '#059669' : '#ef4444',
-                    color: 'white', padding: '1rem 1.5rem', borderRadius: '0.5rem',
-                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
-                    animation: 'slideIn 0.3s ease-out'
-                }}>
-                    {toast.tipo === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
-                    <span style={{ fontWeight: '500' }}>{toast.mensaje}</span>
+        <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-6">
+            <FormError error={error} />
+
+            <Seccion titulo="Inmueble e inquilino">
+                <Select etiqueta="Inmueble" vacio={inmuebles.length ? 'Selecciona…' : 'No tienes inmuebles disponibles'}
+                    opciones={opcionesInmueble} disabled={!inmuebles.length} {...campo('id_inmueble')} />
+
+                <div>
+                    <div className="flex items-end gap-2">
+                        <Input etiqueta="Documento del inquilino" className="flex-1" inputMode="numeric" autoComplete="off"
+                            {...campo('documento')} error={undefined} onChange={cambiarDocumento} readOnly={Boolean(contrasena)}
+                            onKeyDown={(evento) => { if (evento.key === 'Enter') { evento.preventDefault(); buscar(); } }} />
+                        {!contrasena && (
+                            <Button variante="secundario" icono={Search} onClick={buscar} cargando={busqueda === 'buscando'}>Buscar</Button>
+                        )}
+                    </div>
+                    {errores.documento && <p role="alert" className="m-0 mt-1 text-xs text-rojo-texto">{errores.documento}</p>}
+                </div>
+                <FormError error={errorInquilino} />
+
+                {inquilino && (
+                    <p className="m-0 text-sm text-texto">
+                        Inquilino: <span className="font-medium">{inquilino.nombre || 'registrado'}</span>
+                    </p>
+                )}
+
+                {(busqueda === 'no-existe' || busqueda === 'registrando') && (
+                    <div className="flex flex-col gap-4 bg-lavanda border border-solid border-borde rounded-control p-4">
+                        <p className="m-0 text-sm text-texto">
+                            Nadie tiene ese documento registrado. Da de alta al inquilino para firmar el contrato.
+                        </p>
+                        <Fila>
+                            <Input etiqueta="Nombres" {...campoAlta('nombres')} />
+                            <Input etiqueta="Apellidos" {...campoAlta('apellidos')} />
+                        </Fila>
+                        <Fila>
+                            <Input etiqueta="Correo" type="email" {...campoAlta('email')} />
+                            <Input etiqueta="Teléfono (opcional)" type="tel" {...campoAlta('telefono')} />
+                        </Fila>
+                        <div>
+                            <Button variante="secundario" icono={UserPlus} onClick={registrar}
+                                cargando={busqueda === 'registrando'}>Registrar inquilino</Button>
+                        </div>
+                    </div>
+                )}
+
+                {contrasena && <ContrasenaTemporal {...contrasena} />}
+            </Seccion>
+
+            <Seccion titulo="Condiciones">
+                <Fila>
+                    <DateField etiqueta="Inicio" name="inicio" value={form.inicio} error={errores.inicio} onChange={cambiarInicio} />
+                    <DateField etiqueta="Fin" name="fin" value={form.fin} error={errores.fin} onChange={(valor) => poner('fin', valor)} />
+                </Fila>
+                <Fila>
+                    <MoneyField etiqueta="Canon mensual" value={form.canon} error={errores.canon}
+                        onChange={(valor) => poner('canon', valor)} />
+                    <Input etiqueta="Día límite de pago" inputMode="numeric" placeholder="1 a 31"
+                        ayuda="Día del mes. Se sugiere el del inicio." {...campo('fecha_limite_pago')} />
+                </Fila>
+                <DateField etiqueta="Primer corte (opcional)" name="fecha_inicio_corte" value={form.fecha_inicio_corte}
+                    ayuda="Si lo dejas vacío, el ciclo de cobro empieza el día de inicio."
+                    onChange={(valor) => poner('fecha_inicio_corte', valor)} />
+                <AreaTexto etiqueta="Condiciones particulares (opcional)" {...campo('info_contrato')} />
+            </Seccion>
+
+            <Seccion titulo="Deudor solidario (opcional)">
+                <Fila>
+                    <Input etiqueta="Nombre" {...campo('nombre_deudor_solidario')} />
+                    <Input etiqueta="Documento" inputMode="numeric" {...campo('documento_deudor_solidario')} />
+                </Fila>
+            </Seccion>
+        </form>
+    );
+}
+
+const ID_FORMULARIO = 'formulario-contrato';
+
+export default function Contratos() {
+    const sesion = useSesion();
+    const [contratos, setContratos] = useState([]);
+    // `null` = no se pudieron cargar; el formulario lo dice.
+    const [inmuebles, setInmuebles] = useState(null);
+    const [cargando, setCargando] = useState(true);
+    const [errorCarga, setErrorCarga] = useState(null);
+    const [aviso, setAviso] = useState('');
+
+    // { modo: 'crear' } | { modo: 'finalizar', contrato } | { modo: 'contrasena', contrasena, persona } | null
+    const [dialogo, setDialogo] = useState(null);
+    const [enviando, setEnviando] = useState(false);
+    const [errorDialogo, setErrorDialogo] = useState(null);
+    // La del inquilino recién dado de alta, para mostrarla otra vez al firmar.
+    const [contrasenaNueva, setContrasenaNueva] = useState(null);
+
+    const { esPropietario } = sesion;
+
+    const cargar = useCallback(async () => {
+        setErrorCarga(null);
+        // Al inquilino no se le piden los inmuebles: la matriz se los niega.
+        const [con, inm] = await Promise.allSettled([
+            listarContratos(),
+            esPropietario ? listarInmuebles() : Promise.resolve([])
+        ]);
+        if (con.status === 'fulfilled') setContratos(con.value);
+        else setErrorCarga(con.reason);
+        setInmuebles(inm.status === 'fulfilled' ? inm.value : null);
+        setCargando(false);
+    }, [esPropietario]);
+
+    useEffect(() => { cargar(); }, [cargar]);
+
+    /**
+     * Disponibles para firmar. El estado del inmueble converge unos segundos
+     * después de firmar (regla dura 9), así que también se descartan los que ya
+     * tienen un contrato activo en la lista.
+     */
+    const disponibles = useMemo(() => {
+        const ocupados = new Set(contratos.filter((c) => c.estado === 'activo').map((c) => c.id_inmueble));
+        return (inmuebles || []).filter((i) => i.estado === 'disponible' && !ocupados.has(i.id_inmueble));
+    }, [inmuebles, contratos]);
+
+    const algunoPropio = contratos.some((c) => actuaComoPropietario(c, sesion));
+
+    const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
+    const cerrar = () => { if (!enviando) setDialogo(null); };
+    const abrirAlta = () => { setContrasenaNueva(null); abrir({ modo: 'crear' }); };
+
+    const crear = async (datos) => {
+        setEnviando(true);
+        setErrorDialogo(null);
+        try {
+            await crearContrato(datos);
+            setAviso('Contrato firmado. El inmueble pasará a «Arrendado» en unos segundos.');
+            setDialogo(contrasenaNueva ? { modo: 'contrasena', ...contrasenaNueva } : null);
+            setContrasenaNueva(null);
+            await cargar();
+        } catch (error) {
+            setErrorDialogo(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    const finalizar = async () => {
+        setEnviando(true);
+        setErrorDialogo(null);
+        try {
+            await finalizarContrato(dialogo.contrato.id_contrato);
+            setDialogo(null);
+            setAviso('Contrato finalizado. El inmueble volverá a «Disponible» en unos segundos.');
+            await cargar();
+        } catch (error) {
+            setErrorDialogo(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    const columnas = [
+        {
+            clave: 'inmueble', titulo: 'Inmueble',
+            render: (c) => (
+                <div className="min-w-[10rem]">
+                    <Link to={`/contratos/${c.id_contrato}`} className="text-sm font-medium text-texto no-underline hover:underline">
+                        {c.Inmueble?.direccion || 'Inmueble sin datos'}
+                    </Link>
+                    {ubicacionDe(c.Inmueble) && <p className="m-0 mt-0.5 text-xs text-texto-suave">{ubicacionDe(c.Inmueble)}</p>}
+                </div>
+            )
+        },
+        algunoPropio && {
+            clave: 'inquilino', titulo: 'Inquilino',
+            render: (c) => (actuaComoPropietario(c, sesion) ? nombreDe(c.Inquilino) || '—' : 'Tú')
+        },
+        { clave: 'vigencia', titulo: 'Vigencia', render: (c) => <span className="whitespace-nowrap">{vigencia(c)}</span> },
+        { clave: 'canon', titulo: 'Canon', alinear: 'derecha', render: (c) => formatearDinero(c.canon) },
+        { clave: 'estado', titulo: 'Estado', render: (c) => <Badge estado={c.estado} /> },
+        {
+            clave: 'acciones', titulo: 'Acciones', alinear: 'derecha',
+            render: (c) => (
+                <div className="flex justify-end gap-1">
+                    <Link to={`/contratos/${c.id_contrato}`}
+                        className="inline-flex items-center h-8 px-3 text-xs font-medium text-indigo-medio no-underline rounded-control hover:bg-lavanda">
+                        Ver
+                    </Link>
+                    {actuaComoPropietario(c, sesion) && c.estado === 'activo' && (
+                        <Button variante="fantasma" tamano="pequeno" onClick={() => abrir({ modo: 'finalizar', contrato: c })}>
+                            Finalizar
+                        </Button>
+                    )}
+                </div>
+            )
+        }
+    ].filter(Boolean);
+
+    const titulo = esPropietario ? 'Contratos de arrendamiento' : 'Mis contratos';
+    const subtitulo = esPropietario
+        ? 'Gestiona los contratos de tus inmuebles.'
+        : 'Consulta tus contratos y descarga sus anexos.';
+
+    return (
+        <div className="flex flex-col gap-6">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h1 className="m-0 text-2xl font-medium text-texto">{titulo}</h1>
+                    <p className="m-0 mt-1 text-sm text-texto-suave">{subtitulo}</p>
+                </div>
+                {esPropietario && <Button icono={Plus} onClick={() => abrirAlta()}>Nuevo contrato</Button>}
+            </header>
+
+            <p aria-live="polite" className="m-0 text-sm text-texto-suave empty:hidden">{aviso}</p>
+
+            {errorCarga ? (
+                <div className="flex flex-col items-start gap-3">
+                    <FormError error={errorCarga} className="w-full box-border" />
+                    <Button variante="secundario" onClick={() => { setCargando(true); cargar(); }}>Reintentar</Button>
+                </div>
+            ) : (
+                <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                    <Table
+                        columnas={columnas}
+                        filas={contratos}
+                        claveFila="id_contrato"
+                        cargando={cargando}
+                        vacio={
+                            <EmptyState
+                                icono={FileText}
+                                titulo={esPropietario ? 'Aún no tienes contratos' : 'No tienes contratos'}
+                                descripcion={esPropietario
+                                    ? 'Firma un contrato sobre uno de tus inmuebles disponibles.'
+                                    : 'Cuando un propietario firme un contrato contigo, aparecerá aquí.'}
+                                accion={esPropietario && <Button icono={Plus} onClick={() => abrirAlta()}>Nuevo contrato</Button>}
+                            />
+                        }
+                    />
                 </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                <div>
-                    <h2 style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#1e293b' }}>
-                        {esPropietario ? 'Contratos de Arrendamiento' : 'Mi Contrato'}
-                    </h2>
-                    <p style={{ color: '#64748b' }}>
-                        {esPropietario ? 'Gestiona los contratos de tus inmuebles.' : 'Consulta tu contrato vigente.'}
+            <Modal
+                abierto={dialogo?.modo === 'crear'}
+                onCerrar={cerrar}
+                titulo="Nuevo contrato"
+                ancho="max-w-2xl"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button type="submit" form={ID_FORMULARIO} cargando={enviando}>Firmar contrato</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'crear' && (
+                    <div className="flex flex-col gap-4">
+                        {inmuebles === null && <FormError error="No se pudieron cargar tus inmuebles. Cierra e inténtalo de nuevo." />}
+                        <FormularioContrato
+                            idFormulario={ID_FORMULARIO}
+                            inmuebles={disponibles}
+                            error={errorDialogo}
+                            onEnviar={crear}
+                            onContrasena={setContrasenaNueva}
+                        />
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'finalizar'}
+                onCerrar={cerrar}
+                titulo="Finalizar contrato"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button onClick={finalizar} cargando={enviando}>Finalizar</Button>
+                    </>
+                }
+            >
+                <div className="flex flex-col gap-3">
+                    <FormError error={errorDialogo} />
+                    <p className="m-0 text-sm text-texto">
+                        ¿Finalizar el contrato de <span className="font-medium">{dialogo?.contrato?.Inmueble?.direccion || 'este inmueble'}</span>?
+                        El inmueble quedará disponible. Lo que se deba sigue pendiente de cobro.
                     </p>
                 </div>
-                {esPropietario && (
-                    <button className="btn btn-primary" onClick={() => setShowForm(!showForm)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        {showForm ? <X size={18} /> : <Plus size={18} />}
-                        {showForm ? 'Cancelar' : 'Nuevo Contrato'}
-                    </button>
-                )}
-            </div>
+            </Modal>
 
-            {showForm && (
-                <div className="card" style={{ marginBottom: '2rem', border: '1px solid #e2e8f0' }}>
-                    <h4 style={{ marginBottom: '1.5rem' }}>Registrar Nuevo Contrato</h4>
-                    <form onSubmit={handleSubmit} style={{ maxWidth: '800px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Inmueble Disponible</label>
-                            <select value={idInmueble} onChange={(e) => setIdInmueble(e.target.value)} required>
-                                <option value="">-- Seleccione un inmueble --</option>
-                                {inmuebles.map(inmueble => (
-                                    <option key={inmueble.id_inmueble} value={inmueble.id_inmueble}>
-                                        {inmueble.direccion} ({inmueble.barrio})
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Cédula Inquilino</label>
-                            <input type="text" placeholder="Ej: 10203040" value={documentoInquilino} onChange={(e) => setDocumentoInquilino(e.target.value)} required />
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Inicio</label>
-                            <input type="date" value={inicio} onChange={(e) => cambiarInicio(e.target.value)} required />
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Fin</label>
-                            <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} required />
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Canon Mensual ($)</label>
-                            <input type="number" value={canon} onChange={(e) => setCanon(e.target.value)} required />
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>Dia limite de pago</label>
-                            <input
-                                type="number"
-                                min="1"
-                                max="31"
-                                value={diaLimitePago}
-                                onChange={(e) => setDiaLimitePago(e.target.value)}
-                                placeholder="Se toma del dia de inicio"
-                            />
-                            <small style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                Sugerido por la fecha de inicio. Si un mes no tiene ese dia, se cobra el ultimo.
-                            </small>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>
-                                Deudor solidario <span style={{ color: '#64748b', fontWeight: '400' }}>(opcional)</span>
-                            </label>
-                            <input type="text" placeholder="Nombre completo" value={nombreDeudor} onChange={(e) => setNombreDeudor(e.target.value)} />
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500' }}>
-                                Cedula del deudor solidario <span style={{ color: '#64748b', fontWeight: '400' }}>(opcional)</span>
-                            </label>
-                            <input type="text" placeholder="Ej: 10203040" value={documentoDeudor} onChange={(e) => setDocumentoDeudor(e.target.value)} />
-                        </div>
-
-                        <div style={{ gridColumn: 'span 2', fontSize: '0.8rem', color: '#64748b' }}>
-                            El contrato escaneado se adjunta despues, desde el detalle del
-                            contrato: el anexo necesita un contrato que ya exista.
-                        </div>
-
-                        <div style={{ gridColumn: 'span 2', marginTop: '1rem' }}>
-                            <button type="submit" className="btn btn-primary" style={{ width: '100%', height: '3rem' }}>
-                                Crear Contrato
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            )}
-
-            {/* La contraseña temporal se muestra UNA vez: no hay forma de
-                recuperarla después. Se cierra a mano, para que no desaparezca
-                sola antes de que el propietario la anote. */}
-            {contrasenaTemporal && (
-                <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000
-                }}>
-                    <div style={{ background: '#fff', padding: '2rem', borderRadius: '0.75rem', width: '100%', maxWidth: '440px' }}>
-                        <h4 style={{ margin: '0 0 0.5rem', color: '#0f172a' }}>Contraseña temporal del inquilino</h4>
-                        <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
-                            Entrégasela para que pueda entrar. <b>No se puede volver a consultar</b>:
-                            si cierras esta ventana sin anotarla, habrá que crear otra.
-                            La primera vez que entre, el sistema le pedirá elegir una propia.
-                        </p>
-                        <div style={{
-                            fontFamily: 'monospace', fontSize: '1.5rem', letterSpacing: '0.1em',
-                            textAlign: 'center', background: '#f1f5f9', padding: '1rem',
-                            borderRadius: '0.5rem', color: '#0f172a', userSelect: 'all'
-                        }}>
-                            {contrasenaTemporal}
-                        </div>
-                        <button
-                            className="btn btn-primary"
-                            style={{ width: '100%', marginTop: '1.5rem' }}
-                            onClick={() => setContrasenaTemporal(null)}
-                        >
-                            Ya la anoté
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Inquilino Modal */}
-            {showTenantModal && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
-                    background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center',
-                    alignItems: 'center', zIndex: 10000, backdropFilter: 'blur(4px)'
-                }}>
-                    <div className="card" style={{ width: '90%', maxWidth: '450px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#2563eb' }}>
-                                <UserPlus size={24} />
-                                <h4 style={{ margin: 0 }}>Inquilino No Encontrado</h4>
-                            </div>
-                            <X size={20} style={{ cursor: 'pointer' }} onClick={() => setShowTenantModal(false)} />
-                        </div>
-                        <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-                            El inquilino con documento <b>{documentoInquilino}</b> no está registrado. Por favor completa sus datos para continuar:
-                        </p>
-                        <form onSubmit={handleCreateTenant}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                <div>
-                                    <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Nombres</label>
-                                    <input type="text" value={tenantData.nombres} onChange={(e) => setTenantData({...tenantData, nombres: e.target.value})} required />
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Apellidos</label>
-                                    <input type="text" value={tenantData.apellidos} onChange={(e) => setTenantData({...tenantData, apellidos: e.target.value})} required />
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Correo Electrónico</label>
-                                    <input type="email" value={tenantData.email} onChange={(e) => setTenantData({...tenantData, email: e.target.value})} required />
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Teléfono</label>
-                                    <input type="text" value={tenantData.telefono} onChange={(e) => setTenantData({...tenantData, telefono: e.target.value})} required />
-                                </div>
-                            </div>
-                            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '2rem' }}>
-                                Registrar y Continuar
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            <div className="card" style={{ border: '1px solid #e2e8f0' }}>
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '2px solid #f1f5f9', textAlign: 'left' }}>
-                                <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Inmueble</th>
-                                <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Inquilino</th>
-                                <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Vigencia</th>
-                                <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Valor</th>
-                                <th style={{ padding: '1rem', color: '#64748b', fontWeight: '600' }}>Estado</th>
-                                <th style={{ padding: '1rem', color: '#64748b', textAlign: 'center' }}>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {contratos.map(contrato => (
-                                <tr key={contrato.id_contrato} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                    <td style={{ padding: '1rem' }}>
-                                        <div style={{ fontWeight: '500' }}>{contrato.Inmueble?.direccion}</div>
-                                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{contrato.Inmueble?.municipio}</div>
-                                    </td>
-                                    <td style={{ padding: '1rem' }}>{contrato.Inquilino ? `${contrato.Inquilino.nombres} ${contrato.Inquilino.apellidos}` : '—'}</td>
-                                    <td style={{ padding: '1rem' }}>
-                                        <div style={{ fontSize: '0.9rem' }}>
-                                            {formatDate(contrato.inicio)} - {formatDate(contrato.fin)}
-                                        </div>
-                                    </td>
-                                    <td style={{ padding: '1rem', fontWeight: '600', color: '#059669' }}>
-                                        ${parseFloat(contrato.canon).toLocaleString()}
-                                    </td>
-                                    <td style={{ padding: '1rem' }}>
-                                        <span className={`badge ${contrato.estado === ESTADO_ACTIVO ? 'badge-success' : 'badge-pending'}`}>
-                                            {ETIQUETA_ESTADO[contrato.estado] || contrato.estado}
-                                        </span>
-                                    </td>
-                                    <td style={{ padding: '1rem', textAlign: 'center', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                                        {/* El detalle es de las dos partes: el inquilino se descarga
-                                            alli su contrato firmado. Antes esta columna entera era
-                                            solo del propietario porque lo unico que tenia era el
-                                            enlace al PDF publico. */}
-                                        <Link
-                                            to={`/contratos/${contrato.id_contrato}`}
-                                            className="btn"
-                                            style={{ color: '#2563eb', padding: '0.4rem' }}
-                                            title="Ver detalle y anexos"
-                                        >
-                                            <FileText size={18} />
-                                        </Link>
-                                        {esPropietario && contrato.estado === ESTADO_ACTIVO && (
-                                            <button
-                                                title="Finalizar contrato"
-                                                onClick={async () => {
-                                                    if (!window.confirm('¿Finalizar este contrato?')) return;
-                                                    try {
-                                                        await api.put(`/contratos/${contrato.id_contrato}/finalizar`);
-                                                        showNotify('Contrato finalizado', 'success');
-                                                        fetchData();
-                                                    } catch (e) {
-                                                        showNotify(e.response?.data?.mensaje || 'Error al finalizar');
-                                                    }
-                                                }}
-                                                style={{ border: 'none', background: '#fee2e2', color: '#ef4444', borderRadius: '0.375rem', padding: '0.35rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600' }}
-                                            >
-                                                Finalizar
-                                            </button>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <style>{`
-                @keyframes slideIn {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-                @keyframes fadeIn {
-                    from { opacity: 0; }
-                    to { opacity: 1; }
-                }
-            `}</style>
+            <Modal
+                abierto={dialogo?.modo === 'contrasena'}
+                onCerrar={() => setDialogo(null)}
+                titulo="Entrega la contraseña al inquilino"
+                acciones={<Button onClick={() => setDialogo(null)}>Ya la anoté</Button>}
+            >
+                {dialogo?.modo === 'contrasena' && <ContrasenaTemporal contrasena={dialogo.contrasena} persona={dialogo.persona} />}
+            </Modal>
         </div>
     );
-};
-
-export default Contratos;
+}

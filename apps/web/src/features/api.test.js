@@ -5,7 +5,7 @@
  */
 
 import { actualizarInmueble, crearInmueble, eliminarInmueble } from './inmuebles/api';
-import { crearContrato, subirAnexo } from './contratos/api';
+import { actualizarContrato, crearContrato, fechaDeContrato, subirAnexo } from './contratos/api';
 import { anularTransaccion, crearCuentaCobro, registrarPago } from './pagos/api';
 import { buscarPorDocumento, crearInquilino } from './usuarios/api';
 import { montoParaEnviar, soloCampos } from './comun';
@@ -76,6 +76,26 @@ test('el contrato va en JSON, con el día límite entero y el canon numérico', 
 test('sin día límite, no se manda: lo deriva el servicio', async () => {
     await crearContrato({ id_inmueble: 'i1', id_inquilino: 'u1', inicio: '2026-10-01', fin: '2027-09-30', canon: '1', fecha_limite_pago: '' });
     expect(api.post.mock.calls[0][1]).not.toHaveProperty('fecha_limite_pago');
+});
+
+test('editar un contrato no manda sus partes ni su estado, y vaciar un opcional lo borra', async () => {
+    await actualizarContrato('c1', {
+        id_inquilino: 'u2', estado: 'cancelado', inicio: '2020-01-01',
+        fin: '2028-01-31', canon: '1600000', fecha_limite_pago: '10',
+        info_contrato: 'Incluye parqueadero', nombre_deudor_solidario: '', documento_deudor_solidario: ' '
+    });
+
+    expect(api.put).toHaveBeenCalledWith('/contratos/c1', {
+        fin: '2028-01-31', canon: 1600000, fecha_limite_pago: 10, info_contrato: 'Incluye parqueadero',
+        nombre_deudor_solidario: null, documento_deudor_solidario: null
+    });
+});
+
+test('inicio y fin vuelven como instante UTC y se leen como el día guardado', () => {
+    expect(fechaDeContrato('2026-10-01T00:00:00.000Z')).toBe('2026-10-01');
+    expect(fechaDeContrato('2026-10-01')).toBe('2026-10-01');
+    expect(fechaDeContrato(null)).toBeNull();
+    expect(fechaDeContrato('mañana')).toBeNull();
 });
 
 test('el anexo va en multipart con `file` y `tipo`', async () => {

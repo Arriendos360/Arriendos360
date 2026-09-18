@@ -1,276 +1,470 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, FileText, Upload, Download, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
-import { TIPOS_ANEXO_CONOCIDOS, TAMANO_MAXIMO_ANEXO_MB } from 'arriendos360-contracts';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, Download, FileText, KeyRound, Pencil, Trash2, Upload } from 'lucide-react';
+import { TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-contracts';
 
 import { useSesion } from '../auth/sesion';
-import api from '../services/api';
-import { descargarPdf } from '../services/descargas';
+import {
+    actualizarContrato, descargarAnexo, eliminarAnexo, fechaDeContrato, finalizarContrato, listarAnexos,
+    obtenerContrato, reemitirContrasenaInquilino, subirAnexo
+} from '../features/contratos/api';
+import {
+    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, ubicacionDe, vigencia
+} from '../features/contratos/piezas';
+import {
+    Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, formatearDinero, formatearFecha,
+    formatearFechaHora
+} from '../ui';
 
 /**
- * Detalle de un contrato, con sus anexos.
+ * Detalle de un contrato: sus datos, sus anexos y, para el propietario, editar,
+ * finalizar, reemitir la contraseña del inquilino y adjuntar o borrar anexos.
  *
- * ES UNA VISTA NUEVA, y existe por un cambio de experiencia de usuario que viene
- * del Capítulo 2: el anexo ya no nace con el contrato. Antes el PDF viajaba en
- * el mismo formulario que lo creaba, lo que obligaba a tener el archivo escaneado
- * en el momento de firmar y dejaba un solo archivo, sin tipo y sin forma de
- * añadir un otrosí después.
+ * Los anexos se descargan como blob por la API autenticada (`descargarAnexo`,
+ * docs/adr/0014): nunca `window.open` ni una URL con el token.
  *
- * Ahora son dos pasos: el propietario crea el contrato y luego entra aquí a
- * adjuntar. Es un clic más y un modelo mental más honesto — un contrato existe
- * antes de estar escaneado.
- *
- * La ruta es accesible a los dos roles. El inquilino ve su contrato y se puede
- * descargar lo que hay firmado; lo que no ve es el formulario de carga. El
- * backend lo vuelve a comprobar de todas formas (regla dura 8): esto es
- * presentación, no seguridad.
+ * Las acciones de propietario dependen de este contrato, no sólo del rol
+ * (`actuaComoPropietario`). El backend lo vuelve a decidir (regla dura 8).
  */
 
-const ETIQUETA_ESTADO = {
-    activo: 'Activo',
-    finalizado: 'Finalizado',
-    cancelado: 'Cancelado'
-};
+const ETIQUETA_TIPO_ANEXO = { CONTRATO_FIRMADO: 'Contrato firmado', OTROSI: 'Otrosí' };
+const etiquetaDeAnexo = (tipo) => ETIQUETA_TIPO_ANEXO[tipo] || tipo;
 
-const ETIQUETA_TIPO = {
-    CONTRATO_FIRMADO: 'Contrato firmado',
-    OTROSI: 'Otrosí'
-};
+const BYTES_MAXIMOS = TAMANO_MAXIMO_ANEXO_MB * 1024 * 1024;
 
-const formatearFecha = (valor) =>
-    valor ? new Date(valor).toLocaleDateString('es-CO', { timeZone: 'UTC' }) : 'N/A';
+const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
 
-const ContratoDetalle = () => {
-    const { id } = useParams();
-    const { esPropietario } = useSesion();
+/** Un dato del contrato: etiqueta arriba, valor abajo. */
+const Dato = ({ etiqueta, children }) => (
+    <div className="min-w-[12rem] flex-1">
+        <dt className="text-xs font-medium uppercase tracking-label text-texto-label">{etiqueta}</dt>
+        <dd className="m-0 mt-1 text-sm text-texto break-words">{children || '—'}</dd>
+    </div>
+);
 
-    const [contrato, setContrato] = useState(null);
-    const [anexos, setAnexos] = useState([]);
-    const [cargando, setCargando] = useState(true);
-    const [error, setError] = useState(null);
-    const [aviso, setAviso] = useState(null);
+const aTexto = (valor) => (valor === null || valor === undefined ? '' : String(valor));
 
-    const [archivo, setArchivo] = useState(null);
-    const [tipo, setTipo] = useState(TIPOS_ANEXO_CONOCIDOS[0]);
-    const [subiendo, setSubiendo] = useState(false);
+/** Sólo lo editable (`CAMPOS_CONTRATO_EDITABLES`): las partes, el inicio y el estado no se tocan. */
+const formDeContrato = (contrato) => ({
+    fin: fechaDeContrato(contrato.fin) || '',
+    canon: contrato.canon ?? null,
+    fecha_limite_pago: aTexto(contrato.fecha_limite_pago),
+    info_contrato: aTexto(contrato.info_contrato),
+    nombre_deudor_solidario: aTexto(contrato.nombre_deudor_solidario),
+    documento_deudor_solidario: aTexto(contrato.documento_deudor_solidario)
+});
 
-    const notificar = (mensaje, tono = 'error') => {
-        setAviso({ mensaje, tono });
-        setTimeout(() => setAviso(null), 4000);
+/**
+ * El servicio no valida nada al editar, y un día límite fuera de rango le sale
+ * como 502: todo se revisa aquí.
+ */
+function validarEdicion(form, inicio) {
+    const errores = {};
+    if (!form.fin) errores.fin = 'Indica la fecha de fin.';
+    else if (inicio && form.fin <= inicio) errores.fin = 'Debe ser posterior al inicio.';
+    if (form.canon === null || !(Number(form.canon) > 0)) errores.canon = 'Escribe un canon mayor que cero.';
+    const dia = form.fecha_limite_pago.trim();
+    if (!(/^\d{1,2}$/.test(dia) && Number(dia) >= 1 && Number(dia) <= 31)) {
+        errores.fecha_limite_pago = 'Un día del mes, de 1 a 31.';
+    }
+    return errores;
+}
+
+function FormularioEdicion({ contrato, error, onEnviar, idFormulario }) {
+    const [form, setForm] = useState(() => formDeContrato(contrato));
+    const [errores, setErrores] = useState({});
+    const inicio = fechaDeContrato(contrato.inicio);
+
+    const poner = (nombre, valor) => {
+        setForm((actual) => ({ ...actual, [nombre]: valor }));
+        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+    };
+    const campo = (nombre) => ({
+        name: nombre, value: form[nombre], error: errores[nombre], onChange: (evento) => poner(nombre, evento.target.value)
+    });
+
+    const enviar = (evento) => {
+        evento.preventDefault();
+        const encontrados = validarEdicion(form, inicio);
+        setErrores(encontrados);
+        if (Object.keys(encontrados).length === 0) onEnviar(form);
     };
 
-    const cargar = useCallback(async () => {
-        try {
-            const [detalle, listado] = await Promise.all([
-                api.get(`/contratos/${id}`),
-                api.get(`/contratos/${id}/anexos`)
-            ]);
-            setContrato(detalle.data);
-            setAnexos(listado.data);
-        } catch (err) {
-            setError(err.response?.data?.mensaje || 'No se pudo cargar el contrato');
-        } finally {
-            setCargando(false);
-        }
-    }, [id]);
+    return (
+        <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-4">
+            <FormError error={error} />
+            <Fila>
+                <DateField etiqueta="Fin" name="fin" value={form.fin} error={errores.fin} min={inicio || undefined}
+                    onChange={(valor) => poner('fin', valor)} />
+                <MoneyField etiqueta="Canon mensual" value={form.canon} error={errores.canon} onChange={(valor) => poner('canon', valor)} />
+            </Fila>
+            <Input etiqueta="Día límite de pago" inputMode="numeric" ayuda="Día del mes, de 1 a 31." {...campo('fecha_limite_pago')} />
+            <AreaTexto etiqueta="Condiciones particulares" {...campo('info_contrato')} />
+            <Fila>
+                <Input etiqueta="Deudor solidario" {...campo('nombre_deudor_solidario')} />
+                <Input etiqueta="Documento del deudor" inputMode="numeric" {...campo('documento_deudor_solidario')} />
+            </Fila>
+        </form>
+    );
+}
 
-    useEffect(() => {
-        cargar();
-    }, [cargar]);
+/** Adjuntar un PDF. `tipo` es un catálogo abierto: se sugieren los conocidos y se admite cualquiera. */
+function SubirAnexo({ idContrato, onSubido }) {
+    const [tipo, setTipo] = useState(TIPOS_ANEXO_CONOCIDOS[0]);
+    const [archivo, setArchivo] = useState(null);
+    const [error, setError] = useState(null);
+    const [subiendo, setSubiendo] = useState(false);
+    // Cambiarla remonta el <input type=file>, que es la única forma de vaciarlo.
+    const [claveArchivo, setClaveArchivo] = useState(0);
+
+    const elegir = (evento) => {
+        const elegido = evento.target.files?.[0] || null;
+        setError(null);
+        if (elegido && elegido.type !== 'application/pdf' && !/\.pdf$/i.test(elegido.name)) {
+            setError('El archivo debe ser un PDF.');
+            setArchivo(null);
+        } else if (elegido && elegido.size > BYTES_MAXIMOS) {
+            setError(`El archivo supera el máximo de ${TAMANO_MAXIMO_ANEXO_MB} MB.`);
+            setArchivo(null);
+        } else {
+            setArchivo(elegido);
+        }
+    };
 
     const subir = async (evento) => {
         evento.preventDefault();
-
-        if (!archivo) {
-            notificar('Elige un archivo PDF');
-            return;
-        }
-
-        // Se comprueba aquí ADEMÁS de en el servidor. No sustituye al 413 —el
-        // cliente no es de fiar y el backend lo rechaza igual— pero evita subir
-        // diez megas por una red móvil para que te los rechacen al final.
-        if (archivo.size > TAMANO_MAXIMO_ANEXO_MB * 1024 * 1024) {
-            notificar(`El archivo supera el máximo de ${TAMANO_MAXIMO_ANEXO_MB} MB`);
-            return;
-        }
-
-        const cuerpo = new FormData();
-        cuerpo.append('file', archivo);
-        cuerpo.append('tipo', tipo);
-
+        if (!archivo) { setError('Elige un PDF.'); return; }
+        if (!tipo.trim()) { setError('Indica el tipo de anexo.'); return; }
         setSubiendo(true);
+        setError(null);
         try {
-            await api.post(`/contratos/${id}/anexos`, cuerpo, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
+            await subirAnexo(idContrato, { archivo, tipo });
             setArchivo(null);
-            evento.target.reset();
-            await cargar();
-            notificar('Anexo cargado', 'exito');
-        } catch (err) {
-            notificar(err.response?.data?.mensaje || 'No se pudo cargar el anexo');
+            setClaveArchivo((clave) => clave + 1);
+            await onSubido();
+        } catch (fallo) {
+            setError(fallo);
         } finally {
             setSubiendo(false);
         }
     };
 
+    return (
+        <form onSubmit={subir} noValidate className="flex flex-col gap-3 pt-4 mt-4 border-0 border-t border-solid border-borde">
+            <FormError error={error} />
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                <Input etiqueta="Tipo" className="sm:w-56" list="tipos-anexo" value={tipo}
+                    onChange={(evento) => setTipo(evento.target.value.toUpperCase())} />
+                <datalist id="tipos-anexo">
+                    {TIPOS_ANEXO_CONOCIDOS.map((valor) => <option key={valor} value={valor}>{etiquetaDeAnexo(valor)}</option>)}
+                </datalist>
+                <Input etiqueta={`Archivo (PDF, máx. ${TAMANO_MAXIMO_ANEXO_MB} MB)`} className="flex-1" type="file"
+                    key={claveArchivo} accept="application/pdf,.pdf" onChange={elegir} />
+                <Button type="submit" icono={Upload} cargando={subiendo}>Adjuntar</Button>
+            </div>
+        </form>
+    );
+}
+
+export default function ContratoDetalle() {
+    const { id } = useParams();
+    const sesion = useSesion();
+    const [contrato, setContrato] = useState(null);
+    // `null` = no se pudieron cargar; se dice aparte, el contrato sigue en pie.
+    const [anexos, setAnexos] = useState([]);
+    const [errorAnexos, setErrorAnexos] = useState(null);
+    const [cargando, setCargando] = useState(true);
+    const [errorCarga, setErrorCarga] = useState(null);
+    const [aviso, setAviso] = useState('');
+
+    // { modo: 'editar' | 'finalizar' | 'reemitir' | 'contrasena' | 'eliminar-anexo', ... } | null
+    const [dialogo, setDialogo] = useState(null);
+    const [enviando, setEnviando] = useState(false);
+    const [errorDialogo, setErrorDialogo] = useState(null);
+    const [descargando, setDescargando] = useState(null);
+    const [errorDescarga, setErrorDescarga] = useState(null);
+
+    const cargarAnexos = useCallback(async () => {
+        try {
+            setAnexos(await listarAnexos(id));
+            setErrorAnexos(null);
+        } catch (error) {
+            setErrorAnexos(error);
+        }
+    }, [id]);
+
+    const cargar = useCallback(async () => {
+        setErrorCarga(null);
+        const [con] = await Promise.allSettled([obtenerContrato(id), cargarAnexos()]);
+        if (con.status === 'fulfilled') setContrato(con.value);
+        else setErrorCarga(con.reason);
+        setCargando(false);
+    }, [id, cargarAnexos]);
+
+    useEffect(() => { cargar(); }, [cargar]);
+
+    const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
+    const cerrar = () => { if (!enviando) setDialogo(null); };
+
+    /** Ejecuta la acción del diálogo; el error se queda en el diálogo. */
+    const ejecutar = async (accion) => {
+        setEnviando(true);
+        setErrorDialogo(null);
+        try {
+            await accion();
+        } catch (error) {
+            setErrorDialogo(error);
+        } finally {
+            setEnviando(false);
+        }
+    };
+
+    const guardar = (datos) => ejecutar(async () => {
+        await actualizarContrato(id, datos);
+        setDialogo(null);
+        setAviso('Contrato actualizado.');
+        await cargar();
+    });
+
+    const finalizar = () => ejecutar(async () => {
+        await finalizarContrato(id);
+        setDialogo(null);
+        setAviso('Contrato finalizado. El inmueble volverá a «Disponible» en unos segundos.');
+        await cargar();
+    });
+
+    const reemitir = () => ejecutar(async () => {
+        const respuesta = await reemitirContrasenaInquilino(id);
+        setDialogo({ modo: 'contrasena', contrasena: respuesta.contrasena_temporal, persona: nombreDe(respuesta.inquilino) });
+    });
+
+    const borrarAnexo = () => ejecutar(async () => {
+        await eliminarAnexo(id, dialogo.anexo.id_anexo);
+        setDialogo(null);
+        setAviso('Anexo eliminado.');
+        await cargarAnexos();
+    });
+
     const descargar = async (anexo) => {
+        setDescargando(anexo.id_anexo);
+        setErrorDescarga(null);
         try {
-            // Por `fetch` y blob, con el interceptor que pone el token. Es el
-            // mismo camino que los recibos: el archivo NO tiene URL pública.
-            await descargarPdf(
-                `/contratos/${id}/anexos/${anexo.id_anexo}`,
-                `${(ETIQUETA_TIPO[anexo.tipo] || anexo.tipo).replace(/\s+/g, '-')}.pdf`
-            );
-        } catch (err) {
-            notificar('No se pudo descargar el anexo');
+            await descargarAnexo(id, anexo);
+        } catch (error) {
+            // Con `responseType: 'blob'` el `{ mensaje }` llega como Blob: se lee para mostrarlo.
+            const cuerpo = error.response?.data;
+            if (cuerpo instanceof Blob) {
+                try { setErrorDescarga(JSON.parse(await cuerpo.text())); return; } catch { /* sin cuerpo legible */ }
+            }
+            setErrorDescarga(error);
+        } finally {
+            setDescargando(null);
         }
     };
 
-    const eliminar = async (anexo) => {
-        try {
-            await api.delete(`/contratos/${id}/anexos/${anexo.id_anexo}`);
-            await cargar();
-            notificar('Anexo eliminado', 'exito');
-        } catch (err) {
-            notificar(err.response?.data?.mensaje || 'No se pudo eliminar el anexo');
-        }
-    };
+    const volver = (
+        <Link to="/contratos" className="inline-flex items-center gap-1 text-sm text-indigo-medio no-underline hover:underline">
+            <ArrowLeft size={16} aria-hidden="true" /> Contratos
+        </Link>
+    );
 
-    if (cargando) {
-        return <div className="card">Cargando…</div>;
-    }
+    if (cargando) return <div className="flex flex-col gap-4">{volver}<p className="m-0 text-sm text-texto-suave">Cargando contrato…</p></div>;
 
-    if (error) {
+    if (errorCarga) {
         return (
-            <div className="card">
-                <p style={{ color: '#b91c1c' }}>{error}</p>
-                <Link to="/contratos" className="btn">Volver a contratos</Link>
+            <div className="flex flex-col items-start gap-4">
+                {volver}
+                <FormError error={errorCarga} className="w-full box-border" />
+                <Button variante="secundario" onClick={() => { setCargando(true); cargar(); }}>Reintentar</Button>
             </div>
         );
     }
 
+    const propio = actuaComoPropietario(contrato, sesion);
+    const activo = contrato.estado === 'activo';
+    const inquilino = contrato.Inquilino;
+    const inmueble = contrato.Inmueble;
+
     return (
-        <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                <Link to="/contratos" className="btn" style={{ padding: '0.4rem' }} aria-label="Volver">
-                    <ArrowLeft size={18} />
-                </Link>
-                <h3 style={{ margin: 0 }}>Contrato</h3>
-                <span className={`badge ${contrato.estado === 'activo' ? 'badge-success' : 'badge-pending'}`}>
-                    {ETIQUETA_ESTADO[contrato.estado] || contrato.estado}
-                </span>
-            </div>
+        <div className="flex flex-col gap-6">
+            {volver}
 
-            {aviso && (
-                <div
-                    className="card"
-                    style={{
-                        marginBottom: '1rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        color: aviso.tono === 'exito' ? '#166534' : '#b91c1c'
-                    }}
-                >
-                    {aviso.tono === 'exito' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                    {aviso.mensaje}
-                </div>
-            )}
-
-            <div className="card" style={{ marginBottom: '1.5rem' }}>
-                <h4 style={{ marginTop: 0 }}>Condiciones</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
-                    {[
-                        ['Inmueble', contrato.Inmueble ? contrato.Inmueble.direccion : contrato.id_inmueble],
-                        ['Inquilino', contrato.Inquilino ? `${contrato.Inquilino.nombres} ${contrato.Inquilino.apellidos}` : contrato.id_inquilino],
-                        ['Inicio', formatearFecha(contrato.inicio)],
-                        ['Fin', formatearFecha(contrato.fin)],
-                        ['Canon', `$${parseFloat(contrato.canon).toLocaleString()}`],
-                        ['Inicio de corte', formatearFecha(contrato.fecha_inicio_corte)],
-                        ['Día límite de pago', contrato.fecha_limite_pago],
-                        ['Deudor solidario', contrato.nombre_deudor_solidario || '—']
-                    ].map(([etiqueta, valor]) => (
-                        <div key={etiqueta}>
-                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>{etiqueta}</div>
-                            <div style={{ fontWeight: '600' }}>{valor}</div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <div className="card">
-                <h4 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <FileText size={18} /> Anexos
-                </h4>
-
-                {esPropietario && (
-                    <form
-                        onSubmit={subir}
-                        style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '1.5rem' }}
-                    >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                            <label style={{ fontSize: '0.8rem', fontWeight: '500' }}>Tipo</label>
-                            <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-                                {TIPOS_ANEXO_CONOCIDOS.map((valor) => (
-                                    <option key={valor} value={valor}>{ETIQUETA_TIPO[valor] || valor}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                            <label style={{ fontSize: '0.8rem', fontWeight: '500' }}>
-                                Archivo PDF (máx. {TAMANO_MAXIMO_ANEXO_MB} MB)
-                            </label>
-                            <input
-                                type="file"
-                                accept="application/pdf"
-                                onChange={(e) => setArchivo(e.target.files[0])}
-                            />
-                        </div>
-
-                        <button type="submit" className="btn btn-primary" disabled={subiendo}>
-                            <Upload size={15} /> {subiendo ? 'Subiendo…' : 'Adjuntar'}
-                        </button>
-                    </form>
-                )}
-
-                {anexos.length === 0 ? (
-                    <p style={{ color: '#64748b' }}>
-                        {esPropietario
-                            ? 'Todavía no hay anexos. Adjunta el contrato firmado.'
-                            : 'Tu arrendador todavía no ha adjuntado el contrato firmado.'}
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <h1 className="m-0 text-2xl font-medium text-texto">{inmueble?.direccion || 'Contrato'}</h1>
+                        <Badge estado={contrato.estado} />
+                    </div>
+                    <p className="m-0 mt-1 text-sm text-texto-suave">
+                        {[ubicacionDe(inmueble), vigencia(contrato)].filter(Boolean).join(' · ')}
                     </p>
-                ) : (
-                    <table style={{ width: '100%' }}>
-                        <tbody>
-                            {anexos.map((anexo) => (
-                                <tr key={anexo.id_anexo}>
-                                    <td style={{ fontWeight: '600' }}>{ETIQUETA_TIPO[anexo.tipo] || anexo.tipo}</td>
-                                    <td style={{ color: '#64748b' }}>{formatearFecha(anexo.fecha_creacion)}</td>
-                                    <td style={{ textAlign: 'right' }}>
-                                        <button className="btn" onClick={() => descargar(anexo)} title="Descargar">
-                                            <Download size={15} />
-                                        </button>
-                                        {esPropietario && (
-                                            <button
-                                                className="btn"
-                                                style={{ color: '#b91c1c' }}
-                                                onClick={() => eliminar(anexo)}
-                                                title="Eliminar"
-                                            >
-                                                <Trash2 size={15} />
-                                            </button>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                </div>
+                {propio && activo && (
+                    <div className="flex flex-wrap gap-2">
+                        <Button variante="secundario" icono={Pencil} onClick={() => abrir({ modo: 'editar' })}>Editar</Button>
+                        <Button variante="secundario" icono={KeyRound} onClick={() => abrir({ modo: 'reemitir' })}>Contraseña del inquilino</Button>
+                        <Button onClick={() => abrir({ modo: 'finalizar' })}>Finalizar</Button>
+                    </div>
                 )}
+            </header>
+
+            <p aria-live="polite" className="m-0 text-sm text-texto-suave empty:hidden">{aviso}</p>
+
+            <Card titulo="Condiciones">
+                <dl className="flex flex-wrap gap-x-6 gap-y-5 m-0">
+                    <Dato etiqueta="Canon mensual"><span className="tabular-nums">{formatearDinero(contrato.canon)}</span></Dato>
+                    <Dato etiqueta="Día límite de pago">{contrato.fecha_limite_pago ? `Día ${contrato.fecha_limite_pago} de cada mes` : null}</Dato>
+                    <Dato etiqueta="Primer corte">{formatearFecha(contrato.fecha_inicio_corte)}</Dato>
+                    <Dato etiqueta="Vigencia">{vigencia(contrato)}</Dato>
+                </dl>
+                {contrato.info_contrato && (
+                    <dl className="m-0 mt-5"><Dato etiqueta="Condiciones particulares">
+                        <span className="whitespace-pre-line">{contrato.info_contrato}</span>
+                    </Dato></dl>
+                )}
+            </Card>
+
+            <div className="flex flex-col lg:flex-row gap-6 [&>*]:flex-1">
+                {propio && (
+                    <Card titulo="Inquilino">
+                        <dl className="flex flex-col gap-4 m-0">
+                            <Dato etiqueta="Nombre">{nombreDe(inquilino)}</Dato>
+                            <Dato etiqueta="Documento">{inquilino?.documento}</Dato>
+                            <Dato etiqueta="Correo">{inquilino?.email}</Dato>
+                            <Dato etiqueta="Teléfono">{inquilino?.telefono}</Dato>
+                        </dl>
+                    </Card>
+                )}
+                <Card titulo="Deudor solidario">
+                    {contrato.nombre_deudor_solidario || contrato.documento_deudor_solidario ? (
+                        <dl className="flex flex-col gap-4 m-0">
+                            <Dato etiqueta="Nombre">{contrato.nombre_deudor_solidario}</Dato>
+                            <Dato etiqueta="Documento">{contrato.documento_deudor_solidario}</Dato>
+                        </dl>
+                    ) : (
+                        <p className="m-0 text-sm text-texto-suave">Este contrato no tiene deudor solidario.</p>
+                    )}
+                </Card>
             </div>
+
+            <Card titulo="Anexos">
+                <div className="flex flex-col gap-3">
+                    <FormError error={errorAnexos} />
+                    <FormError error={errorDescarga} />
+                    {!errorAnexos && anexos.length === 0 && (
+                        <EmptyState icono={FileText} titulo="Sin anexos"
+                            descripcion={propio ? 'Adjunta el contrato firmado o un otrosí en PDF.' : 'El propietario aún no ha adjuntado documentos.'} />
+                    )}
+                    {anexos.length > 0 && (
+                        <ul className="flex flex-col list-none m-0 p-0">
+                            {anexos.map((anexo) => (
+                                <li key={anexo.id_anexo}
+                                    className="flex flex-wrap items-center gap-3 py-3 border-0 border-b border-solid border-borde last:border-b-0">
+                                    <span className="flex items-center justify-center shrink-0 w-9 h-9 rounded-control bg-chip text-indigo-medio">
+                                        <FileText size={16} aria-hidden="true" />
+                                    </span>
+                                    <div className="flex-1 min-w-[10rem]">
+                                        <p className="m-0 text-sm font-medium text-texto">{etiquetaDeAnexo(anexo.tipo)}</p>
+                                        <p className="m-0 mt-0.5 text-xs text-texto-suave">Adjuntado el {formatearFechaHora(anexo.fecha_creacion)}</p>
+                                    </div>
+                                    <Button variante="secundario" tamano="pequeno" icono={Download}
+                                        cargando={descargando === anexo.id_anexo} onClick={() => descargar(anexo)}>Descargar</Button>
+                                    {propio && (
+                                        <Button variante="fantasma" tamano="pequeno" icono={Trash2}
+                                            onClick={() => abrir({ modo: 'eliminar-anexo', anexo })}
+                                            aria-label={`Eliminar ${etiquetaDeAnexo(anexo.tipo)}`} title="Eliminar" />
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+                {propio && <SubirAnexo idContrato={id} onSubido={async () => { setAviso('Anexo adjuntado.'); await cargarAnexos(); }} />}
+            </Card>
+
+            <Modal
+                abierto={dialogo?.modo === 'editar'}
+                onCerrar={cerrar}
+                titulo="Editar contrato"
+                ancho="max-w-2xl"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button type="submit" form="formulario-edicion" cargando={enviando}>Guardar cambios</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'editar' && (
+                    <FormularioEdicion idFormulario="formulario-edicion" contrato={contrato} error={errorDialogo} onEnviar={guardar} />
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'finalizar'}
+                onCerrar={cerrar}
+                titulo="Finalizar contrato"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button onClick={finalizar} cargando={enviando}>Finalizar</Button>
+                    </>
+                }
+            >
+                <div className="flex flex-col gap-3">
+                    <FormError error={errorDialogo} />
+                    <p className="m-0 text-sm text-texto">
+                        El inmueble quedará disponible. Lo que se deba sigue pendiente de cobro.
+                    </p>
+                </div>
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'reemitir'}
+                onCerrar={cerrar}
+                titulo="Nueva contraseña temporal"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button icono={KeyRound} onClick={reemitir} cargando={enviando}>Generar</Button>
+                    </>
+                }
+            >
+                <div className="flex flex-col gap-3">
+                    <FormError error={errorDialogo} />
+                    <p className="m-0 text-sm text-texto">
+                        Se generará una contraseña nueva para <span className="font-medium">{nombreDe(inquilino) || 'el inquilino'}</span>.
+                        La anterior deja de servir y se cierran sus sesiones abiertas. Úsala si perdió la que le entregaste.
+                    </p>
+                </div>
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'contrasena'}
+                onCerrar={() => setDialogo(null)}
+                titulo="Entrega la contraseña al inquilino"
+                acciones={<Button onClick={() => setDialogo(null)}>Ya la anoté</Button>}
+            >
+                {dialogo?.modo === 'contrasena' && <ContrasenaTemporal contrasena={dialogo.contrasena} persona={dialogo.persona} />}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'eliminar-anexo'}
+                onCerrar={cerrar}
+                titulo="Eliminar anexo"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button icono={Trash2} onClick={borrarAnexo} cargando={enviando}>Eliminar</Button>
+                    </>
+                }
+            >
+                <div className="flex flex-col gap-3">
+                    <FormError error={errorDialogo} />
+                    <p className="m-0 text-sm text-texto">
+                        ¿Eliminar <span className="font-medium">{etiquetaDeAnexo(dialogo?.anexo?.tipo)}</span>? El archivo se borra y no se puede recuperar.
+                    </p>
+                </div>
+            </Modal>
         </div>
     );
-};
-
-export default ContratoDetalle;
+}
