@@ -19,6 +19,7 @@ module.exports = {
       chip: 'var(--chip-pastel)',
       superficie: 'var(--superficie)',
       borde: 'var(--borde)',
+      velo: 'var(--velo)',
       texto: {
         DEFAULT: 'var(--texto)',
         suave: 'var(--texto-suave)',

@@ -7,6 +7,7 @@
   --chip-pastel:     #E8E5F9;
   --superficie:      #FFFFFF;
   --borde:           #EDEBF7;
+  --velo:            rgba(36, 31, 77, 0.45);   /* fondo tras un Modal: --texto translúcido */
 
   --texto:           #241F4D;
   --texto-suave:     #6B6580;
