@@ -1,0 +1,23 @@
+/* Identidad de marca: fuente de verdad en marca.md. */
+:root {
+  --indigo-profundo: #3D3480;
+  --indigo-medio:    #5B52A3;
+  --indigo-hover:    #4A4289;
+  --lavanda:         #F4F3FC;
+  --chip-pastel:     #E8E5F9;
+  --superficie:      #FFFFFF;
+  --borde:           #EDEBF7;
+
+  --texto:           #241F4D;
+  --texto-suave:     #6B6580;
+  --texto-label:     #6F6690;
+
+  --verde: #10B981;  --verde-texto: #047857;  --verde-tenue: #E6F7F1;
+  --ambar: #F59E0B;  --ambar-texto: #B45309;  --ambar-tenue: #FEF3E2;
+  --rojo:  #EF4444;  --rojo-texto:  #B91C1C;  --rojo-tenue:  #FDECEC;
+
+  --radio-app:     24px;
+  --radio-tarjeta: 14px;
+  --radio-control: 10px;
+  --radio-chip:     8px;
+}
