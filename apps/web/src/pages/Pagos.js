@@ -10,7 +10,7 @@ import {
 } from '../features/pagos/api';
 import {
     Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table,
-    aDecimal, formatearDinero, formatearFecha, formatearFechaHora, hoyEnBogota
+    aDecimal, formatearDinero, formatearFecha, formatearFechaHora, formatearMes, hoyEnBogota
 } from '../ui';
 import { unir } from '../ui/clases';
 
@@ -32,17 +32,6 @@ import { unir } from '../ui/clases';
  * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
  * a Tailwind hasta el paso 6.
  */
-
-const MESES_LARGOS = [
-    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
-];
-
-/** «agosto 2026», leído del texto `YYYY-MM-DD`: `new Date()` lo correría a la víspera. */
-const mesDe = (fecha) => {
-    const partes = /^(\d{4})-(\d{2})-\d{2}$/.exec(fecha || '');
-    return partes ? `${MESES_LARGOS[Number(partes[2]) - 1]} ${partes[1]}` : '—';
-};
 
 const FILTROS = [
     { clave: 'todos', texto: 'Todos', estados: null, tono: 'text-texto-suave' },
@@ -133,7 +122,7 @@ function FormularioPago({ cuenta, error, onEnviar }) {
         <form id={ID_PAGO} onSubmit={enviar} noValidate className="flex flex-col gap-4">
             <FormError error={error} />
             <div className="flex flex-wrap gap-6 bg-lavanda rounded-control p-4">
-                <Dato titulo="Periodo">{mesDe(cuenta.inicio)}</Dato>
+                <Dato titulo="Periodo">{formatearMes(cuenta.inicio)}</Dato>
                 <Dato titulo="Valor">{formatearDinero(cuenta.valor)}</Dato>
                 <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>
             </div>
@@ -338,7 +327,7 @@ export default function Pagos() {
             clave: 'mes', titulo: 'Mes',
             render: (c) => (
                 <div className="whitespace-nowrap">
-                    <p className="m-0 text-sm text-texto first-letter:uppercase">{mesDe(c.inicio)}</p>
+                    <p className="m-0 text-sm text-texto first-letter:uppercase">{formatearMes(c.inicio)}</p>
                     <p className="m-0 mt-0.5 text-xs text-texto-suave">{formatearFecha(c.inicio)} – {formatearFecha(c.fin)}</p>
                 </div>
             )

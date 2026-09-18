@@ -4,6 +4,7 @@ import {
     formatearDinero,
     formatearFecha,
     formatearFechaHora,
+    formatearMes,
     hoyEnBogota,
     leerDinero
 } from './formato';
@@ -61,6 +62,11 @@ describe('fechas', () => {
     test('valores ilegibles no revientan', () => {
         expect(formatearFecha(null)).toBe('—');
         expect(formatearFechaHora('no-es-fecha')).toBe('—');
+    });
+
+    test('el mes de un periodo sale del texto, sin correrse de zona', () => {
+        expect(formatearMes('2026-08-01')).toBe('agosto 2026');
+        expect(formatearMes(null)).toBe('—');
     });
 
     test('hoy es el de Bogotá, no el del contenedor', () => {
