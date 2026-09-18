@@ -4,11 +4,30 @@
  * El alta va en JSON, como fija el Capítulo 2. El formulario viejo la mandaba
  * como `multipart/form-data`, y ms-contratos sólo lee JSON en esa ruta (multer
  * sólo está en la de anexos): llegaba un cuerpo vacío.
+ *
+ * Alineado al modelo y al controlador de ms-contratos, que se apartan del
+ * Capítulo 2 en esto:
+ * - `inicio` y `fin` son `TIMESTAMPTZ`, no fechas: se mandan `YYYY-MM-DD` pero
+ *   vuelven como instante a medianoche UTC. Se leen con `fechaDeContrato`.
+ * - `fecha_inicio_corte` y `fecha_limite_pago` son opcionales al crear: si no
+ *   vienen, el servicio los deriva de `inicio`.
+ * - `PUT /contratos/:id` acepta cualquier columna (también `estado` o las
+ *   partes) y no valida fechas ni canon: el recorte y la validación son de aquí.
  */
 
 import api from '../../services/api';
 import { abrirPdf, descargarPdf } from '../../services/descargas';
 import { cuerpo, montoParaEnviar, soloCampos } from '../comun';
+
+/**
+ * `inicio`/`fin` como día de calendario `YYYY-MM-DD`. Llegan como instante a
+ * medianoche UTC; llevarlo a Bogotá lo correría al día anterior, así que se toma
+ * la fecha UTC tal cual. `null` si no es una fecha.
+ */
+export const fechaDeContrato = (valor) => {
+    const texto = typeof valor === 'string' ? valor : valor instanceof Date ? valor.toISOString() : '';
+    return /^\d{4}-\d{2}-\d{2}/.test(texto) ? texto.slice(0, 10) : null;
+};
 
 export const CAMPOS_CONTRATO = [
     'id_inmueble',
@@ -57,9 +76,19 @@ export const obtenerContrato = (id) => cuerpo(api.get(`/contratos/${id}`));
 /** @returns `{ mensaje, contrato }` */
 export const crearContrato = (datos) => cuerpo(api.post('/contratos', normalizarContrato(datos, CAMPOS_CONTRATO)));
 
+/** Los opcionales de texto: vaciarlos al editar es borrarlos, y se manda `null`. */
+const CAMPOS_CONTRATO_BORRABLES = ['info_contrato', 'nombre_deudor_solidario', 'documento_deudor_solidario'];
+
 /** @returns `{ mensaje, contrato }` */
-export const actualizarContrato = (id, datos) =>
-    cuerpo(api.put(`/contratos/${id}`, normalizarContrato(datos, CAMPOS_CONTRATO_EDITABLES)));
+export const actualizarContrato = (id, datos) => {
+    const vaciados = CAMPOS_CONTRATO_BORRABLES.filter(
+        (campo) => typeof datos?.[campo] === 'string' && datos[campo].trim() === ''
+    );
+    return cuerpo(api.put(`/contratos/${id}`, {
+        ...normalizarContrato(datos, CAMPOS_CONTRATO_EDITABLES),
+        ...Object.fromEntries(vaciados.map((campo) => [campo, null]))
+    }));
+};
 
 /**
  * `PUT /api/contratos/:id/finalizar`. El inmueble vuelve a `disponible` cuando

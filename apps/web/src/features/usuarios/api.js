@@ -7,12 +7,18 @@
 import api from '../../services/api';
 import { cuerpo, soloCampos } from '../comun';
 
-/** Campos del alta de inquilino: los del registro sin `contrasena` (docs/adr/0007). */
+/**
+ * Campos del alta de inquilino: los del registro sin `contrasena` (docs/adr/0007).
+ * El servicio exige `nombres`, `apellidos`, `email` y `documento`; `telefono` es
+ * opcional. Un email o documento repetido responde 400, no 409.
+ */
 export const CAMPOS_INQUILINO = ['nombres', 'apellidos', 'email', 'telefono', 'documento'];
 
 /**
  * `GET /api/usuarios?documento=`.
  * @returns `{ id, nombres, apellidos }`, o `null` si nadie tiene ese documento.
+ *   No dice los roles: si la persona existe pero no es INQUILINO, el alta del
+ *   contrato responde 404 `TENANT_NOT_FOUND`.
  */
 export const buscarPorDocumento = async (documento) => {
     try {
