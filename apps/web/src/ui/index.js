@@ -8,6 +8,7 @@ export { default as FormError, mensajeDeError } from './FormError';
 export { default as Input } from './Input';
 export { default as Modal } from './Modal';
 export { default as MoneyField } from './MoneyField';
+export { default as PasswordField } from './PasswordField';
 export { default as Select } from './Select';
 export { default as Table } from './Table';
 export { ToastProvider, useToast } from './Toast';

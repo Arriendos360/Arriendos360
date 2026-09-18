@@ -12,7 +12,8 @@ export const FOCO = 'focus-visible:outline focus-visible:outline-2 focus-visible
 export const CONTROL = unir(
     'box-border block w-full m-0 h-10 px-3 font-sans text-sm text-texto bg-superficie',
     'border border-solid border-borde rounded-control',
-    'focus:outline focus:outline-1 focus:outline-indigo-medio focus:border-indigo-medio',
+    // shadow-none anula el halo de input:focus en App.css; sobra cuando el paso 6 lo borre.
+    'focus:outline focus:outline-1 focus:outline-indigo-medio focus:border-indigo-medio focus:shadow-none',
     'disabled:bg-lavanda disabled:text-texto-suave'
 );
 
