@@ -113,3 +113,14 @@ export function hoyEnBogota(ahora = new Date()) {
     const { anio, mes, dia } = partesEnZona(ahora);
     return `${anio}-${mes}-${dia}`;
 }
+
+const MESES_LARGOS = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+];
+
+/** «agosto 2026», el mes de un periodo. Se lee del texto `YYYY-MM-DD`, sin zona. */
+export function formatearMes(valor) {
+    const partes = typeof valor === 'string' ? valor.match(FECHA_ISO) : null;
+    return partes ? `${MESES_LARGOS[Number(partes[2]) - 1]} ${partes[1]}` : '—';
+}

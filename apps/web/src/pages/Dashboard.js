@@ -1,212 +1,179 @@
-import React, { useState, useEffect } from 'react';
-import { Bar, Doughnut } from 'react-chartjs-2';
-import { useNavigate } from 'react-router-dom';
-import {
-    Chart as ChartJS, CategoryScale, LinearScale, BarElement,
-    Title, Tooltip, Legend, ArcElement
-} from 'chart.js';
-import api from '../services/api';
-import { ESTADOS_CUENTA_COBRO } from 'arriendos360-contracts';
-import {
-    TrendingUp, Home, AlertCircle, FileText,
-    MapPin, ArrowRight, Calendar
-} from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, Building2, FileText, Home, TrendingUp } from 'lucide-react';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
+import { useSesion } from '../auth/sesion';
+import { obtenerResumen } from '../features/dashboard/api';
+import { actuaComoPropietario } from '../features/contratos/piezas';
+import { listarCuentasCobro } from '../features/pagos/api';
+import { Button, Card, EmptyState, FormError, formatearDinero, formatearMes } from '../ui';
+import { unir } from '../ui/clases';
 
 /**
- * Los cuatro estados de una cuenta de cobro, del catálogo compartido.
+ * Dashboard del propietario (mockup docs/mockups/dashboard.png).
  *
- * Se desestructuran por posición del `as const` para que un cambio en el
- * catálogo llegue aquí sin que haya que acordarse: si alguien añade un estado,
- * lo que falla es esta línea, no una comparación silenciosa contra un literal.
+ * Dos fuentes, y ninguna se degrada a cero: si una falla se ve el error y
+ * «—» en lo que dependía de ella, nunca un «$0» que parezca una respuesta.
+ *
+ * - Las tarjetas salen de `GET /api/dashboard/resumen`, que agrega el gateway.
+ * - «Estado de pagos» y «Cobros en mora» cuentan por `estado` las cuentas de
+ *   `GET /api/pagos`, igual que los filtros de Pagos, para que las dos pantallas
+ *   digan lo mismo. No se usa `/dashboard/mora`: mete el cobro del mes en curso
+ *   (ver features/dashboard/api.js). Aquí no se suma dinero; cada saldo es el
+ *   `saldo_pendiente` que manda el servicio.
+ *
+ * Quien tiene los dos roles ve sólo lo de los contratos donde es el dueño: el
+ * gateway ya filtra por propietario, y de `/api/pagos` se descartan las cuentas
+ * donde es inquilino (`actuaComoPropietario`).
+ *
+ * El gráfico de ingresos por mes del mockup no está: ninguna ruta lo da y
+ * sumarlo en el navegador sería agregar fuera del gateway (regla dura 2).
+ * Tampoco el botón «Motor financiero»: el motor se lanza por línea de comandos.
+ *
+ * Maquetado con flex: la `.grid` de App.css le gana a `grid-cols-*`.
  */
-const [PENDIENTE, PAGADA, PARCIAL, EN_MORA] = ESTADOS_CUENTA_COBRO;
 
-const Dashboard = () => {
-    const navigate = useNavigate();
-    const [resumen, setResumen]       = useState(null);
-    const [pagos, setPagos]           = useState([]);
-    const [loading, setLoading]       = useState(true);
+const ESTADOS_PAGO = [
+    { estado: 'PAGADA', texto: 'Pagadas', punto: 'bg-verde' },
+    { estado: 'PENDIENTE', texto: 'Pendientes', punto: 'bg-ambar' },
+    { estado: 'PARCIAL', texto: 'Con abonos', punto: 'bg-ambar' },
+    { estado: 'EN_MORA', texto: 'En mora', punto: 'bg-rojo' }
+];
 
-    const fetchData = async () => {
-        try {
-            const [resRes, pagosRes] = await Promise.all([
-                api.get('/dashboard/resumen'),
-                api.get('/pagos'),
-            ]);
-            setResumen(resRes.data);
-            setPagos(pagosRes.data);
-        } catch (error) {
-            console.error('Error al cargar dashboard:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
+function Tarjeta({ titulo, icono: Icono, valor, tono = 'text-texto', alerta = false }) {
+    return (
+        <section className="box-border flex-1 min-w-[11rem] bg-superficie border border-solid border-borde rounded-tarjeta p-5">
+            <div className="flex items-start justify-between gap-3">
+                <h2 className="m-0 text-xs font-medium uppercase tracking-label text-texto-label">{titulo}</h2>
+                <span className={unir(
+                    'flex items-center justify-center w-8 h-8 rounded-control shrink-0',
+                    alerta ? 'bg-rojo-tenue text-rojo-texto' : 'bg-chip text-indigo-medio'
+                )}>
+                    <Icono size={16} aria-hidden="true" />
+                </span>
+            </div>
+            <p className={unir('m-0 mt-3 text-3xl font-medium tabular-nums', tono)}>{valor}</p>
+        </section>
+    );
+}
 
-    useEffect(() => { fetchData(); }, []);
+export default function Dashboard() {
+    const sesion = useSesion();
 
-    const formatDate = (dateString, options = { month: 'long', year: 'numeric' }) => {
-        if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('es-CO', { ...options, timeZone: 'UTC' });
-    };
+    const [resumen, setResumen] = useState(null);
+    const [errorResumen, setErrorResumen] = useState(null);
+    // Cuentas de cobro donde actúa como propietario; `null` mientras cargan o si fallaron.
+    const [cuentas, setCuentas] = useState(null);
+    const [errorCuentas, setErrorCuentas] = useState(null);
+    const [cargando, setCargando] = useState(true);
 
-    if (loading) return <div className="loading">Cargando dashboard...</div>;
+    const cargar = useCallback(async () => {
+        setCargando(true);
+        setErrorResumen(null);
+        setErrorCuentas(null);
+        const [res, cue] = await Promise.allSettled([obtenerResumen(), listarCuentasCobro()]);
+        if (res.status === 'fulfilled') setResumen(res.value);
+        else { setResumen(null); setErrorResumen(res.reason); }
+        if (cue.status === 'fulfilled') setCuentas(cue.value.filter((c) => actuaComoPropietario(c.Contrato, sesion)));
+        else { setCuentas(null); setErrorCuentas(cue.reason); }
+        setCargando(false);
+        // `sesion` cambia de identidad en cada render; basta con el usuario.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sesion.usuario?.id]);
 
-    // ── Gráfico barras ──
-    // Los estados dejaron de ser 1, 2, 3 y 4 en el paso 6c: son el catálogo
-    // cerrado que comparten el servicio, la migración y esta pantalla. El mes se
-    // saca de `inicio`, que es el arranque del periodo que factura la cuenta.
-    const pagosPorMes = {};
-    pagos.forEach(p => {
-        if (p.estado === PAGADA) {
-            const mes = formatDate(p.inicio, { month: 'short', year: '2-digit' });
-            pagosPorMes[mes] = (pagosPorMes[mes] || 0) + parseFloat(p.valor || 0);
-        }
-    });
-    const meses = Object.keys(pagosPorMes).slice(-6);
-    const barData = {
-        labels: meses.length > 0 ? meses : ['Sin datos'],
-        datasets: [{ label: 'Ingresos ($)', data: meses.map(m => pagosPorMes[m]), backgroundColor: 'rgba(37,99,235,0.75)', borderColor: '#2563eb', borderWidth: 2, borderRadius: 6 }]
-    };
-    const barOptions = {
-        responsive: true, plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { callback: v => '$' + v.toLocaleString() } } }
-    };
+    useEffect(() => { cargar(); }, [cargar]);
 
-    // ── Dona ──
-    const pagados    = pagos.filter(p => p.estado === PAGADA).length;
-    const pendientes = pagos.filter(p => p.estado === PENDIENTE || p.estado === PARCIAL).length;
-    const mora       = pagos.filter(p => p.estado === EN_MORA).length;
-    const donutData  = {
-        labels: ['Pagados', 'Pendientes', 'En Mora'],
-        datasets: [{ data: [pagados, pendientes, mora], backgroundColor: ['#22c55e', '#f59e0b', '#ef4444'], borderWidth: 2 }]
-    };
+    const contar = (estado) => (cuentas ? cuentas.filter((c) => c.estado === estado).length : null);
+    const enMora = cuentas
+        ? cuentas.filter((c) => c.estado === 'EN_MORA').sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)))
+        : [];
+    // «—» mientras carga o si la fuente falló: nunca un cero que no se sabe.
+    const cifra = (valor) => (valor === null || valor === undefined ? '—' : valor);
 
-    // ── Requieren atención ──
-    const requierenAtencion = pagos
-        .filter(p => p.estado === PENDIENTE || p.estado === EN_MORA || p.estado === PARCIAL)
-        .sort((a, b) => {
-            const o = { [EN_MORA]: 0, [PARCIAL]: 1, [PENDIENTE]: 2 };
-            return (o[a.estado] ?? 3) - (o[b.estado] ?? 3);
-        })
-        .slice(0, 5);
-
-    const kpis = [
-        { label: 'Ingresos Totales',     value: '$' + parseFloat(resumen?.ingresos_totales || 0).toLocaleString(), icon: <TrendingUp size={20} color="#22c55e" />, bg: '#dcfce7' },
-        { label: 'Contratos Activos',    value: resumen?.contratos?.activos ?? 0,                                  icon: <FileText size={20} color="#2563eb" />,    bg: '#dbeafe' },
-        { label: 'Inmuebles Arrendados', value: resumen?.inmuebles?.arrendados ?? 0,                               icon: <Home size={20} color="#7c3aed" />,        bg: '#ede9fe' },
-        { label: 'Pagos Pendientes',     value: resumen?.pagos_pendientes ?? 0,                                    icon: <AlertCircle size={20} color="#ef4444" />, bg: '#fee2e2', alert: (resumen?.pagos_pendientes ?? 0) > 0 },
-    ];
-
-    const getEstadoConfig = (estado) => ({
-        [EN_MORA]:   { label: 'En Mora',      bg: '#fef2f2', border: '#fca5a5', badge: '#fee2e2', badgeText: '#b91c1c', dot: '#ef4444' },
-        [PARCIAL]:   { label: 'Pago Parcial', bg: '#fffbeb', border: '#fcd34d', badge: '#fef9c3', badgeText: '#a16207', dot: '#f59e0b' },
-        [PAGADA]:    { label: 'Pagado',       bg: '#f0fdf4', border: '#bbf7d0', badge: '#dcfce7', badgeText: '#15803d', dot: '#22c55e' },
-        [PENDIENTE]: { label: 'Pendiente',    bg: '#f8fafc', border: '#e2e8f0', badge: '#f1f5f9', badgeText: '#475569', dot: '#94a3b8' },
-    }[estado] || { label: '—', bg: '#f8fafc', border: '#e2e8f0', badge: '#f1f5f9', badgeText: '#475569', dot: '#cbd5e1' });
-
+    const sinInmuebles = resumen && resumen.inmuebles.disponibles + resumen.inmuebles.arrendados === 0;
+    const nombre = sesion.usuario?.nombres;
 
     return (
-        <div className="fade-in">
+        <div className="flex flex-col gap-6">
+            <header>
+                <h1 className="m-0 text-2xl font-medium text-texto">{nombre ? `Bienvenido, ${nombre}` : 'Bienvenido'}</h1>
+                <p className="m-0 mt-1 text-sm text-texto-suave">Resumen de tus arrendamientos.</p>
+            </header>
 
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
-                <div>
-                    <h2 style={{ fontSize: '1.875rem', fontWeight: '800', color: '#0f172a', letterSpacing: '-0.02em' }}>Dashboard</h2>
-                    <p style={{ color: '#64748b', marginTop: '0.25rem' }}>Resumen de tus arrendamientos en tiempo real.</p>
+            {errorResumen ? (
+                <div className="flex flex-col items-start gap-3">
+                    <FormError error={errorResumen} className="w-full box-border" />
+                    <Button variante="secundario" onClick={cargar}>Reintentar</Button>
                 </div>
-            </div>
-
-            {/* KPIs */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem', marginBottom: '1.75rem' }}>
-                {kpis.map((k, i) => (
-                    <div key={i} className="card" style={{ margin: 0, position: 'relative', overflow: 'hidden', ...(k.alert ? { borderColor: '#fca5a5', boxShadow: '0 0 0 2px rgba(239,68,68,0.1)' } : {}) }}>
-                        {k.alert && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg,#ef4444,#f97316)' }} />}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                            <span className="stat-label">{k.label}</span>
-                            <div style={{ background: k.bg, padding: '0.45rem', borderRadius: '0.5rem' }}>{k.icon}</div>
-                        </div>
-                        <div className="stat-value" style={{ fontSize: '1.75rem' }}>{k.value}</div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Gráficos */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.25rem', marginBottom: '1.75rem' }}>
-                <div className="card" style={{ margin: 0 }}>
-                    <h4 style={{ marginBottom: '1rem', color: '#0f172a', fontWeight: '700' }}>Ingresos por Mes</h4>
-                    <Bar data={barData} options={barOptions} height={100} />
-                </div>
-                <div className="card" style={{ margin: 0 }}>
-                    <h4 style={{ marginBottom: '1rem', color: '#0f172a', fontWeight: '700' }}>Estado de Pagos</h4>
-                    {(pagados + pendientes + mora) > 0
-                        ? <Doughnut data={donutData} options={{ plugins: { legend: { position: 'bottom' } } }} />
-                        : <div style={{ textAlign: 'center', color: '#94a3b8', padding: '3rem 0', fontSize: '0.9rem' }}>Sin pagos registrados</div>
-                    }
-                </div>
-            </div>
-
-            {/* Requieren atención */}
-            {requierenAtencion.length > 0 && (
-                <div className="card" style={{ margin: '0 0 1.75rem 0', padding: 0, overflow: 'hidden' }}>
-                    <div style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: mora > 0 ? '#ef4444' : '#f59e0b', boxShadow: `0 0 0 3px ${mora > 0 ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}` }} />
-                            <h4 style={{ fontWeight: '700', color: '#0f172a', fontSize: '0.95rem' }}>
-                                Requieren atención
-                                <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', fontWeight: '600', background: mora > 0 ? '#fee2e2' : '#fef9c3', color: mora > 0 ? '#b91c1c' : '#a16207', padding: '0.1rem 0.5rem', borderRadius: '999px' }}>
-                                    {requierenAtencion.length} cobro{requierenAtencion.length > 1 ? 's' : ''}
-                                </span>
-                            </h4>
-                        </div>
-                        <button onClick={() => navigate('/pagos')} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'none', border: '1.5px solid #e2e8f0', borderRadius: '0.5rem', padding: '0.4rem 0.875rem', cursor: 'pointer', fontSize: '0.82rem', fontWeight: '600', color: '#475569' }}>
-                            Ver todos <ArrowRight size={14} />
-                        </button>
-                    </div>
-                    {requierenAtencion.map((pago, idx) => {
-                        const cfg = getEstadoConfig(pago.estado);
-                        const esMora = pago.estado === EN_MORA;
-                        return (
-                            <div key={pago.id_cuenta_cobro} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.5rem', background: cfg.bg, borderBottom: idx < requierenAtencion.length - 1 ? `1px solid ${cfg.border}` : 'none' }}>
-                                <div style={{ width: '4px', height: '40px', borderRadius: '2px', background: cfg.dot, flexShrink: 0 }} />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
-                                        <MapPin size={13} color="#94a3b8" />
-                                        <span style={{ fontWeight: '700', fontSize: '0.875rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {pago.Contrato?.Inmueble?.direccion || `Contrato #${pago.id_contrato}`}
-                                        </span>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '0.75rem' }}>
-                                        <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                                            <Calendar size={11} /> {formatDate(pago.inicio)}
-                                        </span>
-                                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Arrendatario: {pago.Contrato?.id_inquilino || '--'}</span>
-                                    </div>
-                                </div>
-                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                    <div style={{ fontWeight: '800', fontSize: '1rem', color: esMora ? '#b91c1c' : '#0f172a' }}>${parseFloat(pago.saldo_pendiente).toLocaleString()}</div>
-                                    <span style={{ fontSize: '0.7rem', background: cfg.badge, color: cfg.badgeText, padding: '0.1rem 0.45rem', borderRadius: '999px', fontWeight: '700' }}>{cfg.label}</span>
-                                </div>
-                                <button onClick={() => navigate('/pagos')} className="btn btn-primary"
-                                    style={{ flexShrink: 0, padding: '0.5rem 1rem', fontSize: '0.82rem', background: esMora ? 'linear-gradient(135deg,#dc2626,#b91c1c)' : undefined }}>
-                                    Registrar Pago →
-                                </button>
-                            </div>
-                        );
-                    })}
+            ) : (
+                <div className="flex flex-wrap gap-4">
+                    <Tarjeta titulo="Ingresos totales" icono={TrendingUp} tono="text-indigo-medio"
+                        valor={cargando || !resumen ? '—' : formatearDinero(resumen.ingresos_totales)} />
+                    <Tarjeta titulo="Contratos activos" icono={FileText}
+                        valor={cargando || !resumen ? '—' : resumen.contratos.activos} />
+                    <Tarjeta titulo="Inmuebles arrendados" icono={Home}
+                        valor={cargando || !resumen ? '—' : `${resumen.inmuebles.arrendados} de ${resumen.inmuebles.disponibles + resumen.inmuebles.arrendados}`} />
+                    <Tarjeta titulo="Cobros en mora" icono={AlertTriangle} alerta tono="text-rojo-texto"
+                        valor={cargando ? '—' : cifra(contar('EN_MORA'))} />
                 </div>
             )}
 
-            {/* Todo al día */}
-            {requierenAtencion.length === 0 && pagos.length > 0 && (
-                <div style={{ textAlign: 'center', padding: '1.5rem', background: '#f0fdf4', borderRadius: '1rem', border: '1px solid #bbf7d0', marginTop: '1.75rem' }}>
-                    <p style={{ fontWeight: '700', color: '#15803d' }}>🎉 ¡Todo al día! No hay cobros pendientes.</p>
-                </div>
+            {sinInmuebles && !cargando && (
+                <Card>
+                    <EmptyState
+                        icono={Building2}
+                        titulo="Aún no tienes inmuebles"
+                        descripcion="Registra tu primer inmueble y firma un contrato para ver aquí tus cobros e ingresos."
+                        accion={<Link to="/inmuebles" className="text-sm font-medium text-indigo-medio">Ir a Inmuebles</Link>}
+                    />
+                </Card>
             )}
+
+            <div className="flex flex-col lg:flex-row gap-4 items-stretch">
+                <Card titulo="Cobros en mora" className="flex-[2] min-w-0"
+                    acciones={<Link to="/pagos" className="text-sm font-medium text-indigo-medio no-underline hover:underline">Ver pagos</Link>}>
+                    {errorCuentas ? (
+                        <FormError error={errorCuentas} />
+                    ) : cargando || !cuentas ? (
+                        <p className="m-0 py-6 text-center text-sm text-texto-suave">Cargando…</p>
+                    ) : enMora.length === 0 ? (
+                        <p className="m-0 py-6 text-center text-sm text-texto-suave">No tienes cobros en mora.</p>
+                    ) : (
+                        <ul className="m-0 p-0 list-none flex flex-col">
+                            {enMora.map((c) => (
+                                <li key={c.id_cuenta_cobro}
+                                    className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
+                                    <div className="min-w-0">
+                                        <p className="m-0 text-sm font-medium text-texto truncate">
+                                            {c.Contrato?.Inmueble?.direccion || 'Inmueble sin datos'}
+                                        </p>
+                                        <p className="m-0 mt-0.5 text-xs text-texto-suave first-letter:uppercase">{formatearMes(c.inicio)}</p>
+                                    </div>
+                                    <span className="text-sm font-medium text-rojo-texto whitespace-nowrap tabular-nums">
+                                        {formatearDinero(c.saldo_pendiente)}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </Card>
+
+                <Card titulo="Estado de pagos" className="flex-1 min-w-[14rem]">
+                    {errorCuentas ? (
+                        <p className="m-0 text-sm text-texto-suave">No se pudo consultar.</p>
+                    ) : (
+                        <ul className="m-0 p-0 list-none flex flex-col gap-3">
+                            {ESTADOS_PAGO.map(({ estado, texto, punto }) => (
+                                <li key={estado} className="flex items-center gap-2 text-sm text-texto">
+                                    <span aria-hidden="true" className={unir('w-2.5 h-2.5 rounded-chip', punto)} />
+                                    <span>{texto}</span>
+                                    <span className="ml-auto font-medium tabular-nums">{cargando ? '—' : cifra(contar(estado))}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </Card>
+            </div>
         </div>
     );
-};
-
-export default Dashboard;
+}
