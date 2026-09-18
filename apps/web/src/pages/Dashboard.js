@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Building2, FileText, Home, ShieldAlert, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Building2, FileText, Home, TrendingUp } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { obtenerResumen } from '../features/dashboard/api';
 import { actuaComoPropietario } from '../features/contratos/piezas';
-import { listarCuentasCobro, verificarMora } from '../features/pagos/api';
+import { listarCuentasCobro } from '../features/pagos/api';
 import { Button, Card, EmptyState, FormError, formatearDinero, formatearMes } from '../ui';
 import { unir } from '../ui/clases';
 
@@ -28,6 +28,7 @@ import { unir } from '../ui/clases';
  *
  * El gráfico de ingresos por mes del mockup no está: ninguna ruta lo da y
  * sumarlo en el navegador sería agregar fuera del gateway (regla dura 2).
+ * Tampoco el botón «Motor financiero»: el motor se lanza por línea de comandos.
  *
  * Maquetado con flex: la `.grid` de App.css le gana a `grid-cols-*`.
  */
@@ -65,9 +66,6 @@ export default function Dashboard() {
     const [cuentas, setCuentas] = useState(null);
     const [errorCuentas, setErrorCuentas] = useState(null);
     const [cargando, setCargando] = useState(true);
-    const [verificando, setVerificando] = useState(false);
-    const [aviso, setAviso] = useState('');
-    const [errorAccion, setErrorAccion] = useState(null);
 
     const cargar = useCallback(async () => {
         setCargando(true);
@@ -85,20 +83,6 @@ export default function Dashboard() {
 
     useEffect(() => { cargar(); }, [cargar]);
 
-    const revisarMora = async () => {
-        setVerificando(true);
-        setErrorAccion(null);
-        try {
-            const { pagos_actualizados: cuantas } = await verificarMora();
-            setAviso(cuantas ? `${cuantas} cobro(s) pasaron a «En mora».` : 'Ninguna cuenta nueva en mora.');
-            await cargar();
-        } catch (error) {
-            setErrorAccion(error);
-        } finally {
-            setVerificando(false);
-        }
-    };
-
     const contar = (estado) => (cuentas ? cuentas.filter((c) => c.estado === estado).length : null);
     const enMora = cuentas
         ? cuentas.filter((c) => c.estado === 'EN_MORA').sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)))
@@ -111,16 +95,10 @@ export default function Dashboard() {
 
     return (
         <div className="flex flex-col gap-6">
-            <header className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <h1 className="m-0 text-2xl font-medium text-texto">{nombre ? `Bienvenido, ${nombre}` : 'Bienvenido'}</h1>
-                    <p className="m-0 mt-1 text-sm text-texto-suave">Resumen de tus arrendamientos.</p>
-                </div>
-                <Button icono={ShieldAlert} onClick={revisarMora} cargando={verificando}>Verificar mora</Button>
+            <header>
+                <h1 className="m-0 text-2xl font-medium text-texto">{nombre ? `Bienvenido, ${nombre}` : 'Bienvenido'}</h1>
+                <p className="m-0 mt-1 text-sm text-texto-suave">Resumen de tus arrendamientos.</p>
             </header>
-
-            <p aria-live="polite" className="m-0 text-sm text-texto-suave empty:hidden">{aviso}</p>
-            <FormError error={errorAccion} />
 
             {errorResumen ? (
                 <div className="flex flex-col items-start gap-3">

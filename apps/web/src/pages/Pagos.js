@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, FileText, Plus, Receipt, ShieldAlert } from 'lucide-react';
+import { Download, FileText, Plus, Receipt } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { listarContratos } from '../features/contratos/api';
 import { AreaTexto, actuaComoPropietario, ubicacionDe } from '../features/contratos/piezas';
 import {
     MEDIOS_PAGO_CONOCIDOS, abrirComprobante, abrirRecibo, anularTransaccion, crearCuentaCobro,
-    listarCuentasCobro, registrarPago, transaccionesDeCuenta, verificarMora
+    listarCuentasCobro, registrarPago, transaccionesDeCuenta
 } from '../features/pagos/api';
 import {
     Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table,
@@ -308,19 +308,6 @@ export default function Pagos() {
         cargarTransacciones(actualizada);
     });
 
-    const revisarMora = async () => {
-        setEnviando(true);
-        setErrorDescarga(null);
-        try {
-            const { pagos_actualizados: cuantas } = await verificarMora();
-            setAviso({ texto: cuantas ? `${cuantas} cuenta(s) pasaron a «En mora».` : 'Ninguna cuenta nueva en mora.' });
-            await cargar();
-        } catch (error) {
-            setErrorDescarga(error);
-        } finally {
-            setEnviando(false);
-        }
-    };
 
     const columnas = [
         {
@@ -397,14 +384,7 @@ export default function Pagos() {
                     <h1 className="m-0 text-2xl font-medium text-texto">{titulo}</h1>
                     <p className="m-0 mt-1 text-sm text-texto-suave">{subtitulo}</p>
                 </div>
-                {esPropietario && (
-                    <div className="flex flex-wrap gap-2">
-                        <Button variante="secundario" icono={ShieldAlert} onClick={revisarMora} cargando={enviando && !dialogo}>
-                            Verificar mora
-                        </Button>
-                        <Button icono={Plus} onClick={abrirCobro}>Nuevo cobro</Button>
-                    </div>
-                )}
+                {esPropietario && <Button icono={Plus} onClick={abrirCobro}>Nuevo cobro</Button>}
             </header>
 
             {aviso && (
