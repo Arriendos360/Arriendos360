@@ -1,8 +1,4 @@
-/**
- * Clases compartidas por los controles del kit. El preflight de Tailwind está
- * apagado mientras viva App.css, así que cada control declara su borde, fuente y
- * margen en vez de heredarlos de un reset.
- */
+/** Clases compartidas por los controles del kit. */
 
 export const unir = (...clases) => clases.filter(Boolean).join(' ');
 
@@ -12,8 +8,7 @@ export const FOCO = 'focus-visible:outline focus-visible:outline-2 focus-visible
 export const CONTROL = unir(
     'box-border block w-full m-0 h-10 px-3 font-sans text-sm text-texto bg-superficie',
     'border border-solid border-borde rounded-control',
-    // shadow-none anula el halo de input:focus en App.css; sobra cuando el paso 6 lo borre.
-    'focus:outline focus:outline-1 focus:outline-indigo-medio focus:border-indigo-medio focus:shadow-none',
+    'focus:outline focus:outline-1 focus:outline-indigo-medio focus:border-indigo-medio',
     'disabled:bg-lavanda disabled:text-texto-suave'
 );
 

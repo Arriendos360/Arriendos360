@@ -24,9 +24,6 @@ import {
  *
  * Las acciones de propietario dependen del contrato y no sólo del rol: quien
  * tiene los dos roles es inquilino en algunos (`actuaComoPropietario`).
- *
- * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
- * a Tailwind hasta el paso 6.
  */
 
 const FORM_VACIO = {
