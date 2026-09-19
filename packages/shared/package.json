@@ -2,7 +2,7 @@
   "name": "arriendos360-shared",
   "version": "0.0.0",
   "private": true,
-  "description": "Utilidades compartidas entre servicios: verificacion local del JWT, forma estandar de error y cliente HTTP minimo.",
+  "description": "Utilidades compartidas entre servicios: verificacion local del JWT, forma estandar de error, autenticacion entre servicios, bus de eventos y calendario.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

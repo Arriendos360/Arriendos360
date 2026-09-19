@@ -7,7 +7,6 @@
  * - `errores`: la forma `{ mensaje }` y los codigos de estado convenidos.
  * - `jwt`: verificacion local del token y de la lista de revocados, replicando
  *   `auth.middleware.js`.
- * - `http`: cliente minimo para llamadas entre servicios.
  * - `servicio`: autenticacion ENTRE servicios para los endpoints `/interno`,
  *   con las dos mitades: firmar la llamada y verificarla.
  * - `revocacion`: la copia en memoria de lo que invalida tokens, para que cada
@@ -43,9 +42,7 @@ export {
   ESTADO_PUERTA_ENLACE,
   ESTADO_SIN_TOKEN,
   ESTADO_VALIDACION,
-  ErrorHttp,
   crearError,
-  esErrorRespuesta,
 } from './errores';
 export type { ErrorRespuesta } from './errores';
 
@@ -102,19 +99,6 @@ export type {
   Invalidaciones,
   OpcionesCache,
 } from './revocacion';
-
-export {
-  TIMEOUT_POR_DEFECTO_MS,
-  crearClienteHttp,
-  mensajeDeError,
-} from './http';
-export type {
-  ClienteHttp,
-  MetodoHttp,
-  OpcionesCliente,
-  OpcionesPeticion,
-  RespuestaServicio,
-} from './http';
 
 // ── Bus de eventos ───────────────────────────────────────────────────────────
 
