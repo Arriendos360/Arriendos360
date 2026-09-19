@@ -69,13 +69,6 @@ export const limpiarSesion = () => {
 
 export const obtenerToken = () => sesion.token;
 
-export const obtenerUsuario = () => sesion.usuario;
-
-export const haySesion = () => sesion.token !== null;
-
-/** ¿Tiene el usuario que cambiar su contraseña antes de poder hacer nada? */
-export const debeCambiarContrasena = () => sesion.debeCambiar === true;
-
 /**
  * ¿Tiene el usuario este rol?
  *
@@ -87,8 +80,6 @@ export const tieneRol = (rol) =>
     Array.isArray(sesion.usuario?.roles) && sesion.usuario.roles.includes(rol);
 
 export const esPropietario = () => tieneRol(ROL_PROPIETARIO);
-
-export const esInquilino = () => tieneRol(ROL_INQUILINO);
 
 /** Suscribe a los cambios de sesión. Devuelve la función para darse de baja. */
 export const suscribir = (suscriptor) => {

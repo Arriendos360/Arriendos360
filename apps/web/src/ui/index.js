@@ -11,5 +11,4 @@ export { default as MoneyField } from './MoneyField';
 export { default as PasswordField } from './PasswordField';
 export { default as Select } from './Select';
 export { default as Table } from './Table';
-export { ToastProvider, useToast } from './Toast';
 export * from './formato';

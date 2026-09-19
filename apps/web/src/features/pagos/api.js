@@ -39,16 +39,8 @@ const fechaPagoParaEnviar = (valor) =>
 /** `GET /api/pagos`: las cuentas de cobro de los contratos donde el usuario es parte. */
 export const listarCuentasCobro = () => cuerpo(api.get('/pagos'));
 
-/** `GET /api/pagos/pendientes`: sólo `PENDIENTE` y `PARCIAL`; las `EN_MORA` no entran. */
-export const listarCuentasPendientes = () => cuerpo(api.get('/pagos/pendientes'));
-
-export const cuentasDeContrato = (idContrato) => cuerpo(api.get(`/pagos/contrato/${idContrato}`));
-
 /** Transacciones de una cuenta, `CONFIRMADA` y `ANULADA`, la más reciente primero. */
 export const transaccionesDeCuenta = (idCuentaCobro) => cuerpo(api.get(`/pagos/${idCuentaCobro}/transacciones`));
-
-/** `GET /api/pagos/historial-transacciones`: todas las del usuario. */
-export const historialTransacciones = () => cuerpo(api.get('/pagos/historial-transacciones'));
 
 // ── Escritura (propietario) ───────────────────────────────────────────────
 
@@ -78,9 +70,6 @@ export const crearCuentaCobro = (datos) => {
  * cuenta en vez de corregirla en memoria.
  */
 export const anularTransaccion = (idTransaccion) => cuerpo(api.post(`/pagos/transacciones/${idTransaccion}/anular`));
-
-/** `POST /api/pagos/verificar-mora`: pasa a `EN_MORA` lo vencido con saldo. */
-export const verificarMora = () => cuerpo(api.post('/pagos/verificar-mora'));
 
 // ── PDF ───────────────────────────────────────────────────────────────────
 

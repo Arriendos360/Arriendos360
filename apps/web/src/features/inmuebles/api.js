@@ -37,8 +37,6 @@ const conEnteros = (datos) =>
 /** `GET /api/inmuebles`: los del propietario autenticado. */
 export const listarInmuebles = () => cuerpo(api.get('/inmuebles'));
 
-export const obtenerInmueble = (id) => cuerpo(api.get(`/inmuebles/${id}`));
-
 /** @returns `{ mensaje, inmueble }` */
 export const crearInmueble = (datos) =>
     cuerpo(api.post('/inmuebles', conEnteros(soloCampos(datos, CAMPOS_INMUEBLE))));
