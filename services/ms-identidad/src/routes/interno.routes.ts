@@ -49,17 +49,18 @@ router.get('/revocados', async (_req, res) => {
 /**
  * GET /interno/usuarios?ids=...
  *
- * Datos de usuario en lote para que el gateway componga sus respuestas sin
- * cruzar la frontera con un JOIN. Ver el controlador.
+ * Datos de usuario en lote para que ms-contratos, ms-financiero y
+ * ms-notificaciones compongan sus respuestas sin cruzar la frontera con un JOIN.
+ * Ver el controlador.
  */
 router.get('/usuarios', usuariosPorIds);
 
 /**
  * POST /interno/usuarios/:id/contrasena-temporal
  *
- * Reemision de la contrasena temporal. La autorizacion de quien pide la hace el
- * gateway antes de llamar, porque la regla depende de los contratos y esos son
- * de otro servicio.
+ * Reemision de la contrasena temporal. La autorizacion de quien pide la hace
+ * ms-contratos antes de llamar, porque la regla depende de los contratos y esos
+ * son de otro servicio. Ver `docs/adr/0017`.
  */
 router.post('/usuarios/:id/contrasena-temporal', reemitirContrasenaTemporal);
 

@@ -9,8 +9,8 @@
  * DENEGAR POR DEFECTO. Una ruta bajo `/api` que no aparezca aquí se rechaza con
  * 403. No es una precaución teórica: es lo que hace que añadir un endpoint nuevo
  * sin declarar su política falle de forma ruidosa en las pruebas, en vez de
- * quedar abierto en silencio. Fuera de `/api` la matriz no opina: la raíz y
- * `/uploads` los sirve Express directamente.
+ * quedar abierto en silencio. Fuera de `/api` la matriz no opina: la raíz la
+ * sirve Express directamente.
  *
  * La matriz es declarativa a propósito. Se lee de arriba abajo como una tabla y
  * se imprime tal cual al arrancar, así que el estado real de las políticas se

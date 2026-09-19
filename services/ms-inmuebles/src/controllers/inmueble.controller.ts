@@ -161,8 +161,7 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
  * NO comprueba si hay un contrato activo. Esa regla existe y se aplica, pero en
  * el gateway: depende de `contratos`, que es un subdominio de Core, y este
  * servicio es de Soporte. Consultarlo desde aqui invertiria la direccion de las
- * dependencias — el mismo motivo por el que la reemision de contrasena temporal
- * vive en el gateway y no en ms-identidad. Ver `docs/adr/0011`.
+ * dependencias. Ver `docs/adr/0011`.
  *
  * Lo que si es responsabilidad de este endpoint es la pertenencia, y eso si se
  * comprueba.

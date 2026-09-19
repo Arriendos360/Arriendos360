@@ -6,10 +6,16 @@ una unica instancia de PostgreSQL). Reemplazan a `sequelize.sync()`; ver
 
 | Carpeta | Esquema | Quien la aplica |
 |---|---|---|
-| `identidad/` | `identidad` | `services/ms-identidad`, al arrancar |
-| `inmuebles/` | `inmuebles` | `services/ms-inmuebles`, al arrancar |
-| `contratos/` | `contratos` | `services/ms-contratos`, al arrancar |
-| `financiero/` | `financiero` | `services/ms-financiero`, al arrancar |
+| `identidad/` | `identidad` | `services/ms-identidad` |
+| `inmuebles/` | `inmuebles` | `services/ms-inmuebles` |
+| `contratos/` | `contratos` | `services/ms-contratos` |
+| `financiero/` | `financiero` | `services/ms-financiero` |
+| `notificaciones/` | `notificaciones` | `services/ms-notificaciones` |
+
+**Cuándo:** en Compose, cada servicio al arrancar (`MIGRACIONES_AL_ARRANCAR=si`). En
+Azure, un Job `migrar-*` por servicio antes de publicar revisiones; el servicio arranca
+con `MIGRACIONES_AL_ARRANCAR=no` y no levanta si queda alguna pendiente. Ver
+`docs/despliegue.md`.
 
 Cada servicio aplica **solo las suyas**, y la tabla de control
 (`<esquema>.migraciones_aplicadas`) vive en su propio esquema: nadie comparte ni

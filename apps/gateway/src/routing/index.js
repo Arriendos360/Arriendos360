@@ -1,11 +1,11 @@
 /**
  * Costura de enrutamiento del gateway.
  *
- * Un solo middleware decide, peticion por peticion, si el prefijo se atiende con
- * el codigo local del monolito o se reenvia por HTTP al microservicio extraido.
+ * Un solo middleware decide, peticion por peticion, si el prefijo se atiende en
+ * este proceso o se reenvia por HTTP a su microservicio.
  *
- * `/api/auth`, `/api/usuarios` e `/api/inmuebles` estan cableados a sus
- * servicios; el resto sigue resolviendo en local, en el codigo del monolito.
+ * `/api/auth`, `/api/usuarios`, `/api/inmuebles`, `/api/contratos` y
+ * `/api/pagos` van a sus servicios; `/api/dashboard` se atiende aqui.
  *
  * Orden de montaje (importa): va DESPUES de `cors()`, del control de acceso y de
  * los guardias, y ANTES de `express.json()`. Que el RBAC vaya primero no es un
@@ -57,14 +57,14 @@ const crearEnrutadorGateway = (opciones = {}) => {
     return function enrutadorGateway(req, res, next) {
         const entrada = resolverPrefijo(req.path);
 
-        // Ruta fuera de la tabla (`/`, `/uploads/...`): la atiende el monolito.
+        // Ruta fuera de la tabla (`/`): la atiende Express en este proceso.
         if (!entrada) {
             return next();
         }
 
         const destino = urlDestino(entrada, entorno);
 
-        // Modo local: el prefijo todavia no se ha extraido.
+        // Modo local: el prefijo no tiene servicio propio (`/api/dashboard`).
         if (destino === null) {
             return next();
         }

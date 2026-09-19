@@ -1,20 +1,15 @@
 /**
  * Tabla de enrutamiento del gateway.
  *
- * Declara, por cada prefijo de la API, si se resuelve en modo LOCAL (el codigo
- * del monolito que vive en este mismo proceso) o REMOTO (reenvio HTTP al
- * microservicio ya extraido).
+ * Declara, por cada prefijo de la API, si se resuelve en modo LOCAL (en este
+ * mismo proceso) o REMOTO (reenvio HTTP a su microservicio).
  *
- * El modo no se configura a mano: se deriva de si la variable de entorno con la
- * URL del servicio esta definida y no vacia. Asi, extraer un servicio es
- * poner su URL en el entorno, sin tocar codigo ni redesplegar el gateway con
- * otra bandera.
+ * El modo se deriva de si la variable de entorno con la URL del servicio esta
+ * definida y no vacia. Hoy los cinco prefijos con servicio son remotos —`app.js`
+ * exige sus URL al arrancar— y el unico local es `/api/dashboard`, que no
+ * tiene variable.
  *
- * Hoy las cuatro variables estan vacias, de modo que los seis prefijos resuelven
- * en LOCAL y el comportamiento es identico al de antes de esta costura.
- *
- * `/api/auth` y `/api/usuarios` comparten variable: los dos son ms-identidad, y
- * se extraeran juntos en el paso 3b.
+ * `/api/auth` y `/api/usuarios` comparten variable: los dos son ms-identidad.
  */
 
 const MODO_LOCAL = 'local';

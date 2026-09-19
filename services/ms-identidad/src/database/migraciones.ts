@@ -145,8 +145,8 @@ export const migracionesPendientes = async (conexion: Sequelize): Promise<string
  * `sequelize.sync({ force: true })` en las pruebas.
  *
  * Solo funciona con `NODE_ENV=test`, y solo borra `identidad`: aunque alguien lo
- * ejecutara por error contra la base de desarrollo, el esquema `public` con los
- * inmuebles y contratos quedaria intacto.
+ * ejecutara por error contra la base de desarrollo, `public` y los esquemas de
+ * los demas servicios quedarian intactos.
  */
 export const recrearEsquema = async (conexion: Sequelize): Promise<string[]> => {
   if (process.env['NODE_ENV'] !== 'test') {

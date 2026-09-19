@@ -89,8 +89,8 @@ const crearControlDeAcceso = (opciones = {}) => {
         });
 
     return async function controlDeAcceso(req, res, next) {
-        // Fuera de `/api` la matriz no opina: la raíz y `/uploads` los sirve
-        // Express por su cuenta.
+        // Fuera de `/api` la matriz no opina: la raíz la sirve Express por su
+        // cuenta.
         if (!esRutaDeApi(req.path)) {
             return next();
         }
