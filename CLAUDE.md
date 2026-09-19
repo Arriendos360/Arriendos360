@@ -575,7 +575,6 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
 - **Autoservicio de pago del inquilino** (`docs/adr/0006`): reporte + confirmación, o
   pasarela. La regla iría en el ABAC de ms-financiero.
 - **Devoluciones:** `EGRESO` en `TIPOS_TRANSACCION` y en el `CHECK`. No es anular.
-- **Pantalla de Comprobantes**, fuera de UI-01 a UI-05: documentarla o absorberla en Pagos.
 - **Usuario sin correo**: no recibe nada y sólo queda en el log; resolverlo es pantalla.
 - **Reencolar un envío apartado** o atascado en `enviando` exige un `UPDATE` a mano.
 
@@ -588,8 +587,6 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
   despliegue: el token vive en memoria (Capa 1, `apps/web/src/auth/sesion.js`). Lo que el
   corte 5 arregló es otra cosa —que la recarga diera 404 en Static Web Apps—, y ya no pasa.
 - **CRA** ya no recibe mantenimiento: migrar a Vite es barato, no urgente.
-- **Tailwind v3 convive con `App.css`** hasta el revamp: su *preflight* está apagado en
-  `apps/web/tailwind.config.js` para no desarmar las páginas viejas. Encenderlo al borrarlas.
 
 ## Qué no hacer
 

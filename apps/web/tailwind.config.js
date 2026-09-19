@@ -3,8 +3,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./src/**/*.{js,jsx,ts,tsx}'],
-  // Preflight apagado mientras convivan las páginas viejas con App.css (paso 6 lo enciende).
-  corePlugins: { preflight: false },
   theme: {
     colors: {
       transparent: 'transparent',
@@ -44,9 +42,8 @@ module.exports = {
       app: 'var(--radio-app)',
       full: '9999px',
     },
-    // Sin sombras ni degradados. La única utilidad es `shadow-none`, que anula
-    // la sombra heredada de App.css.
-    boxShadow: { none: 'none' },
+    // Sin sombras ni degradados.
+    boxShadow: {},
     backgroundImage: {},
     extend: {
       letterSpacing: { label: '0.45px' },

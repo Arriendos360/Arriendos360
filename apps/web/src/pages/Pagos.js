@@ -28,9 +28,6 @@ import { unir } from '../ui/clases';
  *   emitido sigue diciendo lo que decía (docs/adr/0016). El endpoint no recibe
  *   cuerpo, así que no se pide un motivo que se perdería.
  * - Los PDF salen por blob con el token (services/descargas.js).
- *
- * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
- * a Tailwind hasta el paso 6.
  */
 
 const FILTROS = [

@@ -17,9 +17,6 @@ import { Badge, Button, EmptyState, FormError, Input, Modal, Select, formatearDi
  * DECORAN la fila: si Contratos o Financiero no responden, la fila sale sin
  * ellos y la lista sigue en pie. Los inmuebles sí son el contenido: si fallan,
  * se dice.
- *
- * Maquetado con flex y no con `grid-cols-*`: la clase `.grid` de App.css le gana
- * a Tailwind hasta el paso 6.
  */
 
 /** El catálogo va en minúsculas porque es un dato; la mayúscula es presentación. */

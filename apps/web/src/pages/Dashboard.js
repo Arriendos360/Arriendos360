@@ -29,8 +29,6 @@ import { unir } from '../ui/clases';
  * El gráfico de ingresos por mes del mockup no está: ninguna ruta lo da y
  * sumarlo en el navegador sería agregar fuera del gateway (regla dura 2).
  * Tampoco el botón «Motor financiero»: el motor se lanza por línea de comandos.
- *
- * Maquetado con flex: la `.grid` de App.css le gana a `grid-cols-*`.
  */
 
 const ESTADOS_PAGO = [

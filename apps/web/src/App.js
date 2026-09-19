@@ -11,7 +11,6 @@ import Inmuebles from "./pages/Inmuebles";
 import Contratos from "./pages/Contratos";
 import ContratoDetalle from "./pages/ContratoDetalle";
 import Pagos from "./pages/Pagos";
-import "./App.css";
 
 function App() {
   return (
