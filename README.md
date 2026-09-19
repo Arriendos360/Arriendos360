@@ -22,7 +22,7 @@ Arriendos360/
 │                   TypeScript strict, esquema PostgreSQL propio (`identidad`).
 ├─ packages/
 │  ├─ contracts/    DTOs compartidos en TypeScript.
-│  └─ shared/       Verificacion de JWT, errores, cliente HTTP.
+│  └─ shared/       Verificacion de JWT, errores, bus de eventos.
 ├─ database/        Migraciones SQL versionadas, una carpeta por esquema.
 │  ├─ identidad/    Usuarios, Roles, RolesUsuario, TokensRevocados.
 │  └─ dominio/      Inmuebles, Contratos, Pagos, Abonos.

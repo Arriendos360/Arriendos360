@@ -193,7 +193,7 @@ apps/web/              React SPA
 apps/gateway/          PEP: JWT, matriz RBAC, guardias, costura, dashboard. SIN base.
 services/ms-*/         Los cinco servicios: package.json, Dockerfile, tsconfig, tests/
 packages/contracts/    DTOs en TS; los catálogos cerrados emiten JS
-packages/shared/       JWT y revocados, auth entre servicios, errores, cliente HTTP,
+packages/shared/       JWT y revocados, auth entre servicios, errores,
                        bus (eventos, salida, entrega, entrada) y calendario (fechas.ts)
 database/<esquema>/    Migraciones SQL versionadas (docs/adr/0003)
 infra/                 Dockerfiles, docker-compose, Bicep, sembrador de la demostración
