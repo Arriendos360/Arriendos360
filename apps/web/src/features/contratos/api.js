@@ -16,7 +16,7 @@
  */
 
 import api from '../../services/api';
-import { abrirPdf, descargarPdf } from '../../services/descargas';
+import { descargarPdf } from '../../services/descargas';
 import { cuerpo, montoParaEnviar, soloCampos } from '../comun';
 
 /**
@@ -124,8 +124,5 @@ export const subirAnexo = (idContrato, { archivo, tipo }) => {
 /** Los anexos sólo salen por la API autenticada, como blob (docs/adr/0014). */
 export const descargarAnexo = (idContrato, anexo) =>
     descargarPdf(`/contratos/${idContrato}/anexos/${anexo.id_anexo}`, `${anexo.tipo || 'anexo'}_${anexo.id_anexo}.pdf`);
-
-export const abrirAnexo = (idContrato, anexo) =>
-    abrirPdf(`/contratos/${idContrato}/anexos/${anexo.id_anexo}`, `${anexo.tipo || 'anexo'}_${anexo.id_anexo}.pdf`);
 
 export const eliminarAnexo = (idContrato, idAnexo) => cuerpo(api.delete(`/contratos/${idContrato}/anexos/${idAnexo}`));

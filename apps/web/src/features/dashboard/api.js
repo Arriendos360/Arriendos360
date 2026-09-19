@@ -24,9 +24,3 @@ import api from '../../services/api';
 import { cuerpo } from '../comun';
 
 export const obtenerResumen = () => cuerpo(api.get('/dashboard/resumen'));
-
-export const obtenerIngresos = () => cuerpo(api.get('/dashboard/ingresos'));
-
-export const obtenerMora = () => cuerpo(api.get('/dashboard/mora'));
-
-export const obtenerContratosActivos = () => cuerpo(api.get('/dashboard/contratos-activos'));
