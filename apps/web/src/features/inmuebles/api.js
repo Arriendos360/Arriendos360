@@ -1,16 +1,16 @@
 /**
  * MS-Inmuebles, sólo para el propietario. El cuerpo usa los campos de la tabla
- * (`departamento`, `municipio`, `barrio`, ficha física). `id_propietario` y
- * `estado` no se envían.
+ * (`alias`, `descripcion`, `departamento`, `ciudad`, `barrio`, ficha física).
+ * `id_propietario` y `estado` no se envían.
  */
 
 import api from '../../services/api';
 import { cuerpo, soloCampos } from '../comun';
 
 /** Obligatorios: la tabla los declara `NOT NULL`. */
-const CAMPOS_OBLIGATORIOS = ['direccion', 'tipo'];
+const CAMPOS_OBLIGATORIOS = ['alias', 'direccion', 'tipo'];
 
-const CAMPOS_TEXTO = ['departamento', 'municipio', 'barrio'];
+const CAMPOS_TEXTO = ['descripcion', 'departamento', 'ciudad', 'barrio'];
 
 /** `INTEGER` en la tabla. */
 export const CAMPOS_ENTEROS = ['habitaciones', 'banos', 'deposito', 'parqueaderos', 'estrato'];

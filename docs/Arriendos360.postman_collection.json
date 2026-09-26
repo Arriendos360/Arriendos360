@@ -285,7 +285,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"departamento\": \"Antioquia\",\n    \"municipio\": \"Medellín\",\n    \"barrio\": \"El Poblado\",\n    \"direccion\": \"Calle 10 # 43-21\",\n    \"tipo_inmueble\": \"Apartamento\",\n    \"area_m2\": 75.5,\n    \"habitaciones\": 3,\n    \"banos\": 2,\n    \"deposito\": 1,\n    \"parqueaderos\": 1,\n    \"estrato\": 5\n}",
+              "raw": "{\n    \"alias\": \"Apto El Poblado\",\n    \"direccion\": \"Calle 10 # 43-21\",\n    \"tipo\": \"apartamento\",\n    \"descripcion\": \"Tercer piso, con vista a la montaña\",\n    \"departamento\": \"Antioquia\",\n    \"ciudad\": \"Medellín\",\n    \"barrio\": \"El Poblado\",\n    \"area_m2\": 75.5,\n    \"habitaciones\": 3,\n    \"banos\": 2,\n    \"deposito\": 1,\n    \"parqueaderos\": 1,\n    \"estrato\": 5\n}",
               "options": {
                 "raw": {
                   "language": "json"

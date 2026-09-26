@@ -3,7 +3,7 @@ import { Download, FileText, Plus, Receipt } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { listarContratos } from '../features/contratos/api';
-import { AreaTexto, actuaComoPropietario, ubicacionDe } from '../features/contratos/piezas';
+import { AreaTexto, actuaComoPropietario, nombreDeInmueble, ubicacionDe } from '../features/contratos/piezas';
 import {
     MEDIOS_PAGO_CONOCIDOS, abrirComprobante, abrirRecibo, anularTransaccion, crearCuentaCobro,
     listarCuentasCobro, registrarPago, transaccionesDeCuenta
@@ -70,7 +70,7 @@ function Inmueble({ cuenta }) {
     const inmueble = cuenta.Contrato?.Inmueble;
     return (
         <div className="min-w-[10rem]">
-            <p className="m-0 text-sm font-medium text-texto">{inmueble?.direccion || 'Inmueble sin datos'}</p>
+            <p className="m-0 text-sm font-medium text-texto">{nombreDeInmueble(inmueble) || 'Inmueble sin datos'}</p>
             {ubicacionDe(inmueble) && <p className="m-0 mt-0.5 text-xs text-texto-suave">{ubicacionDe(inmueble)}</p>}
         </div>
     );
@@ -168,7 +168,7 @@ function FormularioCobro({ contratos, error, onEnviar }) {
     };
 
     const opciones = contratos.map((c) => ({
-        valor: c.id_contrato, texto: [c.Inmueble?.direccion || 'Inmueble sin datos', ubicacionDe(c.Inmueble)].filter(Boolean).join(' · ')
+        valor: c.id_contrato, texto: [nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos', ubicacionDe(c.Inmueble)].filter(Boolean).join(' · ')
     }));
 
     return (
@@ -490,7 +490,7 @@ export default function Pagos() {
                     <div className="flex flex-col gap-4">
                         <FormError error={errorDialogo || errorDescarga} />
                         <div className="flex flex-wrap gap-6 bg-lavanda rounded-control p-4">
-                            <Dato titulo="Inmueble">{cuenta.Contrato?.Inmueble?.direccion || '—'}</Dato>
+                            <Dato titulo="Inmueble">{nombreDeInmueble(cuenta.Contrato?.Inmueble) || '—'}</Dato>
                             <Dato titulo="Periodo">{formatearFecha(cuenta.inicio)} – {formatearFecha(cuenta.fin)}</Dato>
                             <Dato titulo="Valor">{formatearDinero(cuenta.valor)}</Dato>
                             <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>

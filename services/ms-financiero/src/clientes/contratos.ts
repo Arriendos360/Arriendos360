@@ -20,7 +20,8 @@ export interface InmuebleAjeno {
   id_propietario: string;
   direccion?: string;
   barrio?: string;
-  municipio?: string;
+  alias?: string;
+  ciudad?: string;
   tipo?: string;
   [clave: string]: unknown;
 }

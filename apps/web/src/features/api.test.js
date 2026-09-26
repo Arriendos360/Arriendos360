@@ -42,19 +42,20 @@ test('devuelve el cuerpo, no la respuesta de axios', async () => {
 
 test('inmuebles manda sólo las columnas del endpoint, con los enteros como número', async () => {
     await crearInmueble({
-        alias: 'Apto 301', direccion: 'Calle 10 # 45-20', municipio: 'Bogotá D.C.', tipo: 'apartamento',
-        barrio: '', area_m2: '78.5', habitaciones: '3', id_propietario: 'otro', estado: 'arrendado'
+        alias: ' Apto 301 ', direccion: 'Calle 10 # 45-20', ciudad: 'Bogotá D.C.', tipo: 'apartamento',
+        descripcion: 'Con balcón', barrio: '', area_m2: '78.5', habitaciones: '3', id_propietario: 'otro', estado: 'arrendado'
     });
 
     expect(api.post).toHaveBeenCalledWith('/inmuebles', {
-        direccion: 'Calle 10 # 45-20', tipo: 'apartamento', municipio: 'Bogotá D.C.', area_m2: '78.5', habitaciones: 3
+        alias: 'Apto 301', direccion: 'Calle 10 # 45-20', tipo: 'apartamento', descripcion: 'Con balcón',
+        ciudad: 'Bogotá D.C.', area_m2: '78.5', habitaciones: 3
     });
 });
 
 test('al editar, un opcional vaciado viaja null y un obligatorio vacío no viaja', async () => {
-    await actualizarInmueble('i1', { direccion: '', tipo: 'casa', barrio: ' ', estrato: '' });
+    await actualizarInmueble('i1', { alias: '', direccion: '', tipo: 'casa', barrio: ' ', descripcion: '', estrato: '' });
 
-    expect(api.put).toHaveBeenCalledWith('/inmuebles/i1', { tipo: 'casa', barrio: null, estrato: null });
+    expect(api.put).toHaveBeenCalledWith('/inmuebles/i1', { tipo: 'casa', descripcion: null, barrio: null, estrato: null });
 });
 
 test('el contrato va en JSON, con el día límite entero y el canon numérico', async () => {

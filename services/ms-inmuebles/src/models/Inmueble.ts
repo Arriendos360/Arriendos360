@@ -1,5 +1,5 @@
 import { DataTypes, Model } from 'sequelize';
-import { ESTADOS_INMUEBLE, TIPOS_INMUEBLE } from 'arriendos360-contracts';
+import { ESTADOS_INMUEBLE, LONGITUD_MAXIMA_ALIAS, TIPOS_INMUEBLE } from 'arriendos360-contracts';
 import type { EstadoInmueble, TipoInmueble } from 'arriendos360-contracts';
 
 import { sequelize } from '../config/database';
@@ -12,10 +12,13 @@ import { ESTADO_INICIAL } from './constantes';
  */
 export class Inmueble extends Model {
   declare id_inmueble: string;
+  /** Nombre corto con el que el propietario reconoce el inmueble. */
+  declare alias: string;
   declare departamento: string | null;
-  declare municipio: string | null;
+  declare ciudad: string | null;
   declare barrio: string | null;
   declare direccion: string;
+  declare descripcion: string | null;
   declare tipo: TipoInmueble;
   declare area_m2: string | null;
   declare habitaciones: number | null;
@@ -33,10 +36,12 @@ export class Inmueble extends Model {
 Inmueble.init(
   {
     id_inmueble: claveUuid(),
+    alias: { type: DataTypes.STRING(LONGITUD_MAXIMA_ALIAS), allowNull: false },
     departamento: { type: DataTypes.STRING(100) },
-    municipio: { type: DataTypes.STRING(100) },
+    ciudad: { type: DataTypes.STRING(100) },
     barrio: { type: DataTypes.STRING(100) },
     direccion: { type: DataTypes.STRING(255), allowNull: false },
+    descripcion: { type: DataTypes.TEXT },
     tipo: {
       type: DataTypes.STRING(20),
       allowNull: false,

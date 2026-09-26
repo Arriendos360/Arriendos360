@@ -307,9 +307,10 @@ describe('Caminos críticos', () => {
         const inmueble = await pedir('POST', '/api/inmuebles', {
             token: tokenPropietario,
             cuerpo: {
+                alias: 'Apto Integración',
                 direccion: 'Calle Integración 1',
                 barrio: 'Centro',
-                municipio: 'Bogota',
+                ciudad: 'Bogota',
                 tipo: 'apartamento'
             }
         });
@@ -440,9 +441,10 @@ describe('Caminos críticos', () => {
         const inmueble = await pedir('POST', '/api/inmuebles', {
             token: tokenPropietario,
             cuerpo: {
+                alias: 'Casa del Corte',
                 direccion: 'Calle del Corte 2',
                 barrio: 'Centro',
-                municipio: 'Bogota',
+                ciudad: 'Bogota',
                 tipo: 'casa'
             }
         });

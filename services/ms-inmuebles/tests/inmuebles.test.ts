@@ -79,9 +79,45 @@ describe('Alta de inmuebles', () => {
     const respuesta = await request(app)
       .post('/api/inmuebles')
       .set(...conToken(dueno.token))
-      .send({ tipo: 'casa' });
+      .send({ tipo: 'casa', alias: 'Casa' });
 
     expect(respuesta.statusCode).toBe(400);
+  });
+
+  test('Sin alias, o con alias en blanco, devuelve 400', async () => {
+    for (const alias of [undefined, '', '   ']) {
+      const respuesta = await request(app)
+        .post('/api/inmuebles')
+        .set(...conToken(dueno.token))
+        .send(inmuebleValido({ alias }));
+
+      expect(respuesta.statusCode).toBe(400);
+      expect(respuesta.body.mensaje).toBe('El alias es obligatorio');
+    }
+  });
+
+  test('Un alias de más de 100 caracteres devuelve 400, no 500', async () => {
+    const respuesta = await request(app)
+      .post('/api/inmuebles')
+      .set(...conToken(dueno.token))
+      .send(inmuebleValido({ alias: 'a'.repeat(101) }));
+
+    expect(respuesta.statusCode).toBe(400);
+  });
+
+  test('Guarda alias, ciudad y descripción', async () => {
+    const { respuesta, id } = await crearInmueble(dueno.token, {
+      alias: '  Apto Chicó  ',
+      ciudad: 'Bogotá D.C.',
+      descripcion: 'Tercer piso, con balcón',
+    });
+
+    expect(respuesta.statusCode).toBe(201);
+
+    const leido = await request(app).get(`/api/inmuebles/${id}`).set(...conToken(dueno.token));
+    expect(leido.body.alias).toBe('Apto Chicó');
+    expect(leido.body.ciudad).toBe('Bogotá D.C.');
+    expect(leido.body.descripcion).toBe('Tercer piso, con balcón');
   });
 });
 
@@ -213,6 +249,29 @@ describe('Actualización', () => {
 
     expect(respuesta.statusCode).toBe(200);
     expect(respuesta.body.inmueble.tipo).toBe('local');
+  });
+
+  test('Cambia el alias y la descripción', async () => {
+    const respuesta = await request(app)
+      .put(`/api/inmuebles/${id}`)
+      .set(...conToken(dueno.token))
+      .send({ alias: 'Local Diagonal', descripcion: 'Esquinero' });
+
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.body.inmueble.alias).toBe('Local Diagonal');
+    expect(respuesta.body.inmueble.descripcion).toBe('Esquinero');
+  });
+
+  test('Vaciar el alias devuelve 400 y lo deja como estaba', async () => {
+    const respuesta = await request(app)
+      .put(`/api/inmuebles/${id}`)
+      .set(...conToken(dueno.token))
+      .send({ alias: '' });
+
+    expect(respuesta.statusCode).toBe(400);
+
+    const sigue = await request(app).get(`/api/inmuebles/${id}`).set(...conToken(dueno.token));
+    expect(sigue.body.alias).toBe('Local Diagonal');
   });
 
   test('Un tipo inválido en la actualización devuelve 400', async () => {
