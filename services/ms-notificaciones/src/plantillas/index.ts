@@ -1,30 +1,6 @@
 /**
- * Las plantillas de correo del sistema, todas juntas y por primera vez.
- *
- * ── DE DONDE VIENEN ─────────────────────────────────────────────────────────
- *
- * De dos sitios donde no tenian que estar. Cuatro de las cinco estaban escritas
- * como cadenas dentro de un bucle de `services/motor.ts`, en ms-financiero; la
- * quinta, dentro del controlador de `POST /api/auth/recuperar`, en ms-identidad.
- * Es decir: dos servicios de dominio que sabian redactar HTML.
- *
- * Reunirlas aqui no es orden por el orden. Es lo que hace que el texto de un aviso
- * se pueda cambiar sin tocar el motor de facturacion, y que las cinco puedan
- * compartir la misma envoltura sin copiarla cinco veces.
- *
- * ── UNA PLANTILLA RECIBE DATOS, NO ENTIDADES ────────────────────────────────
- *
- * Cada funcion toma la carga del evento y el destinatario ya resuelto, y devuelve
- * `{ asunto, cuerpoHtml }`. No consulta nada, no sabe que existe una base de datos
- * y no decide a quien se manda: eso lo hace el manejador. Asi se pueden probar
- * como lo que son, funciones puras.
- *
- * ── EL ASUNTO Y EL TEXTO SE CONSERVAN DE LO QUE HABIA ───────────────────────
- *
- * Los emoji de los asuntos, incluidos. No es nostalgia: el paso 7 mueve de sitio
- * el envio, y si ademas cambiara lo que la gente recibe, no habria forma de saber
- * si un correo raro es culpa de la mudanza o del texto nuevo. Lo unico que cambia
- * es lo que TENIA que cambiar, y esta anotado donde ocurre.
+ * Plantillas de correo. Cada una recibe la carga del evento y el destinatario ya
+ * resuelto, y devuelve `{ asunto, cuerpoHtml }`. Son funciones puras.
  */
 
 import type {
@@ -44,44 +20,23 @@ export interface Mensaje {
   cuerpoHtml: string;
 }
 
-/**
- * Remitente. Se conserva literal del mailer que este servicio sustituye.
- *
- * Con `??` sobre `process.env`, el `EMAIL_REMITENTE=` vacio que pasa Compose dejo el
- * remitente en blanco la primera vez que este servicio mando un correo. Aqui habia un
- * helper local por eso; ahora es `textoDeEntorno`, de `packages/shared`.
- */
+/** Remitente de los correos. */
 export const REMITENTE = textoDeEntorno(
   'EMAIL_REMITENTE',
   '"Arriendos360 🏠" <noreply@arriendos360.com>',
 );
 
-/**
- * Base publica de la SPA. Vive AQUI porque armar un enlace es cosa del canal.
- *
- * Se lee en cada llamada y no una vez al cargar el modulo: asi las pruebas pueden
- * apuntarla a otro sitio, igual que hace la costura del gateway con `MS_*_URL`.
- */
+/** Base pública de la SPA, para los enlaces. Se lee en cada llamada. */
 const urlApp = (): string =>
   textoDeEntorno('URL_APP', 'http://localhost:3000').replace(/\/+$/, '');
 
-/**
- * Pesos colombianos. El mismo formateador que imprimen los comprobantes.
- *
- * Se copia y no se importa de ms-financiero a proposito: importarlo obligaria a
- * este servicio a depender de aquel, y la direccion de las dependencias es la
- * contraria — Core puede depender de Generico, no al reves. Son cuatro lineas.
- */
+/** Pesos colombianos, con el mismo formato que los comprobantes. */
 export const pesos = (valor: number | string): string =>
   `$ ${parseFloat(String(valor ?? 0)).toLocaleString('es-CO', { minimumFractionDigits: 0 })}`;
 
 /**
- * Una fecha de calendario, como la leeria una persona en Bogota.
- *
- * `timeZone` NO es un adorno, y es el mismo cuidado que tiene `fmtPeriodo` en los
- * comprobantes: las fechas de los eventos son `YYYY-MM-DD`, que `Date` interpreta
- * como medianoche UTC. Formatearlas en la zona del contenedor imprimiria el dia
- * anterior en Bogota — el recibo del 1 de junio aparecería como 31 de mayo.
+ * Una fecha `YYYY-MM-DD` en palabras. En UTC: con la zona local se imprimiría el
+ * día anterior.
  */
 export const fecha = (iso: string): string =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('es-CO', {
@@ -108,14 +63,7 @@ const periodo = (inicio: string, fin: string): string => `${fecha(inicio)} al ${
 const saludo = (destinatario: Destinatario): string =>
   destinatario.nombres ? `<p>Hola ${destinatario.nombres},</p>` : '<p>Hola,</p>';
 
-/**
- * Envoltura comun de todos los correos.
- *
- * Es deliberadamente pobre: un `div` con una tipografia y un pie. El PMP declara
- * Tailwind y no esta instalado, y de todas formas el CSS de un correo no se parece
- * al de una pagina. Lo que importa aqui es que las cinco plantillas compartan
- * envoltura, no que sea bonita.
- */
+/** Envoltura común de todos los correos. */
 const envolver = (contenido: string): string => `
 <div style="font-family: Arial, Helvetica, sans-serif; font-size: 15px; color: #222; line-height: 1.5;">
   ${contenido}
@@ -127,25 +75,7 @@ const envolver = (contenido: string): string => `
 
 // ── ms-identidad ─────────────────────────────────────────────────────────────
 
-/**
- * Recuperacion de contrasena. Es la plantilla que estaba en `auth.controller.ts`.
- *
- * ── EL ENLACE SE ARMA AQUI, Y EL EVENTO SOLO TRAE EL TOKEN ─────────────────
- *
- * `URL_APP` es configuracion del canal, no del dominio: ms-identidad no tiene por
- * que saber en que dominio vive la SPA para poder emitir un token.
- *
- * ── LA CADUCIDAD SE DICE COMO INSTANTE, NO COMO «30 MINUTOS» ───────────────
- *
- * Y este es el unico cambio de texto respecto al correo anterior. Alli la frase
- * «caduca en 30 minutos» era cierta porque el envio ocurria dentro de la peticion
- * que creaba el token. Ahora hay una ventana entre las dos cosas, y los
- * reintentos la estiran: «30 minutos» seria una promesa que el enlace no cumple.
- *
- * El evento trae `expira_en` justamente para esto. Si el correo llega tarde, dice
- * una hora que ya paso —que es la verdad— en vez de prometer media hora que no
- * existe. Ver `docs/adr/0019`.
- */
+/** Recuperación de contraseña: el enlace con el token y la hora exacta en que caduca. */
 export const recuperacionSolicitada = (
   carga: RecuperacionSolicitada,
   destinatario: Destinatario,
@@ -160,18 +90,7 @@ export const recuperacionSolicitada = (
   `),
 });
 
-/**
- * Alta o reemision de la contrasena temporal.
- *
- * ── ESTA PLANTILLA NO SUSTITUYE A NINGUNA, ES NUEVA ────────────────────────
- *
- * Y NO LLEVA LA CONTRASENA. El ADR 0007 decide que la temporal se entrega en mano
- * porque el sistema no puede garantizar que un correo llegue, y ese ADR sigue en
- * pie: este mensaje avisa de que la cuenta existe, no la abre.
- *
- * Existe porque un inquilino dado de alta por su arrendador no pidio nada y hoy no
- * recibe ningun aviso de que hay una cuenta a su nombre. Decirselo es lo minimo.
- */
+/** Alta o reemisión de la contraseña temporal. No lleva la contraseña. */
 export const contrasenaTemporalEmitida = (
   carga: ContrasenaTemporalEmitida,
   destinatario: Destinatario,
@@ -204,16 +123,7 @@ export const contrasenaTemporalEmitida = (
 
 // ── ms-financiero ────────────────────────────────────────────────────────────
 
-/**
- * Recibo generado. Era el correo del final de `procesarContratos`.
- *
- * El texto de aquel decia «tu recibo para el periodo que inicia el ${diaCorte}»,
- * con el dia del mes suelto y sin mes ni año, porque era lo que el bucle tenia a
- * mano. Ahora el evento trae el periodo completo, asi que dice el periodo completo.
- *
- * Y lo recibe ademas quien emite un cobro a mano, que antes no mandaba nada. Ver
- * `docs/adr/0019`.
- */
+/** Recibo generado, al inquilino. */
 export const cuentaCobroGenerada = (
   carga: CuentaCobroGenerada,
   destinatario: Destinatario,
@@ -228,14 +138,7 @@ export const cuentaCobroGenerada = (
   `),
 });
 
-/**
- * Vencimiento proximo, al INQUILINO. Era el primero de los dos avisos del motor.
- *
- * El texto anterior decia «tienes hasta mañana», que era cierto en el instante del
- * `sendMail` porque el envio iba dentro del barrido. Con el bus eso deja de ser
- * seguro: el evento trae la fecha en que la cuenta entra en mora, y aqui se dice
- * la fecha. Una frase relativa se vuelve falsa sola; una fecha no.
- */
+/** Vencimiento próximo, al inquilino, con la fecha en que entra en mora. */
 export const porVencerInquilino = (
   carga: CuentaCobroPorVencer,
   destinatario: Destinatario,
@@ -252,7 +155,7 @@ export const porVencerInquilino = (
   `),
 });
 
-/** Vencimiento proximo, al PROPIETARIO. El segundo de los dos. */
+/** Vencimiento próximo, al propietario. */
 export const porVencerPropietario = (
   carga: CuentaCobroPorVencer,
   destinatario: Destinatario,

@@ -1,45 +1,7 @@
 /**
- * Cliente de MS-Notificaciones hacia MS-Identidad.
- *
- * ── ES LA UNICA DEPENDENCIA DEL SERVICIO, Y EXISTE POR UNA REGLA ────────────
- *
- * Los eventos NO LLEVAN DIRECCIONES DE CORREO. Llevan el `id_usuario`, y el
- * destinatario se resuelve aqui. La razon es de propiedad del dato: un correo
- * pertenece a `identidad.usuarios` y a nadie mas; copiarlo en un sobre convertiria
- * a cada emisor —ms-identidad y ms-financiero— en responsable de un dato de
- * contacto que no le pertenece, y dejaria copias viejas en dos tablas de salida
- * que no tienen forma de enterarse de que alguien cambio su correo.
- *
- * El precio es este salto de red, y se paga en el unico momento en el que la
- * respuesta es actual: al manejar el evento.
- *
- * ── AQUI EL FALLO SE PROPAGA. NO DEGRADA ────────────────────────────────────
- *
- * Y es la diferencia mas importante con el cliente equivalente de ms-financiero,
- * que para lo mismo DEGRADA a un mapa vacio.
- *
- * Alli tenia sentido: el que preguntaba era el motor, cuyo trabajo principal es
- * facturar, y un barrido que genera las cuentas del mes sin mandar el correo es
- * mejor que uno que no genera nada. Aqui el correo ES el trabajo. Degradar
- * significaria devolver un destinatario vacio y dar el evento por procesado, es
- * decir, PERDER el aviso sin que nada lo registre — y con la marca del evento ya
- * puesta, el productor no lo reintentaria nunca.
- *
- * Asi que `destinatariosDe` LANZA. El manejador deja subir la excepcion, la
- * transaccion del consumidor se va entera —incluida la marca del `id_evento`— y el
- * `500` le dice al productor que lo reintente. El evento sigue en su tabla de
- * salida, con su espera creciente y su apartado tras diez intentos. No se pierde.
- *
- * Es exactamente la distincion que la cabecera de `apps/gateway/src/clientes/inmuebles.js`
- * hace entre componer para decorar y componer para autorizar, aplicada a un tercer
- * caso: componer para PODER ACTUAR.
- *
- * ── EN LOTE, SIEMPRE ────────────────────────────────────────────────────────
- *
- * Un evento puede tener dos destinatarios —inquilino y propietario— y se piden en
- * UNA peticion. No es una optimizacion prematura: es que el endpoint ya acepta una
- * lista, y pedir de uno en uno dentro de una transaccion abierta seria mantenerla
- * abierta el doble de tiempo por nada.
+ * Cliente de MS-Notificaciones hacia MS-Identidad: resuelve el correo de cada
+ * destinatario a partir de su `id_usuario`, en lote. Si no puede preguntar, lanza
+ * para que el evento se reintente.
  */
 
 import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
@@ -67,11 +29,7 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
   return limpio === '' ? null : limpio.replace(/\/+$/, '');
 };
 
-/**
- * Datos de varios usuarios, indexados por id.
- *
- * LANZA si no se puede preguntar o si la respuesta no es 2xx. Ver la cabecera.
- */
+/** Datos de varios usuarios, indexados por id. Lanza si no se puede preguntar. */
 export const usuariosPorIds = async (
   ids: Array<string | null | undefined>,
   opciones: { urlBase?: string | null } = {},
@@ -84,9 +42,6 @@ export const usuariosPorIds = async (
   }
 
   if (base === null) {
-    // Sin fuente no se puede resolver a nadie, y callarlo seria perder el aviso.
-    // El arranque del servicio ya lo advierte; esto lo convierte en un fallo
-    // observable en vez de en un correo que no sale.
     throw new Error(
       'MS_IDENTIDAD_URL sin definir: no se puede resolver el destinatario de la notificación',
     );
@@ -120,22 +75,8 @@ export interface Destinatario {
 }
 
 /**
- * Resuelve los destinatarios de una lista de identificadores.
- *
- * ── UN USUARIO SIN CORREO NO ES UN FALLO DE RED, Y SE TRATA DISTINTO ────────
- *
- * Que ms-identidad no conteste es transitorio y merece un reintento. Que conteste
- * y el usuario no exista, o no tenga correo, no se arregla reintentando: son diez
- * intentos y un evento apartado para nada.
- *
- * Asi que esos se OMITEN de la lista, y el manejador decide. Hoy todos los
- * manejadores hacen lo mismo —redactan para los que si se pudieron resolver— con
- * una excepcion deliberada: si no se pudo resolver a NADIE, `manejadores`
- * registra el aviso perdido. Un evento que no avisa a nadie no puede pasar en
- * silencio.
- *
- * `documento` y `telefono` no se piden aunque el endpoint los devuelva: este
- * servicio no los usa y no tiene por que tenerlos en memoria.
+ * Los destinatarios de una lista de identificadores. Los usuarios que no existen
+ * o no tienen correo se omiten.
  */
 export const destinatariosDe = async (
   ids: Array<string | null | undefined>,
