@@ -1,24 +1,9 @@
 /**
  * Inmuebles del propietario autenticado.
  *
- * AUTORIZACION EN DOS NIVELES (regla dura 8). El primero lo puso la matriz RBAC
- * del gateway y lo repite `esPropietario`: quien llama tiene rol de propietario.
- * El segundo esta aqui, y es el que importa: que el inmueble sobre el que se
- * opera sea de ESTE propietario. El rol dice que puedes tener inmuebles, no que
- * este sea tuyo.
- *
- * La comprobacion es EXPLICITA en cada operacion sobre un recurso concreto, y no
- * un filtro de listado heredado. `buscarPropio` es una sola funcion que los
- * cuatro caminos usan, para que no haya una operacion que se olvide de mirar.
- *
- * El `id_propietario` sale siempre del `sub` del token y nunca del cuerpo
- * (regla dura 4). Un `id_propietario` en el payload se descarta en silencio: no
- * es un error del cliente, es un campo que no le corresponde poner.
- *
- * SE RESPONDE 404 Y NO 403 cuando el inmueble existe pero es de otro. Distinguir
- * los dos casos le confirmaria a cualquiera que un identificador corresponde a
- * un inmueble real: para quien pregunta, un inmueble ajeno y uno inexistente son
- * lo mismo. Ver `docs/adr/0005`.
+ * Cada operación sobre un inmueble comprueba que sea de quien pregunta
+ * (`buscarPropio`); si es de otro, responde 404, igual que si no existiera.
+ * `id_propietario` sale siempre del `sub` del token.
  */
 
 import type { Request, Response } from 'express';
@@ -31,14 +16,7 @@ import { esUuid } from '../models/uuid';
 /** Columnas que el cliente nunca escribe, las ponga o no en el cuerpo. */
 const NO_ESCRIBIBLES = ['id_inmueble', 'id_propietario', 'creado_por', 'actualizado_por', 'estado'];
 
-/**
- * Quita del cuerpo lo que no le toca escribir al cliente.
- *
- * `estado` esta en la lista y no es un descuido: no lo mueve una persona
- * editando un formulario, lo mueve el ciclo de vida del contrato a traves de
- * `/interno`. Aceptarlo aqui permitiria marcar como disponible un inmueble con
- * contrato vigente. Ver `docs/adr/0011`.
- */
+/** Quita del cuerpo lo que no le toca escribir al cliente. `estado` lo mueven los eventos. */
 const soloCamposDeNegocio = (cuerpo: unknown): Record<string, unknown> => {
   const entrada = (cuerpo ?? {}) as Record<string, unknown>;
 
@@ -49,12 +27,7 @@ const soloCamposDeNegocio = (cuerpo: unknown): Record<string, unknown> => {
 
 const MENSAJE_NO_ENCONTRADO = 'Inmueble no encontrado o no tienes permisos';
 
-/**
- * El inmueble, solo si es de quien pregunta.
- *
- * Devuelve `null` tanto si no existe como si es de otro: los dos casos acaban en
- * el mismo 404 y quien llama no tiene por que distinguirlos.
- */
+/** El inmueble, sólo si es de quien pregunta; `null` si no existe o es de otro. */
 const buscarPropio = async (id: unknown, sub: string): Promise<Inmueble | null> => {
   if (!esUuid(id)) {
     return null;
@@ -105,9 +78,7 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
     const { sub } = req.usuario!;
     const datos = soloCamposDeNegocio(req.body);
 
-    // El tipo se valida ANTES de llegar al modelo para poder devolver un 400 con
-    // el catalogo entero. Si se dejara caer al `isIn` de Sequelize saldria un
-    // ValidationError que este catch traduciria a 500.
+    // Se valida antes del modelo para responder 400 con el catálogo.
     if (!esTipoInmueble(datos['tipo'])) {
       return res.status(400).json(crearError(mensajeTipoInvalido()));
     }
@@ -140,8 +111,7 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
 
     const cambios = soloCamposDeNegocio(req.body);
 
-    // Solo se valida si viene: una actualizacion parcial que no toca el tipo no
-    // tiene por que mandarlo.
+    // Sólo se valida si viene.
     if ('tipo' in cambios && !esTipoInmueble(cambios['tipo'])) {
       return res.status(400).json(crearError(mensajeTipoInvalido()));
     }
@@ -156,15 +126,8 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
 };
 
 /**
- * DELETE /api/inmuebles/:id
- *
- * NO comprueba si hay un contrato activo. Esa regla existe y se aplica, pero en
- * el gateway: depende de `contratos`, que es un subdominio de Core, y este
- * servicio es de Soporte. Consultarlo desde aqui invertiria la direccion de las
- * dependencias. Ver `docs/adr/0011`.
- *
- * Lo que si es responsabilidad de este endpoint es la pertenencia, y eso si se
- * comprueba.
+ * DELETE /api/inmuebles/:id — comprueba la pertenencia. Que no tenga contrato
+ * activo lo comprueba el guardia del gateway.
  */
 export const eliminar = async (req: Request, res: Response): Promise<Response> => {
   try {

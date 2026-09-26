@@ -1,12 +1,6 @@
 /**
- * Arranque de MS-Inmuebles.
- *
- * Aplica sus migraciones antes de escuchar: el esquema `inmuebles` es suyo y de
- * nadie mas, asi que nadie mas puede prepararlo.
- *
- * En Azure no: alli `MIGRACIONES_AL_ARRANCAR=no` y las aplica el Job `migrar-inmuebles`
- * antes de publicar la revision; este proceso solo comprueba que no quede ninguna
- * pendiente, y se niega a arrancar si la hay. Ver `docs/adr/0022`.
+ * Arranque de MS-Inmuebles: valida el entorno, aplica o comprueba las
+ * migraciones, arranca la caché de revocación y escucha.
  */
 
 import { app } from './app';
@@ -17,10 +11,7 @@ import { enteroDeEntorno, validarEntorno, siNoDeEntorno } from 'arriendos360-sha
 
 const PUERTO = enteroDeEntorno('PORT', 3012);
 
-/**
- * Lo que no tiene defecto razonable. Sin `MS_IDENTIDAD_URL` el servicio arrancaba con
- * un aviso y dejaba entrar tokens de sesiones cerradas.
- */
+/** Variables obligatorias. Sin `MS_IDENTIDAD_URL` no se comprobaría la revocación. */
 const OBLIGATORIAS = [
   'DB_PASSWORD',
   'JWT_SECRET',
@@ -36,9 +27,7 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-inmuebles: conexión a PostgreSQL exitosa');
 
-    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
-    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
-    // Ver docs/adr/0022.
+    // Con MIGRACIONES_AL_ARRANCAR=no sólo comprueba que no falte ninguna.
     if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
       const aplicadas = await aplicarMigraciones(sequelize);
       console.log(
