@@ -1,37 +1,7 @@
 /**
- * Almacenamiento de archivos.
- *
- * Viene del gateway sin cambios de diseño: el paso 6d solo lo muda, porque los
- * anexos son de este servicio y su almacenamiento tambien. Lo unico nuevo es que
- * ahora es TypeScript, asi que la interfaz que antes era una clase con metodos
- * que lanzaban es un `interface` de verdad y una implementacion incompleta ya no
- * compila.
- *
- * MISMA JUGADA QUE `Notificador` en ms-identidad, y por la misma razon: hay una
- * cosa que el codigo necesita hacer hoy, un sitio distinto donde tendra que
- * hacerla mañana, y ninguna de las dos debe filtrarse a la logica de negocio. El
- * controlador de anexos no sabe si el archivo acaba en un disco o en un
- * contenedor de Azure; le pide al almacenamiento que lo guarde y se queda con la
- * referencia que le devuelvan.
- *
- * DOS IMPLEMENTACIONES, Y LAS DOS HACEN FALTA.
- *
- * - `AlmacenamientoDisco` es la de desarrollo y la de las pruebas. Que exista es
- *   lo que permite que las suites sigan corriendo en un portatil sin Docker y
- *   sin credenciales de Azure, que es la regla que CLAUDE.md fija para todo el
- *   proyecto. No es un doble: es una implementacion de verdad, con sus pruebas.
- * - `AlmacenamientoAzureBlob` es la de despliegue: en Container Apps el disco del
- *   contenedor se borra cada vez que la replica se apaga. Ver `docs/adr/0014`.
- *
- * LA REFERENCIA ES OPACA. `archivo_anexo` guarda lo que devuelve `guardar()`, y
- * lo unico que se promete de ese valor es que `leer()` y `eliminar()` lo
- * entienden. Con disco es una ruta relativa a la raiz configurada; con Azure, el
- * nombre del blob. Guardar una ruta absoluta de disco —lo que hacia `url_pdf`—
- * ata la fila a la maquina que la escribio.
- *
- * LEER DEVUELVE UN FLUJO, no un Buffer. Un contrato escaneado de 10 MB por diez
- * descargas simultaneas son 100 MB de memoria en un contenedor que tiene poco
- * mas; en streaming son unos pocos kilobytes de bufer.
+ * Almacenamiento de los archivos de anexos: en disco (desarrollo y pruebas) o en
+ * Azure Blob Storage (despliegue). `archivo_anexo` guarda una referencia opaca
+ * que sólo entienden `leer()` y `eliminar()`. Leer devuelve un flujo.
  */
 
 import crypto from 'crypto';
@@ -63,13 +33,7 @@ export interface PeticionGuardar {
   extension?: string;
 }
 
-/**
- * Lo que cumplen las dos implementaciones.
- *
- * En TypeScript no hace falta la clase base con metodos que lanzan: una
- * implementacion a la que le falte un metodo no compila, que es mejor que
- * fallar al usarla.
- */
+/** Lo que cumplen las dos implementaciones. */
 export interface Almacenamiento {
   guardar(archivo: PeticionGuardar): Promise<ArchivoGuardado>;
   /** `null` si la referencia no existe. */
@@ -80,24 +44,10 @@ export interface Almacenamiento {
   describir(): string;
 }
 
-/**
- * Genera el nombre del archivo dentro del almacenamiento.
- *
- * UUID y no el nombre original a proposito. El nombre que trae un archivo subido
- * lo controla quien lo sube: puede traer `../../etc/passwd`, caracteres que el
- * sistema de archivos no acepta, o el nombre de otro archivo ya guardado. Se
- * descarta entero y se genera uno nuevo; el nombre original no hace falta para
- * nada, porque lo que el usuario ve al descargar lo decide el controlador.
- */
+/** Nombre del archivo en el almacenamiento: un UUID, nunca el nombre original. */
 const nombreNuevo = (extension = '.pdf'): string => `${crypto.randomUUID()}${extension}`;
 
-/**
- * Almacenamiento en el disco del propio proceso.
- *
- * La raiz NO es `uploads/`. Ese directorio se servia con `express.static` y
- * cualquiera con la URL se bajaba un contrato; reutilizar el nombre invitaria a
- * volver a exponerlo. Aqui se llama `almacenamiento/` y nada lo publica.
- */
+/** Almacenamiento en disco, bajo `ALMACENAMIENTO_RUTA`. Nada lo publica. */
 export class AlmacenamientoDisco implements Almacenamiento {
   private readonly raiz: string;
 
@@ -105,13 +55,7 @@ export class AlmacenamientoDisco implements Almacenamiento {
     this.raiz = path.resolve(raiz);
   }
 
-  /**
-   * Resuelve una referencia a una ruta absoluta, sin salirse de la raiz.
-   *
-   * La comprobacion no es paranoia: la referencia viaja en la fila de la base y
-   * llega a `leer()` desde un `id_anexo` de la URL. Un `..` en medio convertiria
-   * la descarga de anexos en un lector de archivos arbitrarios del contenedor.
-   */
+  /** Resuelve una referencia a una ruta absoluta; lanza si se sale de la raíz. */
   private rutaDe(referencia: string): string {
     const absoluta = path.resolve(this.raiz, referencia);
 
@@ -139,8 +83,7 @@ export class AlmacenamientoDisco implements Almacenamiento {
     try {
       datos = await fsp.stat(origen);
     } catch (error) {
-      // Que el archivo no este es un caso normal —una fila que quedo apuntando a
-      // un disco que ya no existe— y lo resuelve el llamante con un 404.
+      // Archivo ausente: `null`, y el llamante responde 404.
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
       }
@@ -170,18 +113,8 @@ export class AlmacenamientoDisco implements Almacenamiento {
 }
 
 /**
- * Almacenamiento en Azure Blob Storage.
- *
- * EL SDK SE CARGA AQUI DENTRO, no arriba con los demas `import`. Asi el paquete
- * no se toca en desarrollo ni en las pruebas —que usan disco— y el coste de
- * arranque solo lo paga quien de verdad va a hablar con Azure. Es tambien lo que
- * hace que las suites no necesiten credenciales: nunca llegan a esta linea.
- *
- * NO GENERA URL FIRMADAS. El archivo sale por
- * `GET /api/contratos/:id/anexos/:idAnexo` y pasa por la matriz RBAC del gateway
- * y por el ABAC de este servicio. Una URL firmada es un permiso que viaja solo:
- * quien la tenga entra, aunque haya dejado de ser inquilino de ese contrato, y
- * no hay forma de revocarla antes de que caduque.
+ * Almacenamiento en Azure Blob Storage, en un contenedor privado. El SDK se carga
+ * al primer uso. No genera URL firmadas: los archivos sólo salen por la API.
  */
 export class AlmacenamientoAzureBlob implements Almacenamiento {
   private readonly cadenaConexion: string | undefined;
@@ -206,8 +139,7 @@ export class AlmacenamientoAzureBlob implements Almacenamiento {
     const servicio = BlobServiceClient.fromConnectionString(this.cadenaConexion);
     const contenedor = servicio.getContainerClient(this.contenedor);
 
-    // Sin acceso anonimo: el contenedor es privado y solo se lee a traves de la
-    // API. Es la mitad de la decision de no usar URL firmadas.
+    // Contenedor privado, sin acceso anónimo.
     await contenedor.createIfNotExists();
 
     this.cliente = contenedor;
@@ -251,8 +183,6 @@ export class AlmacenamientoAzureBlob implements Almacenamiento {
       return null;
     }
 
-    // `download()` devuelve el cuerpo como flujo legible: el archivo no pasa
-    // entero por la memoria del servicio.
     const descarga = await blob.download();
 
     return {
@@ -274,15 +204,7 @@ export class AlmacenamientoAzureBlob implements Almacenamiento {
   }
 }
 
-/**
- * Elige implementacion segun el entorno.
- *
- * La regla es una sola linea y conviene que se lea asi: **hay cadena de conexion
- * de Azure, se usa Azure; si no, disco.** Sin banderas que activar y sin un
- * `NODE_ENV` que interpretar, para que no haya forma de desplegar en Azure
- * creyendo que se esta guardando en Blob mientras los archivos van a un disco
- * que se borra esa misma noche.
- */
+/** Con `AZURE_STORAGE_CONNECTION_STRING`, Azure Blob; sin ella, disco. */
 export const crearAlmacenamiento = (): Almacenamiento =>
   process.env['AZURE_STORAGE_CONNECTION_STRING']
     ? new AlmacenamientoAzureBlob()

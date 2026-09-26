@@ -1,30 +1,6 @@
 /**
- * Cliente de MS-Contratos hacia MS-Inmuebles.
- *
- * ── LA DIRECCION ES CORRECTA, Y CONVIENE DEJARLO ESCRITO ────────────────────
- *
- * Contratos es subdominio **Core** e Inmuebles es **Soporte**. Que Core dependa
- * de Soporte es la direccion natural: lo que no vale es lo contrario, y por eso
- * ms-inmuebles nunca pregunta por contratos —deduce el estado de ocupacion de un
- * evento— y por eso el guardia de borrado de inmuebles vive fuera de el.
- *
- * Es tambien lo que hace innecesario denormalizar `id_propietario` en
- * `contratos`: la pregunta «¿de quien es este inmueble?» se le puede hacer al
- * servicio que lo sabe, en el momento, y la respuesta nunca esta vieja. Ver
- * `docs/adr/0017`.
- *
- * ── TODO LO DE AQUI AUTORIZA, ASI QUE NADA SE DEGRADA ───────────────────────
- *
- * `clientes/inmuebles.js` del gateway distingue dos usos —autorizar y decorar— y
- * degrada solo el segundo. Aqui NO hay segundo: este servicio no compone
- * respuestas con datos de inmuebles, solo comprueba pertenencia. Un fallo de
- * ms-inmuebles se PROPAGA siempre y acaba en un 502, nunca en «no tienes
- * permisos» ni en una lista vacia.
- *
- * La razon es la de siempre: una lista vacia haria que un propietario viera «no
- * tienes contratos», que es una respuesta creible y falsa; y un 403 le diria que
- * no tiene derecho sobre algo suyo cuando en realidad no se ha podido
- * comprobar. Las dos son peores que un error honesto.
+ * Cliente de MS-Contratos hacia MS-Inmuebles, para comprobar pertenencia. Los
+ * fallos se propagan siempre: nunca se degradan a 403 ni a una lista vacía.
  */
 
 import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
@@ -72,11 +48,7 @@ const pedirJson = async (url: string): Promise<{ inmuebles?: InmuebleAjeno[] }> 
 /**
  * Los identificadores de los inmuebles de un propietario.
  *
- * Es la mitad cara de la disyuncion de pertenencia: «los contratos sobre mis
- * inmuebles». La otra mitad —«los contratos donde soy el inquilino»— es una
- * columna de esta misma base y no cuesta nada.
- *
- * @throws si el servicio no responde. Ver la nota de cabecera.
+ * @throws si el servicio no responde.
  */
 export const idsDePropietario = async (
   sub: string,
@@ -96,11 +68,7 @@ export const idsDePropietario = async (
 };
 
 /**
- * Un inmueble, SOLO si es de este propietario. `null` en cualquier otro caso.
- *
- * La comprobacion se hace aqui, contra el `id_propietario` que devuelve el
- * servicio, y no pidiendole al servicio que filtre: asi el que autoriza es quien
- * tiene el `sub`.
+ * Un inmueble, sólo si su `id_propietario` es `sub`; si no, `null`.
  *
  * @throws si el servicio no responde.
  */

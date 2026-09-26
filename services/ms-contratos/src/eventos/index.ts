@@ -1,22 +1,6 @@
 /**
- * MS-Contratos como PRODUCTOR de eventos.
- *
- * EL PRODUCTOR SE MUDA CON LO QUE PRODUCE. Este archivo estaba en
- * `apps/gateway/src/eventos/`, y su propia cabecera decia por que: el gateway
- * emitia `ContratoFormalizado` porque `contratos` todavia era suya, y la regla
- * que se respetaba era la que importa —**lo emite quien escribe el contrato**—.
- * El paso 6d mueve la tabla, asi que mueve tambien la bandeja de salida y estas
- * lineas. El Capitulo 2 dice que lo emite MS-Contratos, y a partir de aqui es
- * literalmente cierto.
- *
- * LO QUE NO CAMBIA, y es lo que hace que el traslado sea seguro: el evento se
- * anota en la MISMA transaccion que el cambio de dominio. Antes las dos
- * escrituras iban a `public`; ahora van a `contratos`. Siguen siendo la misma
- * base y la misma transaccion, asi que la atomicidad del patron outbox se
- * conserva intacta. Si algun dia este servicio tiene su propia base, seguira
- * siendo la suya.
- *
- * Ver `packages/shared/src/salida.ts` y `docs/adr/0012`.
+ * MS-Contratos como productor: `ContratoFormalizado` y `ContratoFinalizado`,
+ * anotados en la misma transacción que el cambio del contrato.
  */
 
 import {
@@ -37,7 +21,7 @@ import {
 import { ESQUEMA, sequelize } from '../config/database';
 import type { Contrato } from '../models/Contrato';
 
-/** La bandeja de este productor. Ver `database/contratos/001`. */
+/** Tabla de salida de este productor. */
 export const TABLA_SALIDA = `${ESQUEMA}.eventos_salida`;
 
 export const almacen: AlmacenSalida = crearAlmacenSalidaSql({
@@ -46,32 +30,8 @@ export const almacen: AlmacenSalida = crearAlmacenSalidaSql({
 });
 
 /**
- * Quien escucha cada tipo.
- *
- * Se configura, no se descubre: nada de service discovery (CLAUDE.md, «Que no
- * hacer»). Se lee del entorno EN CADA ENTREGA, igual que hace la costura del
- * gateway con `MS_*_URL`, y por el mismo motivo practico: las pruebas apuntan el
- * destino a un doble despues de haber cargado este modulo.
- *
- * ── DESDE EL PASO 6e HAY DOS SUSCRIPTORES DE UN MISMO EVENTO ───────────────
- *
- * `ContratoFormalizado` va a ms-inmuebles, que pone el inmueble en `arrendado`,
- * y a ms-financiero, que inserta la primera cuenta de cobro. Es el caso que el
- * Capitulo 2 describe y para el que se diseño el bus.
- *
- * Y cambiarlo ha sido añadir una linea, que era la promesa del diseño. Este
- * servicio NO se entera: no llama a ms-financiero, no sabe que existe y no
- * cambia su comportamiento segun lo que aquel conteste. Anuncia un hecho de su
- * dominio y quien escuche vera que hace con el. Coreografia, no orquestacion.
- *
- * LO QUE SI CAMBIA ES LA POLITICA DE ENTREGA, y conviene saberlo: la fila se
- * marca entregada cuando ACEPTAN LOS DOS. Si ms-financiero esta caido, el evento
- * se reintenta y ms-inmuebles lo recibe otra vez — de ahi que la idempotencia
- * del consumidor deje de ser una precaucion teorica. Ver `entrega.ts`.
- *
- * `ContratoFinalizado` sigue teniendo uno solo. No es un olvido: finalizar un
- * contrato no cancela lo que se debe, asi que Financiero no tiene nada que hacer
- * con el. Lo explica `eventos/index.ts` de ese servicio.
+ * Quién escucha cada tipo. La URL se lee del entorno en cada entrega. Un evento
+ * con dos suscriptores se marca entregado cuando aceptan los dos.
  */
 const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>> = {
   [TIPO_CONTRATO_FORMALIZADO]: [
@@ -92,14 +52,7 @@ const entregar = crearEntregaHttp({
   secreto: () => process.env['SERVICIO_JWT_SECRET'],
 });
 
-/**
- * Un publicador sobre esta tabla de salida y este transporte.
- *
- * Se expone la fabrica y no solo la instancia para que las pruebas puedan
- * ajustar lo unico que les estorba —la espera entre reintentos, el limite de
- * intentos— sin sustituir el almacen ni la entrega, que son justo las dos piezas
- * que interesa ejercitar de verdad.
- */
+/** Crea un publicador sobre esta tabla de salida; las pruebas ajustan sus opciones. */
 export const crearPublicadorDeSalida = (opciones: Record<string, unknown> = {}): Publicador =>
   crearPublicador({
     almacen,
@@ -108,25 +61,10 @@ export const crearPublicadorDeSalida = (opciones: Record<string, unknown> = {}):
     ...opciones,
   });
 
-/**
- * El publicador del proceso.
- *
- * Uno solo, creado al cargar el modulo pero SIN arrancar: `server.ts` lo pone en
- * marcha cuando el servidor arranca de verdad, y las pruebas llaman a `ciclo()`
- * a mano. Un temporizador corriendo durante una suite haria que las entregas
- * ocurrieran en momentos que la prueba no controla, que es la forma mas facil de
- * escribir una prueba que falla un dia de cada veinte.
- */
+/** El publicador del proceso, sin arrancar: lo arranca `server.ts`. */
 export const publicador: Publicador = crearPublicadorDeSalida();
 
-/**
- * Anota `ContratoFormalizado` en la tabla de salida.
- *
- * **Tiene que ir dentro de la transaccion que guarda el contrato.** Es todo el
- * sentido del patron: las dos escrituras van a la misma base, asi que o quedan
- * las dos o no queda ninguna. Registrarlo fuera reintroduce exactamente el
- * problema del ADR 0011, solo que con mas codigo.
- */
+/** Anota `ContratoFormalizado`. Debe ir dentro de la transacción que guarda el contrato. */
 export const registrarContratoFormalizado = (
   contrato: Contrato,
   transaccion: unknown,
@@ -135,27 +73,14 @@ export const registrarContratoFormalizado = (
     crearSobre(TIPO_CONTRATO_FORMALIZADO, {
       id_contrato: contrato.id_contrato,
       id_inmueble: contrato.id_inmueble,
-      // `canon` es DECIMAL, y Sequelize devuelve los DECIMAL como texto para no
-      // perder precision. El evento lleva un numero.
+      // Sequelize devuelve los DECIMAL como texto; el evento lleva un número.
       canon: Number(contrato.canon),
       // De la columna, tal cual. `DATEONLY` ya viene como `YYYY-MM-DD`.
       fecha_inicio_corte: contrato.fecha_inicio_corte,
-      // ── VERSION 2, DESDE EL PASO 7 ─────────────────────────────────────────
-      //
-      // Lo pide ms-financiero, y no para crear la cuenta de cobro —esa no guarda el
-      // inquilino en ninguna columna— sino para ANUNCIARLA: el aviso de
-      // `CuentaCobroGenerada` tiene que decir a quien se le factura, y dentro de la
-      // transaccion del consumidor ese dato no esta en ninguna parte. Lo guarda el
-      // contrato, que es de este servicio.
-      //
-      // Es el mismo argumento que puso `canon` aqui: pedirlo despues por HTTP
-      // convertiria la coreografia en una orquestacion disfrazada, y ademas obligaria
-      // a hacerlo con una transaccion abierta.
+      // Versión 2: ms-financiero lo usa para notificar la primera cuenta de cobro.
       id_inquilino: contrato.id_inquilino,
     }),
-    // El inmueble ordena: sus eventos se entregan en el orden en que se
-    // registraron. Sin esto, un `Finalizado` podria adelantar a su
-    // `Formalizado` y dejar el inmueble arrendado para siempre.
+    // Ordenados por inmueble, para que un `Finalizado` no adelante a su `Formalizado`.
     { transaccion: transaccion as never, claveOrden: contrato.id_inmueble },
   );
 
