@@ -25,12 +25,18 @@ export type EstadoInmueble = (typeof ESTADOS_INMUEBLE)[number];
 export const esEstadoInmueble = (valor: unknown): valor is EstadoInmueble =>
   typeof valor === 'string' && (ESTADOS_INMUEBLE as readonly string[]).includes(valor);
 
+/** Longitud máxima del alias, igual que la columna. */
+export const LONGITUD_MAXIMA_ALIAS = 100;
+
 /** Cuerpo de `POST /api/inmuebles`. `id_propietario` sale del token, no del cuerpo. */
 export interface CrearInmuebleRequest {
+  /** Nombre corto con el que el propietario reconoce el inmueble. */
+  alias: string;
   direccion: string;
   tipo: TipoInmueble;
+  descripcion?: string;
   departamento?: string;
-  municipio?: string;
+  ciudad?: string;
   barrio?: string;
   area_m2?: number;
   habitaciones?: number;

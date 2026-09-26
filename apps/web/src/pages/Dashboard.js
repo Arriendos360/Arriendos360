@@ -4,7 +4,7 @@ import { AlertTriangle, Building2, FileText, Home, TrendingUp } from 'lucide-rea
 
 import { useSesion } from '../auth/sesion';
 import { obtenerResumen } from '../features/dashboard/api';
-import { actuaComoPropietario } from '../features/contratos/piezas';
+import { actuaComoPropietario, nombreDeInmueble } from '../features/contratos/piezas';
 import { listarCuentasCobro } from '../features/pagos/api';
 import { Button, Card, EmptyState, FormError, formatearDinero, formatearMes } from '../ui';
 import { unir } from '../ui/clases';
@@ -141,7 +141,7 @@ export default function Dashboard() {
                                     className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
                                     <div className="min-w-0">
                                         <p className="m-0 text-sm font-medium text-texto truncate">
-                                            {c.Contrato?.Inmueble?.direccion || 'Inmueble sin datos'}
+                                            {nombreDeInmueble(c.Contrato?.Inmueble) || 'Inmueble sin datos'}
                                         </p>
                                         <p className="m-0 mt-0.5 text-xs text-texto-suave first-letter:uppercase">{formatearMes(c.inicio)}</p>
                                     </div>

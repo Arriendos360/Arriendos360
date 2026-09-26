@@ -9,7 +9,7 @@ import {
     obtenerContrato, reemitirContrasenaInquilino, subirAnexo
 } from '../features/contratos/api';
 import {
-    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, ubicacionDe, vigencia
+    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
 import {
     Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, formatearDinero, formatearFecha,
@@ -292,11 +292,11 @@ export default function ContratoDetalle() {
             <header className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <div className="flex flex-wrap items-center gap-3">
-                        <h1 className="m-0 text-2xl font-medium text-texto">{inmueble?.direccion || 'Contrato'}</h1>
+                        <h1 className="m-0 text-2xl font-medium text-texto">{nombreDeInmueble(inmueble) || 'Contrato'}</h1>
                         <Badge estado={contrato.estado} />
                     </div>
                     <p className="m-0 mt-1 text-sm text-texto-suave">
-                        {[ubicacionDe(inmueble), vigencia(contrato)].filter(Boolean).join(' · ')}
+                        {[inmueble?.direccion, ubicacionDe(inmueble), vigencia(contrato)].filter(Boolean).join(' · ')}
                     </p>
                 </div>
                 {propio && activo && (

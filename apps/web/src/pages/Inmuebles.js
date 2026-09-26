@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Home, Pencil, Plus, Trash2 } from 'lucide-react';
-import { TIPOS_INMUEBLE } from 'arriendos360-contracts';
+import { LONGITUD_MAXIMA_ALIAS, TIPOS_INMUEBLE } from 'arriendos360-contracts';
 
 import { colombiaData } from '../data/colombia';
 import { listarContratos } from '../features/contratos/api';
+import { AreaTexto, nombreDeInmueble, ubicacionDe } from '../features/contratos/piezas';
 import { actualizarInmueble, crearInmueble, eliminarInmueble, listarInmuebles } from '../features/inmuebles/api';
 import { listarCuentasCobro } from '../features/pagos/api';
 import { Badge, Button, EmptyState, FormError, Input, Modal, Select, formatearDinero } from '../ui';
@@ -25,7 +26,7 @@ const OPCIONES_TIPO = TIPOS_INMUEBLE.map((tipo) => ({ valor: tipo, texto: etique
 const DEPARTAMENTOS = Object.keys(colombiaData);
 
 const FORM_VACIO = {
-    direccion: '', tipo: 'apartamento', departamento: '', municipio: '', barrio: '',
+    alias: '', direccion: '', tipo: 'apartamento', departamento: '', ciudad: '', barrio: '', descripcion: '',
     area_m2: '', habitaciones: '', banos: '', parqueaderos: '', deposito: '', estrato: ''
 };
 
@@ -36,11 +37,13 @@ const formDeInmueble = (inmueble) =>
 
 /**
  * Errores por campo, o `{}` si el formulario se puede enviar. El servicio sólo
- * valida `direccion` y `tipo`; un entero mal escrito le llegaría como 500, así
- * que la forma se revisa aquí.
+ * valida `alias`, `direccion` y `tipo`; un entero mal escrito le llegaría como
+ * 500, así que la forma se revisa aquí.
  */
 function validar(form) {
     const errores = {};
+    if (!form.alias.trim()) errores.alias = 'El alias es obligatorio.';
+    else if (form.alias.trim().length > LONGITUD_MAXIMA_ALIAS) errores.alias = `Hasta ${LONGITUD_MAXIMA_ALIAS} caracteres.`;
     if (!form.direccion.trim()) errores.direccion = 'La dirección es obligatoria.';
     if (!TIPOS_INMUEBLE.includes(form.tipo)) errores.tipo = 'Elige un tipo.';
     if (form.area_m2.trim() && !/^\d{1,8}([.,]\d{1,2})?$/.test(form.area_m2.trim())) {
@@ -88,8 +91,8 @@ function Kpi({ etiqueta, valor }) {
 }
 
 function FilaInmueble({ inmueble, contrato, cuenta, onEditar, onEliminar }) {
-    const ubicacion = [inmueble.barrio, inmueble.municipio].filter(Boolean).join(', ');
-    const subtitulo = [ubicacion, etiquetaDeTipo(inmueble.tipo)].filter(Boolean).join(' · ');
+    const nombre = nombreDeInmueble(inmueble);
+    const subtitulo = [inmueble.direccion, ubicacionDe(inmueble), etiquetaDeTipo(inmueble.tipo)].filter(Boolean).join(' · ');
 
     return (
         <li className="box-border flex flex-wrap items-center gap-4 bg-superficie border border-solid border-borde rounded-tarjeta px-4 py-3">
@@ -97,7 +100,7 @@ function FilaInmueble({ inmueble, contrato, cuenta, onEditar, onEliminar }) {
                 <Home size={18} aria-hidden="true" />
             </span>
             <div className="flex-1 min-w-[12rem]">
-                <p className="m-0 text-sm font-medium text-texto break-words">{inmueble.direccion}</p>
+                <p className="m-0 text-sm font-medium text-texto break-words">{nombre}</p>
                 {subtitulo && <p className="m-0 mt-0.5 text-xs text-texto-suave">{subtitulo}</p>}
             </div>
             {contrato && (
@@ -111,9 +114,9 @@ function FilaInmueble({ inmueble, contrato, cuenta, onEditar, onEliminar }) {
             <Badge estado={cuenta ? cuenta.estado : inmueble.estado} />
             <div className="flex items-center gap-1">
                 <Button variante="fantasma" tamano="pequeno" icono={Pencil} onClick={() => onEditar(inmueble)}
-                    aria-label={`Editar ${inmueble.direccion}`} title="Editar" />
+                    aria-label={`Editar ${nombre}`} title="Editar" />
                 <Button variante="fantasma" tamano="pequeno" icono={Trash2} onClick={() => onEliminar(inmueble)}
-                    aria-label={`Eliminar ${inmueble.direccion}`} title="Eliminar" />
+                    aria-label={`Eliminar ${nombre}`} title="Eliminar" />
             </div>
         </li>
     );
@@ -129,7 +132,7 @@ function FormularioInmueble({ inicial, error, onEnviar, idFormulario }) {
 
     const cambiar = (evento) => {
         const { name, value } = evento.target;
-        setForm((actual) => (name === 'departamento' ? { ...actual, departamento: value, municipio: '' } : { ...actual, [name]: value }));
+        setForm((actual) => (name === 'departamento' ? { ...actual, departamento: value, ciudad: '' } : { ...actual, [name]: value }));
         setErrores((actuales) => ({ ...actuales, [name]: undefined }));
     };
 
@@ -140,23 +143,25 @@ function FormularioInmueble({ inicial, error, onEnviar, idFormulario }) {
         if (Object.keys(encontrados).length === 0) onEnviar(paraEnviar(form));
     };
 
-    const municipios = colombiaData[form.departamento] || [];
-    // Un municipio guardado que no está en la lista (datos viejos) se sigue ofreciendo.
-    const opcionesMunicipio = form.municipio && !municipios.includes(form.municipio) ? [form.municipio, ...municipios] : municipios;
+    const ciudades = colombiaData[form.departamento] || [];
+    // Una ciudad guardada que no está en la lista se sigue ofreciendo.
+    const opcionesCiudad = form.ciudad && !ciudades.includes(form.ciudad) ? [form.ciudad, ...ciudades] : ciudades;
     const campo = (nombre) => ({ name: nombre, value: form[nombre], onChange: cambiar, error: errores[nombre] });
 
     return (
         <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-4">
             <FormError error={error} />
-            <Input etiqueta="Dirección" placeholder="Calle 100 # 15-20" required autoFocus {...campo('direccion')} />
+            <Input etiqueta="Alias" placeholder="Apto Chicó" ayuda="El nombre con el que reconoces este inmueble."
+                required autoFocus maxLength={LONGITUD_MAXIMA_ALIAS} {...campo('alias')} />
+            <Input etiqueta="Dirección" placeholder="Calle 100 # 15-20" required {...campo('direccion')} />
             <Fila>
                 <Select etiqueta="Tipo" opciones={OPCIONES_TIPO} {...campo('tipo')} />
                 <Input etiqueta="Barrio" placeholder="Chicó" {...campo('barrio')} />
             </Fila>
             <Fila>
                 <Select etiqueta="Departamento" vacio="Selecciona…" opciones={DEPARTAMENTOS} {...campo('departamento')} />
-                <Select etiqueta="Municipio" vacio="Selecciona…" opciones={opcionesMunicipio}
-                    disabled={!form.departamento && !form.municipio} {...campo('municipio')} />
+                <Select etiqueta="Ciudad" vacio="Selecciona…" opciones={opcionesCiudad}
+                    disabled={!form.departamento && !form.ciudad} {...campo('ciudad')} />
             </Fila>
             <Fila>
                 <Input etiqueta="Área (m²)" inputMode="decimal" placeholder="78" {...campo('area_m2')} />
@@ -170,6 +175,7 @@ function FormularioInmueble({ inicial, error, onEnviar, idFormulario }) {
                 <Input etiqueta="Parqueaderos" inputMode="numeric" {...campo('parqueaderos')} />
                 <Input etiqueta="Depósitos" inputMode="numeric" {...campo('deposito')} />
             </Fila>
+            <AreaTexto etiqueta="Descripción" placeholder="Piso, vista, acabados, lo que quieras recordar" {...campo('descripcion')} />
         </form>
     );
 }
@@ -348,7 +354,7 @@ export default function Inmuebles() {
                 <div className="flex flex-col gap-3">
                     <FormError error={errorDialogo} />
                     <p className="m-0 text-sm text-texto">
-                        ¿Eliminar <span className="font-medium">{dialogo?.inmueble?.direccion}</span>? Esta acción no se puede deshacer.
+                        ¿Eliminar <span className="font-medium">{nombreDeInmueble(dialogo?.inmueble)}</span>? Esta acción no se puede deshacer.
                     </p>
                 </div>
             </Modal>

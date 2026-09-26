@@ -131,7 +131,8 @@ export const inmuebleDe = (idPropietario: string, direccion = 'Calle 123 #45-67'
     id_propietario: idPropietario,
     direccion,
     barrio: 'Centro',
-    municipio: 'Bogotá D.C.',
+    alias: 'Apto de prueba',
+    ciudad: 'Bogotá D.C.',
     tipo: 'apartamento',
     estado: 'arrendado',
   });

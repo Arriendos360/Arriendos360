@@ -5,7 +5,7 @@ import { FileText, Plus, Search, UserPlus } from 'lucide-react';
 import { useSesion } from '../auth/sesion';
 import { crearContrato, finalizarContrato, listarContratos } from '../features/contratos/api';
 import {
-    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, ubicacionDe, vigencia
+    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
 import { listarInmuebles } from '../features/inmuebles/api';
 import { buscarPorDocumento, crearInquilino } from '../features/usuarios/api';
@@ -174,7 +174,7 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
     });
 
     const opcionesInmueble = inmuebles.map((i) => ({
-        valor: i.id_inmueble, texto: [i.direccion, ubicacionDe(i)].filter(Boolean).join(' · ')
+        valor: i.id_inmueble, texto: [nombreDeInmueble(i), ubicacionDe(i)].filter(Boolean).join(' · ')
     }));
 
     return (
@@ -341,7 +341,7 @@ export default function Contratos() {
             render: (c) => (
                 <div className="min-w-[10rem]">
                     <Link to={`/contratos/${c.id_contrato}`} className="text-sm font-medium text-texto no-underline hover:underline">
-                        {c.Inmueble?.direccion || 'Inmueble sin datos'}
+                        {nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos'}
                     </Link>
                     {ubicacionDe(c.Inmueble) && <p className="m-0 mt-0.5 text-xs text-texto-suave">{ubicacionDe(c.Inmueble)}</p>}
                 </div>
@@ -456,7 +456,7 @@ export default function Contratos() {
                 <div className="flex flex-col gap-3">
                     <FormError error={errorDialogo} />
                     <p className="m-0 text-sm text-texto">
-                        ¿Finalizar el contrato de <span className="font-medium">{dialogo?.contrato?.Inmueble?.direccion || 'este inmueble'}</span>?
+                        ¿Finalizar el contrato de <span className="font-medium">{nombreDeInmueble(dialogo?.contrato?.Inmueble) || 'este inmueble'}</span>?
                         El inmueble quedará disponible. Lo que se deba sigue pendiente de cobro.
                     </p>
                 </div>

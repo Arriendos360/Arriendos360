@@ -515,7 +515,7 @@ const datosArrendatario = (arrendatario: Record<string, unknown> | null) => ({
 const datosInmueble = (inmueble: Record<string, unknown> | null | undefined) => ({
   direccion_inmueble: inmueble ? String(inmueble['direccion']) : 'No disponible',
   barrio_ciudad: inmueble
-    ? `${String(inmueble['barrio'])}, ${String(inmueble['municipio'])}`
+    ? `${String(inmueble['barrio'])}, ${String(inmueble['ciudad'])}`
     : 'No disponible',
   tipo_inmueble: inmueble ? String(inmueble['tipo']) : 'No disponible',
 });

@@ -26,7 +26,10 @@ export const vigencia = (contrato) =>
 
 /** Ubicación corta del inmueble decorado: «Chicó, Bogotá D.C.». */
 export const ubicacionDe = (inmueble) =>
-    inmueble ? [inmueble.barrio, inmueble.municipio].filter(Boolean).join(', ') : '';
+    inmueble ? [inmueble.barrio, inmueble.ciudad].filter(Boolean).join(', ') : '';
+
+/** Cómo se nombra un inmueble: su alias, o la dirección si no lo trae; `null` si no llegó. */
+export const nombreDeInmueble = (inmueble) => inmueble?.alias || inmueble?.direccion || null;
 
 /** Área de texto con el aspecto de los controles del kit. */
 export function AreaTexto({ etiqueta, ayuda, error, id, className, ...resto }) {

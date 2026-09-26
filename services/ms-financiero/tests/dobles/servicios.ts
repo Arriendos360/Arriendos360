@@ -41,7 +41,8 @@ export interface InmuebleFalso {
   id_propietario: string;
   direccion?: string;
   barrio?: string;
-  municipio?: string;
+  alias?: string;
+  ciudad?: string;
   tipo?: string;
   estado?: string;
 }

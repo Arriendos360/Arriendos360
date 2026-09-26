@@ -8,7 +8,7 @@
 
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
-import { TIPOS_INMUEBLE, esTipoInmueble } from 'arriendos360-contracts';
+import { LONGITUD_MAXIMA_ALIAS, TIPOS_INMUEBLE, esTipoInmueble } from 'arriendos360-contracts';
 
 import { Inmueble } from '../models/Inmueble';
 import { esUuid } from '../models/uuid';
@@ -38,6 +38,17 @@ const buscarPropio = async (id: unknown, sub: string): Promise<Inmueble | null> 
 
 const mensajeTipoInvalido = (): string =>
   `El tipo de inmueble debe ser uno de: ${TIPOS_INMUEBLE.join(', ')}`;
+
+/** Mensaje de error del alias, o `null` si es válido. */
+const errorDeAlias = (alias: unknown): string | null => {
+  if (typeof alias !== 'string' || alias.trim() === '') {
+    return 'El alias es obligatorio';
+  }
+
+  return alias.trim().length > LONGITUD_MAXIMA_ALIAS
+    ? `El alias no puede superar ${LONGITUD_MAXIMA_ALIAS} caracteres`
+    : null;
+};
 
 // GET /api/inmuebles
 export const obtenerTodos = async (req: Request, res: Response): Promise<Response> => {
@@ -87,8 +98,13 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
       return res.status(400).json(crearError('La dirección es obligatoria'));
     }
 
+    const errorAlias = errorDeAlias(datos['alias']);
+    if (errorAlias) {
+      return res.status(400).json(crearError(errorAlias));
+    }
+
     const inmueble = await Inmueble.create(
-      { ...datos, id_propietario: sub },
+      { ...datos, alias: (datos['alias'] as string).trim(), id_propietario: sub },
       { usuarioAuditor: sub } as never,
     );
 
@@ -114,6 +130,14 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
     // Sólo se valida si viene.
     if ('tipo' in cambios && !esTipoInmueble(cambios['tipo'])) {
       return res.status(400).json(crearError(mensajeTipoInvalido()));
+    }
+
+    if ('alias' in cambios) {
+      const errorAlias = errorDeAlias(cambios['alias']);
+      if (errorAlias) {
+        return res.status(400).json(crearError(errorAlias));
+      }
+      cambios['alias'] = (cambios['alias'] as string).trim();
     }
 
     await inmueble.update(cambios, { usuarioAuditor: sub } as never);

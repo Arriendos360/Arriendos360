@@ -19,6 +19,7 @@ export type {
 
 export {
   ESTADOS_INMUEBLE,
+  LONGITUD_MAXIMA_ALIAS,
   TIPOS_INMUEBLE,
   esEstadoInmueble,
   esTipoInmueble,

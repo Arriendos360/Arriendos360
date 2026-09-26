@@ -28,7 +28,8 @@ export interface InmuebleFalso {
   id_inmueble: string;
   id_propietario: string;
   direccion?: string;
-  municipio?: string;
+  alias?: string;
+  ciudad?: string;
   tipo?: string;
   estado?: string;
 }

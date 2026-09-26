@@ -89,9 +89,10 @@ export const conServicio = (emisor = 'gateway'): [string, string] => {
 
 /** Cuerpo valido de alta, para no repetirlo en cada prueba. */
 export const inmuebleValido = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  alias: 'Apto Chapinero',
   direccion: 'Calle 123 #45-67',
   tipo: 'apartamento',
-  municipio: 'Bogotá D.C.',
+  ciudad: 'Bogotá D.C.',
   barrio: 'Chapinero',
   ...extra,
 });

@@ -65,7 +65,8 @@ inquilinos; `0005` filtro de pertenencia siempre activo; `0006` registrar pagos 
 propietario; `0007` contraseña temporal; `0010` recuperación (endpoints, tabla de tokens,
 `contrasena_cambiada_en`); `0012` garantía de entrega al-menos-una-vez; `0013`
 `ContratoFinalizado`; `0015` `observaciones`; `0016` anulación de transacciones; `0019`
-el alta manual de un cobro notifica. Los demás ADR no se apartan del documento.
+el alta manual de un cobro notifica; `0023` Inmuebles conserva `departamento`, `barrio` y la
+ficha física. Los demás ADR no se apartan del documento.
 
 ---
 

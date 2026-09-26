@@ -181,12 +181,19 @@ const altaDeInquilino = async (token, definicion) => {
   return { id: datos.usuario.id, contrasena: datos.contrasena_temporal };
 };
 
-/** Crea el inmueble si no hay ya uno con esa dirección. */
+/**
+ * Crea el inmueble si no hay ya uno con esa dirección. Si existe y su alias sigue
+ * siendo la dirección (el que le asignó la migración), le pone alias y descripción.
+ */
 const inmuebleDe = async (token, definicion) => {
   const listado = await exigir('GET', '/api/inmuebles', { token }, [200]);
   const existente = (Array.isArray(listado) ? listado : []).find(
     (inmueble) => inmueble.direccion === definicion.direccion,
   );
+  if (existente && existente.alias === existente.direccion) {
+    const cambios = { alias: definicion.alias, descripcion: definicion.descripcion };
+    return (await exigir('PUT', `/api/inmuebles/${existente.id_inmueble}`, { token, cuerpo: cambios }, [200])).inmueble;
+  }
   if (existente) return existente;
 
   return (await exigir('POST', '/api/inmuebles', { token, cuerpo: definicion }, [201])).inmueble;
@@ -284,8 +291,9 @@ const CARTERA = [
     alias: 'Apartamento de Chapinero',
     inmueble: {
       direccion: 'Calle 63 # 9-45 Apto 502',
+      descripcion: 'Quinto piso con balcón, a dos cuadras de la Séptima.',
       barrio: 'Chapinero Central',
-      municipio: 'Bogotá D.C.',
+      ciudad: 'Bogotá D.C.',
       departamento: 'Cundinamarca',
       tipo: 'apartamento',
       habitaciones: 3,
@@ -308,8 +316,9 @@ const CARTERA = [
     alias: 'Casa de Suba',
     inmueble: {
       direccion: 'Carrera 58 # 128-30',
+      descripcion: 'Casa de dos pisos con patio y garaje doble.',
       barrio: 'Niza',
-      municipio: 'Bogotá D.C.',
+      ciudad: 'Bogotá D.C.',
       departamento: 'Cundinamarca',
       tipo: 'casa',
       habitaciones: 4,
@@ -343,8 +352,9 @@ const CARTERA = [
     alias: 'Apartaestudio de Teusaquillo',
     inmueble: {
       direccion: 'Calle 34 # 18-22 Apto 301',
+      descripcion: 'Apartaestudio amoblado cerca de la Universidad Nacional.',
       barrio: 'Teusaquillo',
-      municipio: 'Bogotá D.C.',
+      ciudad: 'Bogotá D.C.',
       departamento: 'Cundinamarca',
       tipo: 'apartaestudio',
       habitaciones: 1,
@@ -364,8 +374,9 @@ const CARTERA = [
     alias: 'Oficina del centro',
     inmueble: {
       direccion: 'Carrera 7 # 32-16 Oficina 704',
+      descripcion: 'Oficina con recepción y sala de juntas.',
       barrio: 'San Diego',
-      municipio: 'Bogotá D.C.',
+      ciudad: 'Bogotá D.C.',
       departamento: 'Cundinamarca',
       tipo: 'oficina',
       banos: 1,
@@ -383,8 +394,9 @@ const CARTERA = [
     alias: 'Local de Kennedy',
     inmueble: {
       direccion: 'Avenida 1 de Mayo # 42-18 Local 3',
+      descripcion: 'Local comercial a la calle, con vitrina.',
       barrio: 'Kennedy Central',
-      municipio: 'Bogotá D.C.',
+      ciudad: 'Bogotá D.C.',
       departamento: 'Cundinamarca',
       tipo: 'local',
       banos: 1,
@@ -424,7 +436,7 @@ const sembrar = async () => {
 
   for (const ficha of CARTERA) {
     process.stdout.write(`${ficha.alias} `);
-    const inmueble = await inmuebleDe(token, ficha.inmueble);
+    const inmueble = await inmuebleDe(token, { alias: ficha.alias, ...ficha.inmueble });
 
     if (!ficha.contrato) {
       resumen.push({ inmueble: ficha.alias, estado: 'sin contrato', cuentas: 0 });
