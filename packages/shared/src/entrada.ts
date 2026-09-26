@@ -1,27 +1,6 @@
 /**
- * Lado del CONSUMIDOR: bitacora de procesados e idempotencia.
- *
- * La entrega es al-menos-una-vez (ver `salida.ts`), asi que este lado recibira
- * el mismo evento mas de una vez y tiene que dar igual. La forma de conseguirlo
- * NO es que el manejador sea idempotente por casualidad —«poner arrendado dos
- * veces no hace daño» es cierto hoy y deja de serlo en cuanto un consumidor
- * inserte una cuenta de cobro—, sino recordar que eventos ya se procesaron.
- *
- * CADA CONSUMIDOR LLEVA SU PROPIA TABLA, en su propio esquema. Dos consumidores
- * del mismo evento tienen que poder procesarlo cada uno por su lado, y una
- * tabla comun ademas volveria a acoplar servicios que este diseño separa.
- *
- * LA PIEZA CLAVE es que la marca de procesado y el efecto del manejador van EN
- * LA MISMA TRANSACCION. Marcar antes y fallar despues pierde el evento; hacer el
- * efecto y morir antes de marcar lo duplica. Dentro de una transaccion no hay
- * ninguna de las dos ventanas: o queda el efecto y la marca, o no queda nada y
- * el productor lo reintenta.
- *
- * NO SE INTENTA EXACTAMENTE-UNA-VEZ, y no por pereza: seria una transaccion
- * distribuida entre la base del productor y la del consumidor, con coordinador,
- * que es lo que el ADR 0012 descarta por presupuesto y por diseño. Lo que se
- * consigue aqui —al-menos-una-vez mas descarte de repetidos— es indistinguible
- * desde fuera y cabe en una tabla.
+ * Lado del consumidor del bus: descarta eventos repetidos anotando cada
+ * `id_evento` en la misma transacción que el efecto del manejador.
  */
 
 import { type SobreDesconocido, esSobreEvento } from './eventos';
@@ -30,21 +9,11 @@ import { type ConexionSql, filasDe, validarNombreDeTabla } from './sql';
 /** Lo que recibe un manejador ademas de la carga. */
 export interface ContextoManejo {
   sobre: SobreDesconocido;
-  /**
-   * La transaccion en la que ya esta anotado el evento. El manejador DEBE
-   * usarla: si escribe fuera, pierde la atomicidad que da todo el sentido a esto.
-   */
+  /** Transacción donde ya está anotado el evento. El manejador debe escribir en ella. */
   transaccion: unknown;
 }
 
-/**
- * Lo que hace un servicio con un evento.
- *
- * `payload` llega como `unknown` a proposito: viene de la red y de la tabla de
- * otro servicio, asi que el manejador tiene que mirarlo antes de creerselo
- * (regla dura 7). El tipado fuerte esta en `CargaPorTipo`, para comprobar
- * dentro del manejador; no para dar por buena la entrada.
- */
+/** Lo que hace un servicio con un evento. `payload` llega sin validar. */
 export type Manejador = (payload: unknown, contexto: ContextoManejo) => Promise<void>;
 
 export interface OpcionesConsumidor {
@@ -87,11 +56,7 @@ export function crearConsumidor(opciones: OpcionesConsumidor): Consumidor {
     const manejador = opciones.manejadores[sobre.tipo];
 
     if (!manejador) {
-      // No es un error. En una coreografia el productor no sabe quien escucha,
-      // asi que un tipo sin manejador significa que la suscripcion sobra, no que
-      // la entrega haya fallado. Devolver error haria que el productor lo
-      // reintentara hasta apartarlo, ensuciando SU tabla por una decision de
-      // configuracion ajena. Se registra para que no pase inadvertido.
+      // Se acepta y se registra: devolver error haría que el productor lo reintentara.
       registrar(`Evento ${sobre.tipo} ${sobre.id_evento} recibido sin manejador: se ignora.`);
       return { repetido: false, ignorado: true };
     }
@@ -99,11 +64,7 @@ export function crearConsumidor(opciones: OpcionesConsumidor): Consumidor {
     let repetido = false;
 
     await conexion.transaction(async (transaccion) => {
-      // `ON CONFLICT DO NOTHING ... RETURNING` es la anotacion y la comprobacion
-      // a la vez, en una sola sentencia. Consultar primero y anotar despues
-      // dejaria una carrera entre dos entregas simultaneas del mismo evento;
-      // asi la segunda espera al commit de la primera y se encuentra el sitio
-      // ocupado.
+      // Anota y comprueba en una sola sentencia, sin carrera entre entregas simultáneas.
       const resultado = await conexion.query(
         `INSERT INTO ${tabla} (id_evento, tipo)
          VALUES (:id_evento, :tipo)
@@ -149,8 +110,7 @@ export function crearConsumidor(opciones: OpcionesConsumidor): Consumidor {
       const mensaje = (error as Error).message;
       registrar(`Error al procesar ${cuerpo.tipo} ${cuerpo.id_evento}: ${mensaje}`);
 
-      // 500 a proposito: el productor tiene que reintentarlo. Nada quedo
-      // escrito, porque la anotacion se fue con la transaccion.
+      // 500 para que el productor reintente; la transacción no dejó nada escrito.
       return { estado: 500, cuerpo: { mensaje: 'No se pudo procesar el evento' } };
     }
   };
