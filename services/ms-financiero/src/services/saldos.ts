@@ -1,34 +1,7 @@
 /**
- * El saldo de una cuenta de cobro, derivado.
- *
- * Hasta el paso 6c esto era una columna, `pagos.saldo_pendiente`, que el
- * controlador restaba a mano en cada abono. El modelo canonico no la tiene, y
- * hace bien: el saldo es `valor` menos lo cobrado, y guardar el resultado de una
- * resta obliga a que todo camino de escritura se acuerde de rehacerla. El dia
- * que uno se olvide —o que alguien corrija una fila a mano— la columna y las
- * transacciones dicen cosas distintas y nada lo delata.
- *
- * Aqui se calcula, y en un solo sitio. Todo lo demas lo consume:
- *
- *   - los controladores, que lo adjuntan a la respuesta como `saldo_pendiente`
- *     para que el frontend siga recibiendo el mismo campo;
- *   - el registro de una transaccion, que lo necesita para no aceptar un
- *     sobrepago;
- *   - la anulacion, que no tiene que devolver nada: el saldo se corrige solo
- *     porque la suma deja de contar la transaccion anulada;
- *   - el `/interno` del dashboard, que expone HECHOS al gateway.
- *
- * ── SOLO CUENTAN LAS CONFIRMADAS ────────────────────────────────────────────
- *
- * Es toda la definicion, y es lo que hace que anular funcione sin tocar mas
- * datos que un `estado`.
- *
- * ── UN VIAJE POR LISTA, NO UNO POR CUENTA ───────────────────────────────────
- *
- * `conSaldos()` resuelve una lista entera con UNA consulta agrupada. La misma
- * disciplina que `clientes/` aplica a las llamadas de red: la pantalla de Pagos
- * pide todas las cuentas del propietario de golpe, y una consulta por fila
- * convertiria la lista en el sitio mas lento de la aplicacion.
+ * Saldo de una cuenta de cobro: `valor` menos la suma de sus transacciones
+ * `CONFIRMADA`. No es una columna. Una lista se resuelve con una sola consulta
+ * agrupada.
  */
 
 import { Op, col, fn } from 'sequelize';
@@ -55,15 +28,7 @@ export interface OpcionesLectura {
   transaction?: unknown;
 }
 
-/**
- * Redondeo a dos decimales, que es la precision de la columna.
- *
- * `NUMERIC(12,2)` llega a JavaScript como cadena y se opera como `Number`, que
- * es binario: restar 1000 menos 400 menos 600 puede dar `1.1368683772161603e-13`
- * en vez de `0`, y entonces `saldo <= 0` sigue siendo cierto pero la respuesta
- * lleva ese numero en `saldo_pendiente` y el frontend lo pinta. La suma la hace
- * PostgreSQL en `NUMERIC` y es exacta; lo que se redondea es la resta final.
- */
+/** Redondeo a dos decimales, para no arrastrar errores de coma flotante. */
 const redondear = (valor: number): number => Math.round(valor * 100) / 100;
 
 /** Convierte una instancia de Sequelize en objeto plano, o la deja pasar. */
@@ -102,12 +67,7 @@ export const cobradoPorCuenta = async (
   return new Map(filas.map((fila) => [fila.id_cuenta_cobro, parseFloat(fila.cobrado)]));
 };
 
-/**
- * El saldo de UNA cuenta, leido dentro de una transaccion.
- *
- * Lo usan el registro y la anulacion, que necesitan el valor con el bloqueo de
- * la transaccion en curso y no pueden fiarse de una lectura anterior.
- */
+/** El saldo de una cuenta, opcionalmente dentro de una transacción. */
 export const saldoDe = async (
   cuenta: CuentaConValor | CuentaCobro,
   opciones: OpcionesLectura = {},
@@ -118,13 +78,7 @@ export const saldoDe = async (
   );
 };
 
-/**
- * Adjunta `saldo_pendiente` a una lista de cuentas de cobro.
- *
- * El nombre del campo es el de la columna que desaparecio, a proposito: el
- * frontend y los PDF lo leen con ese nombre y no tienen por que enterarse de que
- * ahora se calcula.
- */
+/** Adjunta `saldo_pendiente` a una lista de cuentas de cobro. */
 export const conSaldos = async (
   cuentas: Array<CuentaConValor | CuentaCobro | Record<string, unknown>>,
 ): Promise<Array<Record<string, unknown>>> => {
@@ -155,10 +109,7 @@ export const conSaldo = async (
 };
 
 /**
- * Adjunta `saldo_pendiente` a la cuenta de cobro ANIDADA de una lista.
- *
- * Existe porque una transaccion no tiene saldo propio: cuelga de una cuenta que
- * si lo tiene, y el historial lee esa ruta.
+ * Adjunta `saldo_pendiente` a la cuenta de cobro anidada de cada elemento.
  *
  * @param elementos transacciones
  * @param camino como llegar a la cuenta desde cada elemento
@@ -189,24 +140,12 @@ export const conSaldoAnidado = async (
 };
 
 /**
- * El estado que le corresponde a una cuenta con este saldo.
- *
- * ES LA MISMA REGLA QUE APLICABA EL CONTROLADOR con los enteros, escrita entera
- * en un sitio en vez de en un ternario anidado dentro de `registrarPago`:
+ * El estado que le corresponde a una cuenta con este saldo:
  *
  *   saldo 0            -> PAGADA
  *   venia de EN_MORA   -> sigue EN_MORA, se haya abonado o no
  *   saldo == valor     -> PENDIENTE  (no se ha cobrado nada)
  *   0 < saldo < valor  -> PARCIAL
- *
- * `EN_MORA` gana sobre `PARCIAL` porque no dicen lo mismo: uno habla de cuanto
- * se ha pagado y el otro de si llego a tiempo. Abonar la mitad de una cuenta
- * vencida no la pone al dia.
- *
- * Que sea una FUNCION DEL SALDO y no una secuencia de transiciones es lo que
- * hace que anular funcione: se recalcula con el saldo nuevo y la cuenta vuelve
- * exactamente al estado que tenia antes de la transaccion que se anulo, sin
- * guardar en ninguna parte cual era.
  */
 export const estadoSegunSaldo = (
   valor: number | string,
@@ -224,14 +163,6 @@ export const estadoSegunSaldo = (
   return saldo >= parseFloat(String(valor)) ? ESTADO_CUENTA_PENDIENTE : ESTADO_CUENTA_PARCIAL;
 };
 
-/**
- * `fecha_pago` de la cuenta: cuando quedo cubierta, o `null` si no lo esta.
- *
- * Se decide con el mismo dato que el estado, y por eso vive al lado. Antes la
- * escribia cualquier abono sin mirar el saldo, asi que una cuenta pagada a
- * medias quedaba con fecha de pago puesta; con la anulacion en pie eso importa,
- * porque una cuenta que vuelve a PENDIENTE no puede seguir diciendo cuando se
- * pago.
- */
+/** `fecha_pago` de la cuenta: cuándo quedó cubierta, o `null` si no lo está. */
 export const fechaPagoSegunSaldo = (saldo: number, momento: Date | null): Date | null =>
   saldo <= 0 ? momento : null;

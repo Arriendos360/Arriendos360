@@ -1,39 +1,9 @@
 /**
- * Cuentas de cobro y transacciones.
+ * Cuentas de cobro, transacciones y sus PDF.
  *
- * ── QUE CAMBIA EN EL PASO 6e, Y QUE NO ─────────────────────────────────────
- *
- * NO cambia ni un endpoint, ni un cuerpo, ni un codigo de estado. El prefijo
- * sigue siendo `/api/pagos` y lo que la SPA recibe es byte por byte lo que
- * recibia cuando esto vivia en el gateway. Lo que cambia es donde corre y de
- * donde saca lo que no es suyo.
- *
- * SI cambia quien pregunta por los contratos. Antes el gateway le preguntaba a
- * ms-contratos por HTTP y consultaba sus propias tablas; ahora este servicio
- * hace las dos cosas, con las tablas ya suyas. La costura del gateway reenvia
- * `/api/pagos` entero y no abre la respuesta.
- *
- * ── LA DISYUNCION DE VISIBILIDAD NO CAMBIA ─────────────────────────────────
- *
- * Se ve una cuenta si eres el dueño del inmueble O el inquilino del contrato. Lo
- * que cambia desde el paso 6d es quien la evalua: la resuelve ms-contratos
- * entera y de una vez, porque tiene la mitad barata (`id_inquilino` es columna
- * suya) y sabe pedir la cara (`id_propietario` esta en ms-inmuebles). Aqui llega
- * ya resuelta, como una lista de identificadores que entra en un `IN` contra la
- * base local. Ver `docs/adr/0017`.
- *
- * ── EL ORDEN DE LAS DOS COMPROBACIONES IMPORTA ─────────────────────────────
- *
- * En los endpoints que escriben, la pertenencia se comprueba ANTES de tocar
- * nada, y el fallo de red se propaga: nunca se degrada a 403. Decirle a alguien
- * «no tienes permisos» cuando en realidad no se ha podido comprobar es la peor
- * de las respuestas posibles.
- *
- * ── ABAC, QUE NO ES LO MISMO QUE RBAC ──────────────────────────────────────
- *
- * El gateway ya aplico su matriz —«¿puede un PROPIETARIO llamar esta ruta?»— y
- * el middleware de este servicio la revalida. Nada de eso dice que ESTE recurso
- * sea suyo, y eso es lo que comprueba cada handler de aqui (regla dura 8).
+ * Cada handler comprueba que el recurso sea del usuario: se ve si es dueño del
+ * inmueble o inquilino del contrato (lo resuelve ms-contratos), y se escribe sólo
+ * si es el dueño. Si ms-contratos no responde, 502, nunca 403.
  */
 
 import type { Request, Response } from 'express';
@@ -84,32 +54,19 @@ import {
 /** El `sub` del token, que el middleware ya verifico. */
 const subDe = (req: Request): string => (req.usuario as { sub: string }).sub;
 
-/**
- * 502 con el formato de error del proyecto.
- *
- * El mensaje nombra a Contratos porque es el servicio con el que este
- * controlador habla para autorizar, y el que responde cuando la pertenencia no
- * se puede comprobar.
- */
+/** 502 cuando ms-contratos no responde. */
 const responderServicioCaido = (res: Response, error: unknown, accion: string): Response => {
   console.error(`Error al ${accion}:`, (error as Error).message);
   return res.status(502).json(crearError('No se pudo contactar el servicio de contratos'));
 };
 
-/**
- * ¿Este error viene de no poder hablar con ms-contratos?
- *
- * Existe porque `crearCuentaCobro` tiene un solo `try` que cubre la comprobacion
- * de pertenencia y la escritura, y las dos fallan distinto: una es la red y la
- * otra la base. Distinguirlas es lo que separa un 502 honesto de un 500 con el
- * mensaje interno dentro.
- */
+/** ¿Este error viene de no poder hablar con ms-contratos? Separa un 502 de un 500. */
 const esFalloDeContratos = (error: unknown): boolean => {
   const mensaje = (error as Error).message;
   return typeof mensaje === 'string' && mensaje.includes('ms-contratos');
 };
 
-/** Lo que sustituye al `Op.or` sobre columnas del `include`. */
+/** Filtro por los contratos del usuario. */
 const deMisContratos = (misContratos: string[]) => ({
   id_contrato: { [Op.in]: misContratos },
 });
@@ -123,13 +80,10 @@ const puedeVerCuenta = (cuenta: CuentaCobro, misContratos: string[]): boolean =>
 /** Todas las cuentas de cobro en las que el usuario es parte. */
 export const obtenerTodos = async (req: Request, res: Response): Promise<Response | void> => {
   try {
-    // UNA peticion: la disyuncion de pertenencia ya viene resuelta.
     const misContratos = await idsDondeEsParte(subDe(req));
 
     const cuentas = await CuentaCobro.findAll({ where: deMisContratos(misContratos) });
 
-    // Dos composiciones: el contrato con su inmueble sale de ms-contratos en un
-    // lote, y el saldo de una consulta agrupada local.
     return res.json(await conSaldos(await adjuntarContratoACuentas(cuentas)));
   } catch (error) {
     return responderServicioCaido(res, error, 'obtener cuentas de cobro');
@@ -142,8 +96,7 @@ export const obtenerPorContrato = async (req: Request, res: Response): Promise<R
     const idContrato = req.params['id_contrato'] as string;
     const sub = subDe(req);
 
-    // La disyuncion entera en una llamada: ms-contratos ya sabe si este usuario
-    // es el dueño del inmueble o el inquilino.
+    // ¿Es dueño del inmueble o inquilino? Lo responde ms-contratos.
     const contrato = esUuid(idContrato) ? await parteDe(idContrato, sub) : null;
 
     if (!contrato) {
@@ -196,9 +149,7 @@ export const obtenerHistorialGlobal = async (
       order: [['fecha_pago', 'DESC']],
     });
 
-    // El `include` NO cruza frontera: `cuentas_cobro` y `transacciones` son las
-    // dos tablas de este servicio. Lo que si se compone es el contrato y su
-    // inmueble, un nivel mas abajo.
+    // El contrato y su inmueble se componen desde ms-contratos.
     const conContrato = await adjuntarContratoATransacciones(transacciones);
 
     return res.json(
@@ -230,9 +181,7 @@ export const obtenerTransacciones = async (
       return res.status(403).json(crearError('No autorizado'));
     }
 
-    // Las anuladas SE DEVUELVEN. Dejarlas fuera seria esconder que un movimiento
-    // se registro y se corrigio, que es justo lo que el estado existe para hacer
-    // visible.
+    // Incluye las anuladas.
     const transacciones = await Transaccion.findAll({
       where: { id_cuenta_cobro: id },
       order: [['fecha_pago', 'DESC']],
@@ -247,25 +196,9 @@ export const obtenerTransacciones = async (
 // ── Escrituras ──────────────────────────────────────────────────────────────
 
 /**
- * Alta manual de una cuenta de cobro — `POST /api/pagos/cuentas-cobro`.
- *
- * El camino normal es que la primera cuenta nazca del evento y las siguientes
- * del motor. Esto existe para la demostracion y para corregir a mano, y por eso
- * el periodo se puede omitir: se deriva del ciclo de facturacion del contrato
- * con la MISMA funcion que usa el motor, y no con una segunda cuenta que podria
- * separarse.
- *
- * ── DESDE EL PASO 7 ESTO TAMBIEN AVISA AL INQUILINO, Y ES NUEVO ────────────
- *
- * Antes creaba la cuenta en silencio: el correo de «recibo generado» solo lo mandaba
- * el motor. Ahora los tres caminos que crean una cuenta pasan por
- * `emitirCuentaCobro`, que anota `CuentaCobroGenerada`, asi que este tambien avisa.
- *
- * Es deliberado. El hecho es el mismo —se le emitio una factura a alguien— y quien la
- * recibe tiene el mismo derecho a enterarse la haya generado un barrido o una
- * persona. La alternativa era un `avisar: false` para este camino, es decir,
- * exactamente los tres-sitios-que-hacen-cosas-distintas que `services/cuentas.ts`
- * existe para cerrar. Anotado como comportamiento nuevo en `docs/adr/0019`.
+ * Alta manual de una cuenta de cobro — `POST /api/pagos/cuentas-cobro`. Sin
+ * periodo, se deriva del contrato con la misma función que el motor. Anota
+ * `CuentaCobroGenerada`, como los demás caminos.
  */
 export const crearCuentaCobro = async (req: Request, res: Response): Promise<Response | void> => {
   try {
@@ -278,10 +211,7 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
       fin?: string;
     };
 
-    // Cobrar es exclusivo del dueño del inmueble, asi que aqui no basta con ser
-    // parte: hay que ser el propietario. Se le pregunta a ms-contratos, que
-    // resuelve las dos mitades —el contrato y de quien es su inmueble— en un
-    // solo salto.
+    // Cobrar es sólo del dueño del inmueble.
     const contrato =
       id_contrato && esUuid(id_contrato) ? await contratoPropioDe(id_contrato, sub) : null;
 
@@ -292,9 +222,7 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
     const diaCorte = diaDeCorte(contrato.fecha_inicio_corte);
     const inicioPedido = soloFecha(req.body.inicio);
 
-    // Si viene `inicio`, el `fin` se calcula con el dia pactado del contrato y
-    // no con «un mes menos un dia»: los periodos tienen que seguir teselando el
-    // calendario aunque la cuenta se cree a mano.
+    // Con `inicio`, el `fin` se calcula con el día pactado del contrato.
     const periodo =
       inicioPedido && diaCorte !== null
         ? { ...periodoQueEmpiezaEn(inicioPedido, diaCorte), inicio: inicioPedido }
@@ -302,8 +230,7 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
 
     const fin = soloFecha(req.body.fin) ?? periodo.fin;
 
-    // El inquilino sale del contrato que ya se pidio para comprobar la pertenencia:
-    // no cuesta un viaje mas. Lo necesita el evento, no la fila.
+    // El inquilino, para el evento, sale del contrato ya pedido.
     const { cuenta } = await emitirCuentaCobro({
       id_contrato: id_contrato as string,
       id_inquilino: contrato.id_inquilino,
@@ -311,8 +238,6 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
       inicio: periodo.inicio,
       fin,
       detalle: detalle ?? `Canon de arrendamiento del ${periodo.inicio} al ${fin}`,
-      // Aqui SI hay una persona detras, al contrario que en el motor y en el
-      // consumidor del evento: la cuenta queda a su nombre en la auditoria.
       auditor: sub,
     });
 
@@ -321,8 +246,6 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
       cuenta_cobro: await conSaldo(cuenta),
     });
   } catch (error) {
-    // Un fallo de ms-contratos no es un 500 nuestro: no se pudo comprobar la
-    // pertenencia, y eso es 502.
     if (esFalloDeContratos(error)) {
       return responderServicioCaido(res, error, 'verificar el contrato');
     }
@@ -335,16 +258,9 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
 };
 
 /**
- * Registrar un pago — `POST /api/pagos`. RF-17.
- *
- * El cuerpo es el del Capitulo 2. `tipo` se admite ausente y cae en `INGRESO`,
- * que hoy es su unico valor: exigir que el cliente mande una constante no añade
- * seguridad, pero mandar un valor que no existe si es un error y se rechaza.
- *
- * El saldo se LEE dentro de la transaccion y con la fila de la cuenta bloqueada.
- * Las dos cosas hacen falta: leer dentro evita arrastrar un saldo viejo, y
- * bloquear evita que dos registros simultaneos vean cada uno el saldo entero y
- * acepten los dos.
+ * Registrar un pago — `POST /api/pagos`. Sin `tipo`, `INGRESO`. El saldo se lee
+ * dentro de la transacción con la cuenta bloqueada, para que dos pagos
+ * simultáneos no superen el saldo.
  */
 export const registrarPago = async (req: Request, res: Response): Promise<Response | void> => {
   const sub = subDe(req);
@@ -364,9 +280,7 @@ export const registrarPago = async (req: Request, res: Response): Promise<Respon
       .json(crearError(`El tipo de transacción debe ser uno de: ${TIPOS_TRANSACCION.join(', ')}`));
   }
 
-  // La pertenencia se resuelve ANTES de abrir la transaccion: es una llamada de
-  // red, y tenerla dentro alargaria el bloqueo de la fila por el tiempo que
-  // tarde otro servicio en contestar.
+  // La pertenencia (una llamada de red) se resuelve antes de bloquear la fila.
   let misContratos: string[];
   try {
     misContratos = await idsDondeEsParte(sub);
@@ -386,10 +300,7 @@ export const registrarPago = async (req: Request, res: Response): Promise<Respon
       return res.status(404).json(crearError('Cuenta de cobro no encontrada'));
     }
 
-    // `FOR UPDATE` sobre la fila de la cuenta, en una consulta aparte y sin
-    // `include`: PostgreSQL rechaza el bloqueo sobre el lado anulable de un LEFT
-    // JOIN, y pedirlo sobre la consulta con el contrato bloquearia ademas filas
-    // de otro agregado sin ninguna necesidad.
+    // `FOR UPDATE` sobre la cuenta, en una consulta sin `include`.
     await CuentaCobro.findByPk(cuenta.id_cuenta_cobro, {
       transaction: t,
       lock: t.LOCK.UPDATE,
@@ -419,7 +330,7 @@ export const registrarPago = async (req: Request, res: Response): Promise<Respon
         observaciones,
         fecha_pago: momento,
         estado: ESTADO_TRANSACCION_CONFIRMADA,
-        // La foto historica, la unica cifra de saldo que se guarda.
+        // Foto del saldo para el comprobante; no se vuelve a tocar.
         saldo_restante_momento: nuevoSaldo,
       },
       { transaction: t, usuarioAuditor: sub },
@@ -450,20 +361,9 @@ export const registrarPago = async (req: Request, res: Response): Promise<Respon
 };
 
 /**
- * Anular una transaccion — `POST /api/pagos/transacciones/:id/anular`.
- *
- * ANULAR NO BORRA. Cambia el estado a `ANULADA` y recalcula el de la cuenta; el
- * saldo se corrige solo porque la suma que lo deriva ignora las anuladas. La
- * fila y su comprobante siguen existiendo, que es lo que separa una correccion
- * de una falsificacion. Ver `docs/adr/0016`.
- *
- * El ABAC exige ser DUEÑO del inmueble, no solo parte del contrato — el mismo
- * criterio que el alta de una cuenta de cobro y por el mismo motivo: esto
- * reescribe la contabilidad del arriendo, y quien la lleva es el propietario
- * (`docs/adr/0006`).
- *
- * Una transaccion ya anulada responde 409 y no 403: el recurso es suyo y su rol
- * es el correcto, lo que falla es que no esta en condiciones.
+ * Anular una transacción — `POST /api/pagos/transacciones/:id/anular`. No borra:
+ * la pasa a `ANULADA` y recalcula el estado de la cuenta. Sólo el dueño del
+ * inmueble; una ya anulada responde 409.
  */
 export const anularTransaccion = async (req: Request, res: Response): Promise<Response | void> => {
   const idTransaccion = req.params['id_transaccion'] as string;
@@ -485,16 +385,13 @@ export const anularTransaccion = async (req: Request, res: Response): Promise<Re
 
     const cuenta = transaccion.CuentaCobro;
 
-    // Mismo bloqueo que al registrar, y por lo mismo: anular recalcula el saldo,
-    // y un registro simultaneo sobre la misma cuenta lo dejaria mal.
+    // Mismo bloqueo que al registrar un pago.
     await CuentaCobro.findByPk(cuenta.id_cuenta_cobro, {
       transaction: t,
       lock: t.LOCK.UPDATE,
     });
 
-    // Ser DUEÑO, no solo parte. Un salto a ms-contratos, que comprueba de paso
-    // de quien es el inmueble: este servicio no necesita saber que un contrato
-    // tiene uno.
+    // Tiene que ser el dueño del inmueble.
     let propio;
     try {
       propio = await contratoPropioDe(cuenta.id_contrato, sub);
@@ -518,9 +415,7 @@ export const anularTransaccion = async (req: Request, res: Response): Promise<Re
       { transaction: t, usuarioAuditor: sub },
     );
 
-    // Se relee DESPUES de anular: el saldo nuevo sale de la misma suma de
-    // siempre, que ahora ya no cuenta esta transaccion. No hay ninguna resta que
-    // deshacer ni ningun estado anterior que recordar.
+    // El saldo se deriva de nuevo, ya sin esta transacción.
     const nuevoSaldo = await saldoDe(cuenta, { transaction: t });
 
     await cuenta.update(
@@ -547,34 +442,16 @@ export const anularTransaccion = async (req: Request, res: Response): Promise<Re
 };
 
 /**
- * `POST /api/pagos/verificar-mora`.
- *
- * ── ESTO YA NO SE APARTA DEL MOTOR, Y ERA UNA TRAMPA CONOCIDA ──────────────
- *
- * CLAUDE.md la tenia anotada: «un contrato de 16 lineas de mora no existe:
- * `verificar-mora` y el motor no aplican la misma regla». Este endpoint marcaba
- * EN_MORA toda cuenta PENDIENTE o PARCIAL cuyo corte ya hubiera pasado —un solo
- * dia bastaba— mientras que `procesarPagos()` espera al sexto. Quien lo
- * disparara desde Postman dejaba cuentas en mora que el motor no habria marcado,
- * y que ademas no volvian atras solas.
- *
- * Se unifica aqui, que es lo que el paso 6e tocaba hacer: la regla es «seis dias
- * desde el corte», la misma constante y el mismo `diasEntre()` que usa el motor.
- * Y los mismos estados, `ESTADOS_QUE_ENTRAN_EN_MORA`: `PENDIENTE` y `PARCIAL`. Una
- * cuenta con saldo y el corte vencido entra en mora aunque haya recibido abonos.
- *
- * Lo que NO se unifica es el alcance: el motor barre el sistema entero y esto
- * solo los contratos de quien llama. Es la diferencia entre un proceso y una
- * peticion, y esa si tiene que seguir.
+ * `POST /api/pagos/verificar-mora` — marca EN_MORA las cuentas de los contratos
+ * del propietario con la misma regla que el motor (`DIAS_PARA_MORA`,
+ * `ESTADOS_QUE_ENTRAN_EN_MORA`).
  */
 export const verificarMora = async (req: Request, res: Response): Promise<Response | void> => {
   try {
     const sub = subDe(req);
     const hoy = hoyEnZonaNegocio();
 
-    // Solo sobre los PROPIOS, y aqui propio significa dueño del inmueble, no
-    // parte: verificar la mora ESCRIBE, y escribir sobre la cuenta de otro seria
-    // peor que verla. Un inquilino no puede marcarse a si mismo.
+    // Sólo los contratos donde es dueño del inmueble.
     const mios = (await contratosDePropietario(sub)).map((contrato) => contrato.id_contrato);
 
     const candidatas = await CuentaCobro.findAll({
@@ -585,12 +462,7 @@ export const verificarMora = async (req: Request, res: Response): Promise<Respon
       },
     });
 
-    // El filtro de los seis dias se aplica en memoria y no en el `where` a
-    // proposito: `diasEntre()` cuenta dias de CALENDARIO en la zona del negocio,
-    // y trasladar eso a SQL significaria escribir la aritmetica de fechas otra
-    // vez, en otro lenguaje, con otra zona por defecto. Son decenas de filas, no
-    // millones, y el `where` de arriba ya descarto las que ni siquiera han
-    // llegado a su corte.
+    // Los días de gracia se cuentan con `diasEntre`, en memoria.
     const vencidas = candidatas.filter(
       (cuenta) => diasEntre(cuenta.inicio, hoy) >= DIAS_PARA_MORA,
     );
@@ -612,12 +484,8 @@ const fmt = (valor: unknown): string =>
   `$ ${parseFloat(String(valor ?? 0)).toLocaleString('es-CO', { minimumFractionDigits: 0 })}`;
 
 /**
- * Formateador de periodo (Ej: Junio 2026).
- *
- * `timeZone: 'UTC'` NO es un adorno. `inicio` es `DATEONLY` y llega como
- * `'2026-06-01'`, que `Date` interpreta como medianoche UTC; formatearlo en la
- * zona local imprimiria «mayo de 2026» en Bogota, es decir, el mes equivocado.
- * Es la misma zona que ya usa el `formatDate` del frontend.
+ * Formateador de periodo (Ej: Junio 2026). En UTC: con la zona local, el día 1
+ * caería en el mes anterior.
  */
 const fmtPeriodo = (fecha: string): string =>
   new Date(fecha)
@@ -633,13 +501,7 @@ const datosEmpresa = {
   empresa_ciudad: 'Bogotá D.C.',
 };
 
-/**
- * Bloque del arrendatario.
- *
- * Tolera que falte: si ms-identidad no respondio, el recibo sale con «No
- * disponible» en lugar de no salir. Un comprobante incompleto sirve para algo;
- * un 500 al pedir el recibo, no.
- */
+/** Bloque del arrendatario; «No disponible» si falta. */
 const datosArrendatario = (arrendatario: Record<string, unknown> | null) => ({
   nombre_arrendatario: arrendatario
     ? `${String(arrendatario['nombres'])} ${String(arrendatario['apellidos'])}`
@@ -649,12 +511,7 @@ const datosArrendatario = (arrendatario: Record<string, unknown> | null) => ({
   email_arrendatario: (arrendatario?.['email'] as string) || 'No registrado',
 });
 
-/**
- * Bloque del inmueble.
- *
- * Tolera que falte, igual que el del arrendatario: si el inmueble no vino dentro
- * del contrato, el recibo sale con «No disponible» en lugar de no salir.
- */
+/** Bloque del inmueble; «No disponible» si falta. */
 const datosInmueble = (inmueble: Record<string, unknown> | null | undefined) => ({
   direccion_inmueble: inmueble ? String(inmueble['direccion']) : 'No disponible',
   barrio_ciudad: inmueble
@@ -663,7 +520,7 @@ const datosInmueble = (inmueble: Record<string, unknown> | null | undefined) => 
   tipo_inmueble: inmueble ? String(inmueble['tipo']) : 'No disponible',
 });
 
-/** Envia un PDF ya construido con el mismo encabezado de siempre. */
+/** Genera el comprobante en PDF y lo envía como respuesta. */
 const responderPdf = (res: Response, nombreArchivo: string, data: Record<string, unknown>): void => {
   const doc = new PDFDocument({ size: 'LETTER', margin: 0 });
   res.setHeader('Content-Type', 'application/pdf');
@@ -673,13 +530,7 @@ const responderPdf = (res: Response, nombreArchivo: string, data: Record<string,
   doc.end();
 };
 
-/**
- * El contrato de una cuenta, con su inmueble y su arrendatario, para un PDF.
- *
- * Dos peticiones —ms-contratos con `incluir=inmueble`, y ms-identidad para el
- * inquilino— y las dos DEGRADAN: lo que no venga queda en `null` y el PDF
- * imprime «No disponible». Ver `services/composicion.ts`.
- */
+/** El inmueble y el arrendatario de un contrato, para un PDF; `null` lo que falte. */
 const partesParaPdf = async (
   idContrato: string,
 ): Promise<{
@@ -696,13 +547,8 @@ const partesParaPdf = async (
 };
 
 /**
- * Comprobante de una transaccion — RF-18.
- *
- * IMPRIME LO MISMO QUE ANTES DE LA EXTRACCION, y hay un dato que lo garantiza:
- * el saldo del comprobante NO se recalcula. Sale de `saldo_restante_momento`,
- * que es la foto que se tomo al registrar el movimiento. Un comprobante emitido
- * hace tres meses dice hoy exactamente lo que decia entonces, aunque despues se
- * hayan registrado o anulado otras transacciones sobre la misma cuenta.
+ * Comprobante de una transacción. El saldo sale de `saldo_restante_momento`, la
+ * foto tomada al registrarla, no se recalcula.
  */
 export const generarComprobante = async (req: Request, res: Response): Promise<Response | void> => {
   try {
@@ -772,7 +618,7 @@ export const generarComprobante = async (req: Request, res: Response): Promise<R
   }
 };
 
-/** Como se etiqueta cada estado en el recibo. Los cuatro textos son los de antes. */
+/** Como se etiqueta cada estado en el recibo. */
 const ETIQUETA_ESTADO: Record<string, string> = {
   [ESTADO_CUENTA_PENDIENTE]: 'PENDIENTE',
   [ESTADO_CUENTA_PAGADA]: 'PAGADO',
@@ -781,12 +627,8 @@ const ETIQUETA_ESTADO: Record<string, string> = {
 };
 
 /**
- * Recibo mensual de una cuenta de cobro (resumen del periodo).
- *
- * `forma_pago` sale del medio de la ULTIMA transaccion confirmada. Antes salia
- * de `pagos.tipo_transaccion`, una columna que el controlador iba pisando con el
- * medio del ultimo abono: es el mismo dato, leido de donde de verdad vive en vez
- * de una copia. Si no hay ninguna transaccion todavia, «Múltiple», como antes.
+ * Recibo mensual de una cuenta de cobro. `forma_pago` es el medio de la última
+ * transacción confirmada, o «Múltiple» si no hay ninguna.
  */
 export const generarRecibo = async (req: Request, res: Response): Promise<Response | void> => {
   try {

@@ -1,33 +1,7 @@
 /**
- * Cliente de MS-Financiero hacia MS-Identidad.
- *
- * Dos cosas, con dos politicas de fallo distintas:
- *
- * 1. **`invalidacionesVigentes`** — que tokens dejaron de valer. La consume el
- *    refresco de la cache cada 15 s. El fallo SE PROPAGA: la cache necesita
- *    distinguir «no hay nada que invalidar» de «no pude preguntar», porque
- *    confundirlas dejaria entrar tokens de sesiones cerradas.
- *
- * 2. **`usuariosPorIds`** — el nombre del arrendatario que imprime un
- *    comprobante. El fallo DEGRADA a un mapa vacio: un recibo con «No disponible»
- *    donde va el nombre sigue sirviendo; un 500 al pedir el recibo, no.
- *
- * EN LOTE, SIEMPRE. Un listado de veinte comprobantes pediria veinte veces lo
- * mismo si la consulta fuera de una en una: el N+1 de siempre, pero con latencia
- * de red. Los llamantes recogen todos los identificadores y hacen UNA peticion.
- *
- * ── LA DEUDA QUE ESTA CABECERA ANUNCIABA YA ESTA PAGADA ─────────────────────
- *
- * Decia: «los correos del motor se componen aqui HOY porque ms-notificaciones no
- * existe todavia; en el paso 7 el motor pasara a publicar eventos y `usuariosPorIds`
- * seguira haciendo falta para los PDF, pero el motor dejara de llamarlo».
- *
- * Eso es exactamente lo que paso. El motor no llama a este cliente para nada, y
- * `usuariosPorIds` solo la usan los comprobantes. Se nota en una garantia concreta:
- * los dos barridos del motor hacen UNA peticion cada uno en vez de dos.
- *
- * Lo que queda aqui es de un tipo distinto y no tiene fecha de caducidad: la lista de
- * revocados es confianza cero, y el nombre del arrendatario lo imprime un PDF.
+ * Cliente de MS-Financiero hacia MS-Identidad:
+ * - `invalidacionesVigentes`: lo que invalida tokens. Propaga el fallo.
+ * - `usuariosPorIds`: datos de usuarios en lote, para los PDF. Mapa vacío si falla.
  */
 
 import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
@@ -59,13 +33,7 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
   return limpio === '' ? null : limpio.replace(/\/+$/, '');
 };
 
-/**
- * Peticion GET a un endpoint `/interno`, firmada y con tiempo limite.
- *
- * La credencial se firma en cada llamada en vez de reutilizarla: el token dura
- * un minuto, asi que cachearlo ahorraria una firma HMAC —microsegundos— a cambio
- * de tener que gestionar su caducidad. No compensa.
- */
+/** GET a un endpoint `/interno`, firmado en cada llamada y con tiempo límite. */
 const pedirJson = async (url: string): Promise<unknown> => {
   const respuesta = await fetch(url, {
     headers: cabeceraDeServicio({
@@ -83,11 +51,7 @@ const pedirJson = async (url: string): Promise<unknown> => {
   return respuesta.json();
 };
 
-/**
- * Trae los `jti` revocados y las sesiones caidas.
- *
- * El fallo SE PROPAGA: lo consume el refresco de la cache. Ver la nota 1.
- */
+/** Trae los `jti` revocados y las sesiones caídas, para la caché. Propaga el fallo. */
 export const invalidacionesVigentes = async (
   opciones: { urlBase?: string | null } = {},
 ): Promise<Invalidaciones> => {
@@ -100,11 +64,7 @@ export const invalidacionesVigentes = async (
   return (await pedirJson(`${base}/interno/revocados`)) as Invalidaciones;
 };
 
-/**
- * Datos de varios usuarios, indexados por id.
- *
- * DEGRADA a un mapa vacio. Ver la nota 2 de la cabecera.
- */
+/** Datos de varios usuarios, indexados por id. Mapa vacío si falla. */
 export const usuariosPorIds = async (
   ids: Array<string | null | undefined>,
   opciones: { urlBase?: string | null } = {},
