@@ -1,16 +1,10 @@
 /**
- * Datos de prueba para desarrollo y demo.
- *
- * Vivia en el gateway hasta que la identidad se extrajo. Ahora es de este
- * servicio, que es quien posee `usuarios` y `roles_usuario`: sembrar usuarios
- * desde fuera exigiria escribir en un esquema ajeno, que es justo lo que la
- * regla dura 3 prohibe.
+ * Usuarios de prueba para desarrollo y demostración. Idempotente: no recrea un
+ * email que ya existe.
  *
  * Uso:
  *   npm run seed --workspace=services/ms-identidad
  *   docker exec arriendos360_identidad npm run seed
- *
- * Es idempotente: si el email ya existe, no lo vuelve a crear.
  */
 
 import bcrypt from 'bcryptjs';
@@ -33,12 +27,7 @@ interface DefinicionUsuario {
   roles: string[];
 }
 
-/**
- * El tercer usuario tiene los dos roles a la vez. No es un capricho: es el caso
- * que el modelo viejo NO podia representar, porque `usuarios.rol` era una sola
- * columna. Sirve para comprobar que el arreglo `roles` de los claims y las
- * consultas por pertenencia hacen lo correcto.
- */
+/** Un propietario, un inquilino y un usuario con los dos roles. */
 export const USUARIOS: DefinicionUsuario[] = [
   {
     nombres: 'Ana',
@@ -116,8 +105,6 @@ export const sembrar = async (): Promise<
     resumen.push({
       email: usuario.email,
       documento: usuario.documento,
-      // El gateway ya no puede resolver un usuario por su cedula desde SQL, asi
-      // que el UUID se imprime: es lo que se necesita para armar datos a mano.
       id: usuario.id_usuario,
       roles: definicion.roles.join(', '),
       estado: creado ? 'creado' : 'ya existía',

@@ -7,14 +7,7 @@ import { DataTypes, type Model, type ModelStatic } from 'sequelize';
 
 import { USUARIO_SISTEMA } from './constantes';
 
-/**
- * Clave primaria UUID generada en la aplicacion.
- *
- * No es un `DEFAULT` de PostgreSQL a proposito: un servicio necesita conocer el
- * identificador ANTES de que la fila exista, para poder publicarlo en el evento
- * que dispara la creacion en cadena. Sequelize evalua este `defaultValue` al
- * construir la instancia, asi que el id esta disponible antes del INSERT.
- */
+/** Clave primaria UUID generada en la aplicación, conocida antes del INSERT. */
 export const claveUuid = () => ({
   type: DataTypes.UUID,
   primaryKey: true,
@@ -43,11 +36,8 @@ const autorDe = (opciones: unknown): string =>
   (opciones as OpcionesAuditables | undefined)?.usuarioAuditor ?? USUARIO_SISTEMA;
 
 /**
- * Registra los hooks de autoria.
- *
- * Van en `beforeValidate` y no en `beforeCreate` por el orden de Sequelize:
- * `beforeValidate` -> validacion -> `beforeCreate`. Como las dos columnas son
- * `allowNull: false`, rellenarlas en `beforeCreate` llega tarde.
+ * Registra los hooks de autoría en `beforeValidate`, antes de que se validen las
+ * columnas `allowNull: false`.
  */
 export const registrarHooksAuditoria = (modelo: ModelStatic<Model>): void => {
   modelo.addHook('beforeValidate', (instancia, opciones) => {
@@ -55,8 +45,7 @@ export const registrarHooksAuditoria = (modelo: ModelStatic<Model>): void => {
     const fila = instancia as Model & { creado_por?: string; actualizado_por?: string };
 
     if (fila.isNewRecord) {
-      // Un `creado_por` explicito gana: el autorregistro lo necesita, porque
-      // ahi el autor es el propio usuario que se esta creando.
+      // Un `creado_por` explícito gana sobre el autor de las opciones.
       if (!fila.getDataValue('creado_por')) {
         fila.setDataValue('creado_por', autor);
       }

@@ -3,12 +3,7 @@ import { DataTypes, Model } from 'sequelize';
 import { sequelize } from '../config/database';
 import { claveUuid } from './columnas';
 
-/**
- * Rastro de quien consulto que documento y cuando.
- *
- * Tabla operativa, no de dominio: sin columnas de auditoria (seria redundante
- * consigo misma) y sin exposicion por API. Ver `database/003_consultas_documento.sql`.
- */
+/** Rastro de quién consultó qué documento y cuándo. Tabla operativa. */
 export class ConsultaDocumento extends Model {
   declare id_consulta: string;
   declare id_consultante: string;

@@ -1,13 +1,6 @@
 /**
- * Conexion de MS-Identidad a PostgreSQL.
- *
- * Comparte instancia con el resto del sistema, pero NO esquema: todas las tablas
- * de este servicio viven en `identidad`, y el `searchPath` lo fija aqui para que
- * ninguna consulta pueda alcanzar `public` por descuido. Esa es la regla dura 3
- * hecha configuracion en vez de disciplina.
- *
- * El dia que este servicio se despliegue en Azure con su propia base, lo unico
- * que cambia es `DB_NAME`.
+ * Conexión de MS-Identidad a PostgreSQL. Todas sus tablas viven en el esquema
+ * `identidad`, fijado también como `search_path`.
  */
 
 import { Sequelize } from 'sequelize';
@@ -36,15 +29,11 @@ export const sequelize = new Sequelize(
     // Todos los modelos nacen en `identidad` sin tener que repetirlo uno a uno.
     schema: ESQUEMA,
     dialectOptions: {
-      // Cinturon y tirantes: aunque un modelo olvidara declarar el esquema, el
-      // search_path de la sesion no incluye `public` para las tablas de negocio.
       options: `-c search_path=${ESQUEMA}`,
-      // En Azure la base exige TLS (`DB_SSL=si`), y se verifica el certificado: TLS sin
-      // verificar cifra, pero no dice con quien se habla.
+      // Con `DB_SSL=si`, TLS verificando el certificado.
       ...(siNoDeEntorno('DB_SSL', false) ? { ssl: { rejectUnauthorized: true } } : {}),
     },
-    // Cada replica cuenta contra el limite de conexiones de la base; en Azure B1ms son 35
-    // para los cinco servicios y sus Jobs (`DB_POOL_MAX`).
+    // `DB_POOL_MAX`: conexiones por réplica.
     pool: { max: enteroDeEntorno('DB_POOL_MAX', 5), min: 0, acquire: 30000, idle: 10000 },
   },
 );

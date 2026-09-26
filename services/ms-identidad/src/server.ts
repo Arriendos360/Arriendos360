@@ -1,32 +1,6 @@
 /**
- * Arranque de MS-Identidad.
- *
- * Aplica sus migraciones antes de escuchar: el esquema `identidad` es suyo y de
- * nadie mas, asi que nadie mas puede prepararlo.
- *
- * ── DESDE EL PASO 7 ESTE SERVICIO ES PRODUCTOR DEL BUS ─────────────────────
- *
- * Y deja de ser cliente de SMTP, que es la otra mitad de la misma frase. Hasta aqui
- * abria una conexion de correo para el enlace de recuperacion; ahora anota
- * `RecuperacionSolicitada` y `ContrasenaTemporalEmitida` en su tabla de salida y es
- * ms-notificaciones quien decide a quien avisar. Con eso el `docs/adr/0010` queda
- * saldado: su desviacion era ese envio directo.
- *
- * El publicador arranca AQUI y no al cargar el modulo, por la misma razon que en
- * ms-contratos: un temporizador corriendo durante una suite haria que las entregas
- * ocurrieran en momentos que la prueba no controla. Las pruebas llaman a `ciclo()` a
- * mano.
- *
- * ── SIN SUSCRIPTOR CONFIGURADO, LOS EVENTOS SE DAN POR ENTREGADOS ──────────
- *
- * Es el comportamiento de `crearEntregaHttp` y es el correcto en una coreografia —el
- * productor no sabe ni tiene que saber quien escucha— pero aqui tiene una
- * consecuencia visible que conviene no descubrir en produccion: sin
- * `MS_NOTIFICACIONES_URL`, pedir recuperacion de contrasena emite el token, marca el
- * evento como entregado y NO MANDA NINGUN CORREO. No hay error en ninguna parte.
- *
- * Por eso `MS_NOTIFICACIONES_URL` es obligatoria y sin ella el servicio NO ARRANCA.
- * Antes arrancaba con un aviso en el log, que es exactamente lo que nadie lee.
+ * Arranque de MS-Identidad: valida el entorno, aplica o comprueba las
+ * migraciones, arranca el publicador del bus y escucha.
  */
 
 import { app } from './app';
@@ -41,7 +15,10 @@ const PURGA_LIMITES_MS = 5 * 60 * 1000;
 
 const PUERTO = enteroDeEntorno('PORT', 3011);
 
-/** Lo que no tiene defecto razonable. Ver la cabecera para la ultima. */
+/**
+ * Variables obligatorias. Sin `MS_NOTIFICACIONES_URL` los eventos se darían por
+ * entregados sin enviar ningún correo.
+ */
 const OBLIGATORIAS = [
   'DB_PASSWORD',
   'JWT_SECRET',
@@ -57,9 +34,7 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-identidad: conexión a PostgreSQL exitosa');
 
-    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
-    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
-    // Ver docs/adr/0022.
+    // Con MIGRACIONES_AL_ARRANCAR=no sólo comprueba que no falte ninguna.
     if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
       const aplicadas = await aplicarMigraciones(sequelize);
       console.log(
@@ -78,8 +53,7 @@ const iniciar = async (): Promise<void> => {
       console.log('✅ ms-identidad: esquema al día (las migraciones las aplica el Job, no este proceso)');
     }
 
-    // Una ventana vencida ya no cuenta para nada, solo ocupa sitio. Aqui y no al
-    // cargar el modulo, para que ninguna suite arranque un temporizador.
+    // Purga periódica de las ventanas vencidas de los límites de tasa.
     setInterval(() => {
       purgarVencidos().catch((error: Error) =>
         console.error('⚠️  ms-identidad: no se pudieron purgar los límites de tasa:', error.message),

@@ -1,14 +1,6 @@
 /**
- * Limitacion de tasa de las rutas publicas de ms-identidad.
- *
- * ── POR QUE AQUI Y NO EN EL GATEWAY ────────────────────────────────────────
- *
- * Contar intentos fallidos por cuenta exige leer el correo del cuerpo y saber si la
- * contrasena coincidio. El gateway reenvia el cuerpo sin leerlo y no sabe como acabo
- * el login. Las cuatro rutas ya llegan aqui, asi que contar aqui no anade ningun
- * salto de red, y el gateway sigue sin base. Ver `docs/adr/0020`.
- *
- * ── LOS CONTADORES ─────────────────────────────────────────────────────────
+ * Limitación de tasa de las rutas públicas, con ventana fija en
+ * `identidad.limites_tasa`:
  *
  *   login        por IP, todos los intentos                 100 / 15 min
  *   login        por cuenta e IP, solo los FALLIDOS           5 / 15 min
@@ -17,20 +9,7 @@
  *   recuperar    por cuenta, SILENCIOSO                       3 / hora
  *   restablecer  por IP                                       5 / hora
  *
- * No hay contador de login solo por cuenta, y es deliberado: seria un mecanismo de
- * bloqueo a pedido. Fallar el login de alguien bloquea la IP del atacante para esa
- * cuenta, no a la victima.
- *
- * ── LA IP ──────────────────────────────────────────────────────────────────
- *
- * La que firma el gateway (`x-origen-cliente`), o la de la conexion si la firma
- * falta o no vale. Agrupada: una IPv4 cuenta sola, una IPv6 por su /64, que es lo
- * que un proveedor asigna a un cliente y lo que un atacante podria rotar gratis.
- *
- * ── LA VENTANA ─────────────────────────────────────────────────────────────
- *
- * Fija: se cuenta desde el inicio de la ventana en curso. Permite una rafaga del
- * doble justo en el cambio de ventana; se acepta a cambio de una sola sentencia.
+ * Nunca se limita el login sólo por cuenta: bloquearía a la víctima a pedido.
  */
 
 import crypto from 'crypto';
@@ -199,22 +178,13 @@ export const purgarVencidos = async (): Promise<void> => {
 
 export const MENSAJE_LIMITE = 'Demasiados intentos. Inténtalo más tarde.';
 
-/**
- * 429 con `Retry-After` igual a la ventana COMPLETA, no a lo que falta.
- *
- * Todas estas rutas son de autenticacion: decir cuanto falta para desbloquear le
- * dice a un atacante exactamente cuando volver. Por lo mismo, ninguna cabecera de
- * cuota restante.
- */
+/** 429 con `Retry-After` igual a la ventana completa y sin cabeceras de cuota. */
 export const responderLimite = (res: Response, lim: Limite): Response =>
   res.set('Retry-After', String(lim.ventanaSegundos)).status(429).json(crearError(MENSAJE_LIMITE));
 
 /**
- * Middleware que cuenta la peticion contra un limite por IP.
- *
- * Si el almacen falla responde 503: son rutas de autenticacion, y dejar pasar sin
- * contar es exactamente lo que el limite existe para impedir. Tampoco se pierde
- * nada: sin base, estas rutas fallarian igual un paso despues.
+ * Middleware que cuenta la petición contra un límite por IP. Si no puede contar,
+ * responde 503 en vez de dejar pasar.
  */
 export const limitarPorIp =
   (nombre: NombreLimite) =>

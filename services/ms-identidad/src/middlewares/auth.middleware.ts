@@ -1,13 +1,6 @@
 /**
- * Adaptador Express sobre la verificacion de token de `packages/shared`.
- *
- * CONFIANZA CERO (regla dura 7): este servicio verifica el token por su cuenta
- * aunque la peticion venga del gateway y el gateway ya lo haya verificado. No
- * es redundancia: el dia que alguien alcance la red interna sin pasar por el
- * gateway, esta es la unica comprobacion que queda en pie.
- *
- * La logica de verificacion no se reimplementa: vive en `packages/shared` y es
- * la misma que usa el gateway. Aqui solo esta lo que es propio de Express.
+ * Verificación del token de usuario en el servicio, con la lógica de
+ * `packages/shared`, aunque la petición venga del gateway.
  */
 
 import type { NextFunction, Request, Response } from 'express';
@@ -40,12 +33,7 @@ export const verificarToken = async (
   return next();
 };
 
-/**
- * Exige el rol PROPIETARIO.
- *
- * El gateway ya aplica su matriz RBAC, pero eso es la Capa 2 y esto es la Capa
- * 3: las dos tienen que sostenerse solas.
- */
+/** Exige el rol PROPIETARIO. */
 export const esPropietario = (req: Request, res: Response, next: NextFunction): Response | void => {
   if (claimsSonDePropietario(req.usuario)) {
     return next();

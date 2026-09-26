@@ -3,10 +3,7 @@ import { DataTypes, Model } from 'sequelize';
 import { sequelize } from '../config/database';
 import { claveUuid, columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } from './columnas';
 
-/**
- * Tabla `Roles`. Es catalogo, no configuracion: sus dos filas las crea la
- * migracion `002_roles_base.sql`, no la aplicacion.
- */
+/** Tabla `Roles`. Sus filas las crea la migración `002_roles_base.sql`. */
 export class Rol extends Model {
   declare id_rol: string;
   declare nombre: string;

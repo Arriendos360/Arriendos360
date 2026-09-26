@@ -1,15 +1,6 @@
 /**
- * Aplicador de migraciones de MS-Identidad.
- *
- * Misma idea que el del gateway: los `.sql` son datos y viven aparte, el runner
- * es codigo y viaja con el servicio. Cambian dos cosas.
- *
- * 1. Los `.sql` viven en `database/identidad/`, en la raiz del monorepo, que es
- *    donde CLAUDE.md ubica las migraciones: una carpeta por esquema. Son las
- *    unicas: el gateway dejo de tener tablas de identidad.
- *
- * 2. La tabla de control tambien vive en el esquema `identidad`, para que este
- *    servicio no comparta ni siquiera el registro de que migraciones aplico.
+ * Aplicador de migraciones de MS-Identidad: aplica los `.sql` de
+ * `database/identidad/` y anota cada uno en la tabla de control de su esquema.
  */
 
 import fs from 'fs';
@@ -41,14 +32,7 @@ export const listarMigraciones = (): Migracion[] => {
     .map((archivo) => ({ nombre: archivo, ruta: path.join(RUTA_BASE, archivo) }));
 };
 
-/**
- * Clave del bloqueo consultivo que serializa a quien migra ESTE esquema.
- *
- * En Azure las migraciones las aplica un Job antes de publicar la revision, no cada
- * replica al arrancar; pero un Job se puede reintentar o lanzar dos veces. Con el
- * bloqueo, dos procesos migrando a la vez no chocan: el segundo espera y, al
- * obtenerlo, ve lo que dejo anotado el primero. Ver `docs/adr/0022`.
- */
+/** Clave del bloqueo consultivo que serializa a quien migra este esquema. */
 const BLOQUEO = `migraciones:${ESQUEMA}`;
 
 /** Toma el bloqueo DENTRO de la transaccion: se suelta solo al terminarla. */
@@ -59,9 +43,7 @@ const bloquear = (conexion: Sequelize, transaccion: Transaction): Promise<unknow
   });
 
 const asegurarTablaControl = async (conexion: Sequelize): Promise<void> => {
-  // El esquema tiene que existir antes que su tabla de control, y la primera
-  // migracion es justamente la que lo crea. De ahi que se cree aqui tambien. Bajo el
-  // bloqueo: dos `CREATE TABLE IF NOT EXISTS` simultaneos pueden chocar en el catalogo.
+  // Crea el esquema y la tabla de control, bajo el bloqueo.
   await conexion.transaction(async (transaccion) => {
     await bloquear(conexion, transaccion);
     await conexion.query(`CREATE SCHEMA IF NOT EXISTS ${ESQUEMA}`, { transaction: transaccion });
@@ -79,9 +61,7 @@ const asegurarTablaControl = async (conexion: Sequelize): Promise<void> => {
 
 /**
  * Aplica las migraciones que falten y devuelve los nombres de las aplicadas.
- *
- * Cada una corre en su propia transaccion junto con su registro en la tabla de
- * control: o se aplica entera y queda anotada, o no pasa nada.
+ * Cada una corre en su propia transacción junto con su anotación.
  */
 export const aplicarMigraciones = async (conexion: Sequelize): Promise<string[]> => {
   await asegurarTablaControl(conexion);
@@ -91,8 +71,7 @@ export const aplicarMigraciones = async (conexion: Sequelize): Promise<string[]>
   for (const migracion of listarMigraciones()) {
     const sql = fs.readFileSync(migracion.ruta, 'utf8');
 
-    // La comprobacion de si ya esta aplicada va DENTRO de la transaccion y DESPUES del
-    // bloqueo: si otro proceso la esta aplicando, se espera a que termine y se salta.
+    // Se comprueba si ya está aplicada después de tomar el bloqueo.
     const aplicada = await conexion.transaction(async (transaccion) => {
       await bloquear(conexion, transaccion);
 
@@ -120,11 +99,7 @@ export const aplicarMigraciones = async (conexion: Sequelize): Promise<string[]>
   return aplicadas;
 };
 
-/**
- * Las migraciones de disco que la base no tiene anotadas. NO escribe nada: es lo que
- * usa el arranque con `MIGRACIONES_AL_ARRANCAR=no` para negarse a servir con el esquema
- * atrasado.
- */
+/** Las migraciones de disco que la base no tiene anotadas. No escribe nada. */
 export const migracionesPendientes = async (conexion: Sequelize): Promise<string[]> => {
   const nombres = listarMigraciones().map((migracion) => migracion.nombre);
 
@@ -141,12 +116,8 @@ export const migracionesPendientes = async (conexion: Sequelize): Promise<string
 };
 
 /**
- * Vacia el esquema del servicio y vuelve a migrarlo. Es el reemplazo de
- * `sequelize.sync({ force: true })` en las pruebas.
- *
- * Solo funciona con `NODE_ENV=test`, y solo borra `identidad`: aunque alguien lo
- * ejecutara por error contra la base de desarrollo, `public` y los esquemas de
- * los demas servicios quedarian intactos.
+ * Vacía el esquema del servicio y vuelve a migrarlo, para las pruebas. Sólo con
+ * `NODE_ENV=test`.
  */
 export const recrearEsquema = async (conexion: Sequelize): Promise<string[]> => {
   if (process.env['NODE_ENV'] !== 'test') {
