@@ -14,13 +14,11 @@ import {
 } from '../ui';
 
 /**
- * UI de Contratos (mockup docs/mockups/contratos.png): la lista, el alta y la
+ * Contratos: la lista, el alta y la
  * finalización.
  *
- * El alta sigue el endpoint real (ver `features/contratos/api.js`): el inquilino
- * se busca por documento porque `id_inquilino` es un UUID que nadie teclea, y si
- * no existe se le da de alta aquí mismo. Su contraseña temporal sale una sola vez
- * (docs/adr/0007) y se muestra al terminar.
+ * En el alta, el inquilino se busca por documento y, si no existe, se le da de
+ * alta aquí mismo; su contraseña temporal se muestra una sola vez al terminar.
  *
  * Las acciones de propietario dependen del contrato y no sólo del rol: quien
  * tiene los dos roles es inquilino en algunos (`actuaComoPropietario`).
@@ -292,9 +290,8 @@ export default function Contratos() {
     useEffect(() => { cargar(); }, [cargar]);
 
     /**
-     * Disponibles para firmar. El estado del inmueble converge unos segundos
-     * después de firmar (regla dura 9), así que también se descartan los que ya
-     * tienen un contrato activo en la lista.
+     * Disponibles para firmar: se descartan también los que tienen un contrato
+     * activo en la lista, porque el estado del inmueble tarda unos segundos en cambiar.
      */
     const disponibles = useMemo(() => {
         const ocupados = new Set(contratos.filter((c) => c.estado === 'activo').map((c) => c.id_inmueble));

@@ -12,7 +12,7 @@ import { LONGITUD_MINIMA, validarContrasenaNueva } from './reglas';
  *
  * Es la única pantalla accesible para quien entró con una contraseña temporal:
  * el guardián de ruta lo trae aquí y la API le deniega todo lo demás con
- * `CAMBIO_CONTRASENA_REQUERIDO`. Ver docs/adr/0007.
+ * `CAMBIO_CONTRASENA_REQUERIDO`.
  *
  * También sirve para cambiarla voluntariamente, y en ese caso el texto se
  * adapta en vez de hablar de una temporal que no existe.
@@ -38,8 +38,7 @@ export default function CambiarContrasena() {
         setEnviando(true);
         try {
             const respuesta = await cambiarContrasena({ contrasena_actual: actual, contrasena_nueva: nueva });
-            // El servicio revoca el token viejo y emite otro: el viejo todavía
-            // afirmaba que había que cambiar la contraseña.
+            // Se guarda el token nuevo que emite el servicio.
             guardarSesion({ token: respuesta.token, usuario: respuesta.usuario });
             navigate('/', { replace: true });
         } catch (err) {

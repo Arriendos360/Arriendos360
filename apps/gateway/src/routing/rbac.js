@@ -1,29 +1,11 @@
 /**
- * Punto de aplicación de políticas (PEP) del gateway.
- *
- * Un único middleware que, antes de que la petición toque nada, resuelve tres
- * preguntas en este orden:
+ * Control de acceso del gateway, antes de la costura y de `express.json()`:
  *
  *   1. ¿Está declarada esta combinación de método y ruta?  Si no, 403.
  *   2. ¿El token es válido, vigente y no está revocado?     Si no, 401 o 403.
  *   3. ¿El rol del usuario cubre la política?               Si no, 403.
  *
- * Va montado ANTES de la costura de enrutamiento a propósito. El Capítulo 2 lo
- * pide así: «si no cuadra, 403 y la petición no llega a la red interna». Un
- * control que se aplicara después del reenvío no protegería nada, sólo
- * maquillaría la respuesta.
- *
- * También va antes de `express.json()`, como la costura, para no consumir el
- * cuerpo: la carga de anexos viaja como multipart y tiene que llegar intacta al
- * reenvío.
- *
- * La consulta de revocados se inyecta. Por esa costura entra hoy la caché en
- * memoria que el gateway refresca contra ms-identidad (`cacheRevocados.js`), y
- * es lo que permite que las pruebas de la matriz corran sin red ni base.
- *
- * Si no se inyecta nada, se deniega toda petición autenticada: no hay valor por
- * defecto razonable. Suponer «no hay revocados» convertiría un olvido de
- * cableado en una desactivación silenciosa del logout.
+ * Sin `tokenInvalidado` inyectado, deniega toda petición autenticada.
  */
 
 const {
@@ -41,21 +23,10 @@ const {
     resolverPolitica
 } = require('./matriz');
 
-/**
- * Respuesta para una ruta que no figura en la matriz.
- *
- * Deliberadamente vaga: no distingue entre «no existe» y «no tienes permiso»,
- * para no convertir el 403 en un mapa de la API para quien vaya probando rutas.
- */
+/** Respuesta para una ruta no declarada. No distingue «no existe» de «no puedes». */
 const MENSAJE_NO_DECLARADA = 'Acceso denegado.';
 
-/**
- * Denegación por tener el cambio de contraseña pendiente.
- *
- * Lleva `error_code` además del mensaje para que la SPA pueda llevar a la
- * pantalla de cambio en vez de mostrar un error genérico. Hay precedente del
- * patrón en `TENANT_NOT_FOUND`.
- */
+/** Denegación por cambio de contraseña pendiente; `error_code` lo reconoce la SPA. */
 const CODIGO_CAMBIO_PENDIENTE = 'CAMBIO_CONTRASENA_REQUERIDO';
 const MENSAJE_CAMBIO_PENDIENTE =
     'Debes cambiar tu contraseña temporal antes de usar la aplicación.';
@@ -63,12 +34,7 @@ const MENSAJE_CAMBIO_PENDIENTE =
 /** Denegación por rol cuando la política admite varios roles. */
 const MENSAJE_ROL_NO_AUTORIZADO = 'Acceso restringido. Tu rol no cubre esta operación.';
 
-/**
- * Mensaje de denegación por rol.
- *
- * Cuando la política exige sólo PROPIETARIO se reutiliza el mensaje literal que
- * el proyecto ya devolvía, para no cambiar lo que ve un cliente existente.
- */
+/** Mensaje de denegación por rol. */
 const mensajeDeRol = (acceso) =>
     acceso.length === 1 && acceso[0] === 'PROPIETARIO'
         ? MENSAJE_ROL_INSUFICIENTE
@@ -89,8 +55,7 @@ const crearControlDeAcceso = (opciones = {}) => {
         });
 
     return async function controlDeAcceso(req, res, next) {
-        // Fuera de `/api` la matriz no opina: la raíz y `/uploads` los sirve
-        // Express por su cuenta.
+        // Fuera de `/api` la matriz no opina.
         if (!esRutaDeApi(req.path)) {
             return next();
         }
@@ -117,13 +82,10 @@ const crearControlDeAcceso = (opciones = {}) => {
             return res.status(resultado.estado).json(resultado.error);
         }
 
-        // Se cuelgan los claims para que los routers y controladores no tengan
-        // que volver a verificar el token en la misma petición.
+        // Claims para los routers y controladores.
         req.usuario = resultado.claims;
 
-        // Condición transversal: quien entró con una contraseña que no eligió
-        // no puede hacer nada más que cambiarla. Va aquí y no en la matriz
-        // porque no depende del rol ni del recurso. Ver docs/adr/0007.
+        // Con el cambio de contraseña pendiente sólo se permite cambiarla.
         if (
             resultado.claims.debe_cambiar === true &&
             !permitidaConCambioPendiente(req.method, req.path)

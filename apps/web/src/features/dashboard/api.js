@@ -1,5 +1,5 @@
 /**
- * Dashboard: lo compone el gateway (regla dura 5), sólo para el propietario.
+ * Dashboard: lo compone el gateway, sólo para el propietario.
  *
  * Nada de `.catch(() => [])` aquí. Si un servicio no responde, el gateway da 502
  * a propósito: un «$0 en mora» sería creíble y falso. El error sube a la pantalla.
@@ -14,7 +14,7 @@
  * - `/mora`: `{ cantidad_en_mora, total_mora, detalle }`. OJO: además de las
  *   `EN_MORA` cuenta toda `PENDIENTE` o `PARCIAL` cuyo periodo ya empezó
  *   (`inicio < hoy`), así que incluye el cobro del mes en curso aunque no haya
- *   vencido. No es la mora de docs/adr/0018; la pantalla no la usa.
+ *   vencido. No es la mora del motor; la pantalla no la usa.
  * - `/contratos-activos`: `{ cantidad_activos, contratos }`, con su `Inmueble`.
  *
  * No hay ruta de ingresos por mes.

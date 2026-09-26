@@ -1,24 +1,9 @@
-/**
- * Forma estandar de error del proyecto.
- *
- * Convencion de `CLAUDE.md`: el cuerpo de todo error es `{ mensaje: "..." }`,
- * nunca `{ error }` ni `{ message }`. El monolito ya lo hace asi y los servicios
- * extraidos deben mantenerlo, porque el frontend y la coleccion de Postman leen
- * ese campo.
- */
+/** Cuerpo de todo error de la API. */
 export interface ErrorRespuesta {
   mensaje: string;
 }
 
-/**
- * Codigos de estado que el proyecto usa de forma convenida.
- *
- * - `400` validacion
- * - `401` falta el token
- * - `403` token invalido o expirado, o rol insuficiente
- * - `404` no encontrado
- * - `502` el gateway no pudo alcanzar al servicio de destino
- */
+/** Códigos de estado convenidos. */
 export const ESTADO_VALIDACION = 400;
 export const ESTADO_SIN_TOKEN = 401;
 export const ESTADO_PROHIBIDO = 403;

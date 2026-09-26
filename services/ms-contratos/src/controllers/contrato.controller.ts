@@ -1,28 +1,6 @@
 /**
- * Contratos.
- *
- * ── QUE CAMBIA AL SALIR DEL GATEWAY, Y QUE NO ───────────────────────────────
- *
- * NO cambia la logica de negocio: las validaciones, los codigos de estado y los
- * mensajes son los mismos que servia el gateway. Lo que cambia es de donde salen
- * los datos que no son de aqui.
- *
- * COMPONER EL `Inquilino` Y EL `Inmueble` SE MUDA CON EL ENDPOINT, y conviene
- * decir por que, porque la regla dura 5 dice que las agregaciones se resuelven
- * en el gateway.
- *
- * La razon es la costura: el gateway reenvia `/api/contratos` entero y devuelve
- * la respuesta tal cual — no la abre ni la reescribe. Hacer que lo hiciera
- * significaria meter logica de dominio en el proxy. Asi que quien sirve el
- * endpoint tiene que devolverlo completo, y `contrato.Inmueble.direccion` sigue
- * siendo la ruta que el frontend lee desde antes de que Inmuebles se extrajera.
- *
- * La regla dura 5 sigue donde importa: el DASHBOARD, que cruza tres contextos y
- * no es de nadie, se resuelve en el gateway. Ver `services/composicion.ts`.
- *
- * Y la AUTORIZACION vive aqui porque depende de datos de este servicio. Toda
- * ella pasa por `services/pertenencia.ts`, que es el unico sitio donde esta
- * escrita.
+ * Contratos. Las respuestas salen compuestas con `Inquilino` e `Inmueble`
+ * (`services/composicion.ts`) y la autorización pasa por `services/pertenencia.ts`.
  */
 
 import type { Request, Response } from 'express';
@@ -45,28 +23,16 @@ import {
 /** El rol que tiene que tener el inquilino de un contrato. */
 const ROL_INQUILINO = 'INQUILINO';
 
-/**
- * 502 con el formato de error del proyecto.
- *
- * Un fallo de ms-inmuebles NO se degrada a 403 ni a una lista vacia: decirle a
- * alguien «no tienes permisos» cuando en realidad no se ha podido comprobar es
- * la peor de las respuestas posibles.
- */
+/** 502 cuando ms-inmuebles no responde; nunca se degrada a 403 ni a una lista vacía. */
 const responderServicioCaido = (res: Response, error: unknown, accion: string): Response => {
   console.error(`Error al ${accion}:`, (error as Error).message);
   return res.status(502).json(crearError('No se pudo contactar el servicio de inmuebles'));
 };
 
-/**
- * GET /api/contratos
- *
- * Los contratos en los que el usuario es parte: dueño del inmueble O inquilino.
- * La disyuncion la resuelve `contratosDondeEsParte` con un solo salto de red.
- */
+/** GET /api/contratos — los contratos donde el usuario es propietario o inquilino. */
 export const obtenerTodos = async (req: Request, res: Response): Promise<Response> => {
   try {
     const sub = req.usuario?.sub as string;
-    // Dos composiciones en paralelo para la lista entera, no dos por contrato.
     return res.json(await adjuntarPartes(await contratosDondeEsParte(sub)));
   } catch (error) {
     return responderServicioCaido(res, error, 'obtener contratos');
@@ -80,8 +46,7 @@ export const obtenerPorId = async (req: Request, res: Response): Promise<Respons
     const contrato = await contratoDondeEsParte(req.params['id'] as string, sub);
 
     if (!contrato) {
-      // 404 y no 403: un 403 confirmaria que ese identificador existe, que es
-      // informacion que quien pregunta no tiene por que obtener probando UUID.
+      // 404 y no 403, para no confirmar que el contrato existe.
       return res.status(404).json(crearError('Contrato no encontrado'));
     }
 
@@ -104,11 +69,8 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
     void creado_por;
     void actualizado_por;
 
-    // 0. El inmueble tiene que ser del propietario autenticado. Que el `sub` no
-    //    salga de este proceso es deliberado: el que autoriza es quien lo tiene.
-    //
-    //    En su propio try/catch: un servicio caido es un 502, no un 500 con el
-    //    mensaje interno dentro. Y sobre todo NO es un 403.
+    // 0. El inmueble tiene que ser del propietario autenticado. Si ms-inmuebles
+    //    no responde, 502.
     let inmueble = null;
     try {
       inmueble = esUuid(id_inmueble) ? await propioDe(id_inmueble as string, sub) : null;
@@ -131,10 +93,7 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
       return res.status(400).json(crearError('El canon debe ser un número positivo'));
     }
 
-    // El dia limite llega del formulario, asi que se valida aqui y no solo en el
-    // modelo: la validacion de Sequelize saldria por el `catch` de abajo como un
-    // 500, y esto es un 400 de manual. Solo se mira si viene: si no, lo deriva
-    // el hook.
+    // Día límite: se valida si viene; si no, lo deriva el hook.
     if (
       contratoData['fecha_limite_pago'] !== undefined &&
       contratoData['fecha_limite_pago'] !== ''
@@ -151,9 +110,7 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
       contratoData['fecha_limite_pago'] = dia;
     }
 
-    // 2. El inquilino tiene que existir y ser inquilino. Un fallo de
-    //    ms-identidad se traduce en «no encontrado», que es lo prudente: ante la
-    //    duda no se firma un contrato contra un usuario que quiza no exista.
+    // 2. El inquilino tiene que existir y tener el rol INQUILINO.
     const inquilino = esUuid(id_inquilino) ? await usuarioPorId(id_inquilino as string) : null;
 
     if (!inquilino || !(inquilino.roles ?? []).includes(ROL_INQUILINO)) {
@@ -164,18 +121,7 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
       });
     }
 
-    // 3. Guardar el contrato Y ANUNCIARLO, en una sola transaccion.
-    //
-    //    Las dos escrituras van a la misma base, asi que o quedan las dos o no
-    //    queda ninguna. Es lo que devuelve la atomicidad que el ADR 0011 dio por
-    //    perdida: no la del contrato con el estado del inmueble —eso ya no es
-    //    posible ni deseable— sino la del contrato con el HECHO DE HABERLO
-    //    ANUNCIADO, que es la que se puede tener y la que hace que el estado del
-    //    inmueble acabe convergiendo.
-    //
-    //    Si el registro del evento falla, el contrato no se guarda. Es el orden
-    //    correcto: un contrato que nadie anuncia deja el sistema inconsistente
-    //    en silencio; uno que no se firma se le dice al usuario.
+    // 3. El contrato y su `ContratoFormalizado`, en una sola transacción.
     t = await sequelize.transaction();
     const nuevoContrato = await Contrato.create(contratoData, {
       transaction: t,
@@ -185,9 +131,6 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
     await t.commit();
     t = null;
 
-    // El publicador entrega el evento y el inmueble pasa a `arrendado` en
-    // cuestion de segundos; la respuesta no espera a eso y tampoco necesita
-    // avisar de nada, porque no hay nada que se pueda haber perdido.
     return res.status(201).json({
       mensaje: 'Contrato creado exitosamente',
       contrato: nuevoContrato,
@@ -236,8 +179,7 @@ export const finalizar = async (req: Request, res: Response): Promise<Response> 
         .json(crearError('Contrato no encontrado o no tienes permisos'));
     }
 
-    // Estado finalizado y anuncio, en la misma transaccion: son justamente las
-    // dos escrituras que no pueden quedar desparejadas.
+    // El cambio de estado y su `ContratoFinalizado`, en una transacción.
     await sequelize.transaction(async (transaccion) => {
       await contrato.update(
         { estado: ESTADO_CONTRATO_FINALIZADO },
@@ -246,7 +188,6 @@ export const finalizar = async (req: Request, res: Response): Promise<Response> 
       await registrarContratoFinalizado(contrato, transaccion);
     });
 
-    // La liberacion del inmueble la hace ms-inmuebles al consumir el evento.
     return res.json({ mensaje: 'Contrato finalizado', contrato });
   } catch (error) {
     console.error('Error al finalizar contrato:', (error as Error).message);
@@ -257,27 +198,8 @@ export const finalizar = async (req: Request, res: Response): Promise<Response> 
 };
 
 /**
- * POST /api/contratos/:id/contrasena-inquilino
- *
- * Regenera la contraseña temporal del inquilino de un contrato y la devuelve una
- * sola vez, para que el propietario se la entregue. Existe porque la temporal
- * del alta se muestra una vez y no se puede volver a consultar: si se pierde
- * antes de entregarla, no habria forma de generar otra.
- *
- * ── POR QUE AHORA VIVE AQUI ─────────────────────────────────────────────────
- *
- * El `docs/adr/0010` la puso en el gateway porque la regla de autorizacion es
- * «solo sobre inquilinos con contrato en mis inmuebles», y eso eran datos de
- * contratos —del gateway— e inmuebles. Ms-identidad no podia comprobarlo sin
- * depender de un servicio de dominio.
- *
- * El argumento no ha cambiado; ha cambiado quien tiene los datos. Los contratos
- * son de este servicio, y preguntar por el inmueble es Core -> Soporte, que es
- * la direccion correcta. Dejarla en el gateway obligaria a que el gateway
- * volviera a saber que es un contrato justo despues de habersela quitado. Ver
- * `docs/adr/0017`.
- *
- * La ruta cuelga del contrato a proposito: el contrato ES lo que autoriza.
+ * POST /api/contratos/:id/contrasena-inquilino — regenera la contraseña temporal
+ * del inquilino de un contrato propio y la devuelve una sola vez.
  */
 export const reemitirContrasenaDelInquilino = async (
   req: Request,
@@ -287,9 +209,7 @@ export const reemitirContrasenaDelInquilino = async (
   try {
     const sub = req.usuario?.sub as string;
 
-    // ABAC de pertenencia (regla dura 8): el contrato tiene que ser sobre un
-    // inmueble de quien pide. Se responde 404 y no 403 para no confirmar que el
-    // contrato existe.
+    // El contrato tiene que ser sobre un inmueble de quien pide.
     contrato = await contratoPropio(req.params['id'] as string, sub);
 
     if (!contrato) {
@@ -309,8 +229,7 @@ export const reemitirContrasenaDelInquilino = async (
 
     return res.json({
       mensaje: 'Contraseña temporal regenerada',
-      // Unica vez que viaja en claro, igual que en el alta. No se guarda, no se
-      // registra y no hay forma de volver a consultarla.
+      // Única vez que viaja en claro.
       contrasena_temporal: resultado.contrasena_temporal,
       inquilino: resultado.usuario,
     });

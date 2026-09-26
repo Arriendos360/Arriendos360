@@ -7,24 +7,8 @@ import { claveUuid, columnasAuditoria, opcionesAuditoria, registrarHooksAuditori
 import { ESTADO_INICIAL } from './constantes';
 
 /**
- * Tabla `Inmuebles` del modelo canonico.
- *
- * DOS DIFERENCIAS con la version que tenia el gateway:
- *
- * - `estado_ocupacion` se llama ahora `estado`, como en el Capitulo 2.
- * - `tipo_inmueble` se llama `tipo` y es un catalogo cerrado. Era
- *   `VARCHAR(50)` libre, y la base acumulaba "Casa", "casa" y "Apto" como
- *   valores distintos.
- *
- * `id_propietario` guarda el UUID del usuario como referencia logica pura: ni
- * clave foranea ni asociacion de Sequelize. Vive en ms-identidad, asi que esa
- * columna cruza la frontera del servicio y ni la base ni el ORM pueden
- * seguirla. Quien necesite los datos del propietario los compone por HTTP.
- *
- * La validacion del catalogo va DOS veces: aqui, con `isIn`, y en la base, con
- * un CHECK. No es celo. El `isIn` da un 400 con un mensaje que se puede leer;
- * el CHECK es lo que impide que una migracion futura, un `INSERT` a mano o un
- * bug en otro camino metan basura. El de la base es el que manda.
+ * Tabla `Inmuebles`. `tipo` y `estado` se validan contra los catálogos aquí y con
+ * un `CHECK` en la base. `id_propietario` es una referencia sin clave foránea.
  */
 export class Inmueble extends Model {
   declare id_inmueble: string;

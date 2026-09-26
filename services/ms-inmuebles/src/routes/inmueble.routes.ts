@@ -11,13 +11,7 @@ import { esPropietario, verificarToken } from '../middlewares/auth.middleware';
 
 const router: Router = Router();
 
-/**
- * Todas exigen token y rol de propietario.
- *
- * Va con `router.use` y no ruta por ruta a proposito: asi un endpoint nuevo nace
- * protegido. La version del gateway lo ponia en cada linea y `GET /` se habia
- * quedado sin `esPropietario`, de modo que un inquilino llegaba al controlador.
- */
+/** Todas exigen token y rol de propietario. */
 router.use(verificarToken, esPropietario);
 
 // GET /api/inmuebles

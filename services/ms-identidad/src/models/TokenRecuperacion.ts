@@ -4,16 +4,7 @@ import { sequelize } from '../config/database';
 import { claveUuid } from './columnas';
 import { Usuario } from './Usuario';
 
-/**
- * Token de recuperacion de contrasena.
- *
- * Tabla operativa de seguridad, no de dominio: sin columnas de auditoria, como
- * `tokens_revocados`.
- *
- * Se guarda el HASH, nunca el token. Quien consiga leer esta tabla no debe poder
- * restablecer la contrasena de nadie; el token en claro existe una sola vez, en
- * el correo.
- */
+/** Token de recuperación de contraseña. Tabla operativa: guarda el hash, nunca el token. */
 export class TokenRecuperacion extends Model {
   declare id_token: string;
   /** SHA-256 hexadecimal del token enviado. */

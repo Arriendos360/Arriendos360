@@ -1,14 +1,4 @@
-/**
- * Lo unico que este servicio le pide a ms-identidad: que tokens dejaron de valer.
- *
- * No pide datos de usuario. Un inmueble guarda el UUID de su propietario y nada
- * mas; quien necesite su nombre —el gateway, al componer un PDF— se lo pregunta
- * a ms-identidad por su cuenta. Este servicio no compone nada de otro contexto.
- *
- * Se llama una vez cada 15 segundos, no una por peticion: lo que se consulta en
- * el camino critico es la copia en memoria de `packages/shared`. Ver
- * `docs/adr/0008`.
- */
+/** Cliente hacia ms-identidad: trae lo que invalida tokens, para la caché. */
 
 import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
 import type { Invalidaciones } from 'arriendos360-shared';
@@ -29,13 +19,8 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
 };
 
 /**
- * Trae los `jti` revocados y las sesiones caidas.
- *
- * El fallo SE PROPAGA. Quien llama es el refresco de la cache, y necesita
- * distinguir entre «no hay nada que invalidar» y «no pude preguntar»: confundir
- * las dos cosas dejaria entrar tokens de sesiones ya cerradas sin que nadie se
- * entere. La cache decide que hacer con el fallo — conservar su ultima copia
- * buena — y eso es una decision suya, no de este cliente.
+ * Trae los `jti` revocados y las sesiones caídas. Propaga el fallo, para
+ * distinguir «no hay nada» de «no pude preguntar».
  */
 export const invalidacionesVigentes = async (
   opciones: { urlBase?: string | null } = {},

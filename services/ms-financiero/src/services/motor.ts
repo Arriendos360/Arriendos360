@@ -1,115 +1,15 @@
 /**
- * MOTOR FINANCIERO — Arriendos360
+ * Motor financiero: genera las cuentas de cobro de los meses siguientes al primero
+ * y aplica los vencimientos (aviso previo y mora). Los avisos se anotan como
+ * eventos en la misma transacción que el cambio.
  *
- * Trazabilidad: la generacion de recibos es RF-11 y las alertas de mora son
- * RF-12. El control de dias de gracia no tiene requisito propio identificado;
- * queda marcado como pendiente de confirmar contra el SRS en vez de inventarle
- * un numero.
- *
- * Este proceso corre sin usuario autenticado, asi que las columnas de auditoria
- * quedan a nombre de USUARIO_SISTEMA (ver `models/columnas.ts`).
- *
- * ── LO QUE CAMBIA EN EL PASO 6e, Y ES LO MAS IMPORTANTE DE ESTE ARCHIVO ─────
- *
- * `procesarContratos` YA NO GENERA LA PRIMERA CUENTA DE COBRO. La primera nace
- * del evento `ContratoFormalizado`, en `eventos/index.ts`, que es el caso que el
- * Capitulo 2 especifica textualmente: «MS-Financiero consume el evento, extrae
- * `id_contrato`, `canon` y `fecha_inicio_corte`, e inserta la primera
- * Cuenta_cobro».
- *
- * Este barrido se queda con LOS MESES SIGUIENTES, que es lo que un evento no
- * puede dar: el contrato se formaliza una vez y hay que facturarlo doce.
- *
- * La frontera entre los dos esta en `primerPeriodoDe()`, y no es una
- * comprobacion de si «ya existe»: es una comprobacion de CUAL es el periodo. El
- * primero es del consumidor y este barrido lo salta siempre, exista o no. La
- * diferencia importa — saltarlo solo cuando ya existe dejaria que el motor
- * generase la primera cuenta de un contrato cuyo evento todavia no ha llegado, y
- * entonces habria dos caminos escribiendo la misma fila y una carrera entre
- * ellos. Hay ademas un indice unico `(id_contrato, inicio)` debajo, pero eso es
- * la red, no el diseño.
- *
- * ── LO QUE CAMBIA EN EL PASO 7: EL MOTOR NO MANDA CORREOS ──────────────────
- *
- * Los cuatro `enviarCorreo` que habia aqui —recibo generado, vencimiento proximo al
- * inquilino y al propietario, mora a los dos— se han convertido en tres eventos:
- * `CuentaCobroGenerada`, `CuentaCobroPorVencer` y `CuentaCobroEnMora`. Quien decide
- * a quien avisar, en que idioma y por que canal es ms-notificaciones.
- *
- * Y no es solo mover codigo de sitio. Un barrido que abre una conexion SMTP hereda su
- * latencia y sus fallos: el aviso del mes de alguien dependia de que un servidor de
- * correo contestara mientras el bucle estaba a medias. Ahora el aviso es una fila mas
- * en la misma transaccion, y lo que pueda fallar al mandarlo ya no ocurre aqui. Ver
- * `docs/adr/0019`.
- *
- * ── EL BARRIDO SIGUE SIENDO UN NUMERO FIJO DE VIAJES, Y AHORA SON MENOS ────
- *
- * La garantia no cambia con el paso 7: **el numero de peticiones no depende de
- * cuantos contratos haya.** Lo que cambia es el numero.
- *
- *   `procesarContratos` — 1 a ms-contratos (todos los activos, con su inmueble
- *   dentro). UNA, haya 5 contratos o 500.
- *
- *   `procesarPagos` — 1 a ms-contratos (los contratos de las cuentas vencidas, POR
- *   IDENTIFICADOR y en lote). UNA.
- *
- * Eran DOS cada uno hasta el paso 6e: la segunda iba a ms-identidad, a por las
- * direcciones de correo. Ha desaparecido porque los eventos NO LLEVAN direcciones de
- * correo — llevan el `id_usuario`, y quien resuelve el destinatario es
- * ms-notificaciones. La regla que existia por propiedad del dato resulta que tambien
- * le quita un salto de red al barrido.
- *
- * La forma de romper la garantia seria pedir el contrato dentro del bucle, que
- * es exactamente lo que `porIds` existe para evitar. La prueba lo comprueba.
- *
- * ── Y CON ELLO DESAPARECE LA DEGRADACION QUE HABIA QUE EXPLICAR ────────────
- *
- * Hasta el paso 6e este archivo documentaba que si ms-identidad no respondia, el
- * aviso se omitia y el barrido seguia facturando: degradar era lo correcto porque
- * avisar es lo accesorio de un proceso que existe para facturar.
- *
- * Ese caso ya no existe. El aviso no necesita a nadie para anotarse, asi que no hay
- * nada que degradar: o la transaccion escribe la cuenta y su evento, o no escribe
- * ninguna de las dos cosas. La decision de si el correo es prescindible se ha mudado
- * al sitio donde se puede tomar bien — ms-notificaciones, que si depende de
- * ms-identidad para resolver el destinatario y que ante un fallo devuelve 500 para
- * que el evento se reintente en vez de perderse.
- *
- * Lo que SI sigue igual: si ms-contratos no responde, el barrido no genera NADA.
- * Generar la mitad de las cuentas del mes seria peor que no generar ninguna, porque al
- * dia siguiente el motor no sabria cuales faltan, y con la comprobacion de duplicados
- * que ya hay, no generar nada hoy se arregla solo mañana.
- *
- * ── LAS FECHAS SON DE BOGOTA, NO DEL SERVIDOR ──────────────────────────────
- *
- * El paso 6c lo cerro: el motor no compara contra `new Date()` local sino contra
- * `hoyEnZonaNegocio()`, y `diasEntre()` cuenta dias de calendario en vez de
- * intervalos de 24 horas. Quien decide que un arriendo entro en mora al sexto
- * dia lo hace en Bogota; en un contenedor en UTC el corte se adelantaria cinco
- * horas.
- *
- * NO hay intereses ni recargos, y no los va a haber por esta via: RF-12 es
- * alertas de vencimiento, no cobro de mora.
- *
- * ── CUANDO CORRE, Y POR QUE TIENE QUE PODER CORRER DOS VECES ───────────────
- *
- * Lo decide `MOTOR_PROGRAMACION`, obligatoria y sin valor por defecto: `cron` en
- * Compose y en local —node-cron dentro de este proceso— y `trabajo` en Container Apps,
- * donde un Job programado ejecuta `npm run motor` y el proceso no programa nada. Con
- * scale-to-zero un cron dentro del contenedor no dispara. Ver `docs/adr/0021`.
- *
- * Un Job se reintenta si sale con error y no garantiza no solaparse con otra
- * ejecucion, asi que el motor es IDEMPOTENTE: dos ejecuciones el mismo dia, seguidas o
- * a la vez, no generan dos cuentas ni anotan dos avisos.
- *
- *   - Generacion: comprobacion previa e indice unico `(id_contrato, inicio)`. Si una
- *     ejecucion concurrente gana la carrera, el choque se trata como «ya existe».
- *   - Aviso previo: `id_evento` derivado del hecho; la segunda anotacion no se escribe.
- *   - Mora: la cuenta se relee BLOQUEADA y con el estado en el filtro; si otra
- *     ejecucion ya la marco, no se marca ni se avisa otra vez.
- *
- * Y no se traga los fallos: los devuelve, y `scripts/motor.ts` sale con 1 para que el
- * Job reintente. Reintentar es seguro precisamente por lo anterior.
+ * - La primera cuenta de cada contrato la crea el consumidor de
+ *   `ContratoFormalizado`; este barrido salta SIEMPRE el primer periodo.
+ * - Las fechas son de `America/Bogota` (`hoyEnZonaNegocio`, `diasEntre`).
+ * - Hace un número fijo de peticiones a ms-contratos, sin importar cuántos
+ *   contratos haya. No pidas el contrato dentro del bucle.
+ * - Es idempotente: puede correr dos veces el mismo día, seguidas o a la vez, sin
+ *   duplicar cuentas ni avisos. Devuelve los fallos para que el Job reintente.
  */
 
 import cron from 'node-cron';
@@ -145,44 +45,13 @@ import {
 } from '../eventos/salida';
 import { emitirCuentaCobro } from './cuentas';
 
-/**
- * Dias desde el corte a partir de los cuales una cuenta esta EN MORA.
- *
- * ── ESTA CONSTANTE CIERRA UNA TRAMPA QUE CLAUDE.md TENIA ANOTADA ───────────
- *
- * «Un contrato de 16 lineas de mora no existe: `verificar-mora` y el motor no
- * aplican la misma regla». El endpoint manual marcaba EN_MORA con que el corte
- * hubiera pasado un solo dia; este barrido espera al sexto. Las dos reglas
- * vivian en dos archivos y nada las ataba.
- *
- * Ahora es un numero, exportado, y lo usan los dos: este barrido y
- * `verificarMora` en `controllers/pago.controller.ts`. Cambiar el periodo de
- * gracia es cambiarlo aqui.
- */
+/** Días desde el corte a partir de los cuales una cuenta entra en mora. Lo usa también `verificarMora`. */
 export const DIAS_PARA_MORA = 6;
 
-/**
- * Dias desde el corte en que se avisa de que el plazo se acaba.
- *
- * Uno antes de que expire la gracia, de ahi que sea `DIAS_PARA_MORA - 2`: el
- * aviso sale el cuarto dia y la mora entra al sexto, asi que entre el uno y la
- * otra hay un dia entero para pagar. Escrito en funcion de la otra constante
- * para que mover el periodo de gracia mueva el aviso con el.
- */
+/** Días desde el corte en que se avisa de que el plazo se acaba. */
 export const DIAS_AVISO_PREVIO = DIAS_PARA_MORA - 2;
 
-/**
- * El dia en que una cuenta con este corte pasaria a EN_MORA.
- *
- * Es `DIAS_PARA_MORA` dias de calendario despues del corte, calculado con la misma
- * constante que decide la mora: si mañana el periodo de gracia cambia, la fecha que
- * anuncia el aviso cambia con el. Escribirla como un numero aparte habria sido la
- * forma de que un dia dijeran cosas distintas, que es la trampa que `DIAS_PARA_MORA`
- * vino a cerrar.
- *
- * Lo consume `CuentaCobroPorVencer`, que lleva una FECHA y no un «mañana». Ver la
- * cabecera del tipo en `packages/shared/src/eventos.ts`.
- */
+/** El día en que una cuenta con este corte pasaría a EN_MORA. */
 export const diaDeMora = (inicio: string): string => sumarDias(inicio, DIAS_PARA_MORA);
 
 /** El concepto que se imprime en la cuenta de cobro. */
@@ -190,15 +59,8 @@ export const detalleDelPeriodo = (periodo: Periodo): string =>
   `Canon de arrendamiento del ${periodo.inicio} al ${periodo.fin}`;
 
 /**
- * El periodo que le toca facturar hoy a un contrato con este dia de corte.
- *
- * Reproduce exactamente la decision que tomaba la version anterior con
- * aritmetica de `Date`, solo que sobre componentes de calendario:
- *
- *   - se parte del corte de ESTE mes;
- *   - si hoy ya paso de ese dia por mas de dos, el que toca es el del mes que
- *     viene (si hoy es 25 y el corte es 5, la proxima factura es la de junio,
- *     no la de mayo, que ya esta).
+ * El periodo que le toca facturar hoy a un contrato con este día de corte: el de
+ * este mes o, si hoy pasó del corte por más de dos días, el del mes siguiente.
  *
  * @param diaCorte dia pactado, 1-31
  * @param hoy `YYYY-MM-DD` en la zona del negocio
@@ -215,14 +77,8 @@ export const periodoAFacturar = (diaCorte: number, hoy: string): Periodo => {
 };
 
 /**
- * El PRIMER periodo del contrato: el que arranca en su fecha de inicio de corte.
- *
- * Es el que crea el consumidor de `ContratoFormalizado`, y por eso el barrido lo
- * salta. Se calcula igual que alli —`periodoDeCorte()` sobre los componentes de
- * `fecha_inicio_corte`— para que las dos mitades no puedan discrepar: si una
- * usara el dia pactado y la otra el dia recortado, un contrato con corte el 31
- * firmado en enero tendria dos «primeros periodos» distintos y el motor
- * duplicaria la factura de febrero.
+ * El primer periodo del contrato, calculado igual que en el consumidor de
+ * `ContratoFormalizado` para que los dos coincidan.
  */
 export const primerPeriodoDe = (fechaInicioCorte: unknown): Periodo | null => {
   const fecha = soloFecha(fechaInicioCorte);
@@ -231,15 +87,6 @@ export const primerPeriodoDe = (fechaInicioCorte: unknown): Periodo | null => {
   return fecha === null || dia === null ? null : periodoQueEmpiezaEn(fecha, dia);
 };
 
-/**
- * RF-11: generacion automatica de recibos, DE LOS MESES SIGUIENTES.
- * Regla: 2 dias antes de la fecha de corte (aniversario).
- *
- * La cuenta de cobro nace con el PERIODO EXPLICITO, no con un mes suelto: `fin`
- * es el dia anterior al siguiente corte, de modo que los periodos teselan el
- * calendario sin huecos ni solapes. La regla esta en `periodoDeCorte()`, en
- * `packages/shared`.
- */
 /** Lo que deja un barrido de generacion. */
 export interface ResultadoGeneracion {
   generadas: number;
@@ -247,13 +94,15 @@ export interface ResultadoGeneracion {
   fallos: string[];
 }
 
+/**
+ * Genera las cuentas de cobro de los contratos activos, desde 2 días antes del
+ * corte. Si ms-contratos no responde, no genera nada.
+ */
 export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
   const resultado: ResultadoGeneracion = { generadas: 0, fallos: [] };
   const hoy = hoyEnZonaNegocio();
 
-  // UNA peticion para todos los contratos activos del sistema, con su inmueble
-  // dentro. Si no responde, no hay nada que facturar: se anota el fallo —el trabajo
-  // programado reintentara— y este barrido no genera nada.
+  // Una petición para todos los contratos activos, con su inmueble.
   let contratos: Awaited<ReturnType<typeof contratosConEstado>>;
   try {
     contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
@@ -263,19 +112,12 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
     return resultado;
   }
 
-  // Y NO hay segundo viaje. Hasta el paso 6e habia una llamada a ms-identidad aqui
-  // para conseguir la direccion de correo del inquilino; los eventos llevan el
-  // `id_usuario`, asi que ya no hace falta.
-  //
-  // Un contrato que falla no para a los demas: se anota y se sigue. Reintentar el
-  // barrido entero es seguro, y el reintento solo hara lo que falte.
+  // Un contrato que falla se anota y no detiene a los demás.
   for (const contrato of contratos) {
     try {
       const fechaInicioCorte = contrato.fecha_inicio_corte;
 
-      // El dia de corte sale de SU COLUMNA, no de recalcularlo desde el inicio
-      // del contrato. Es la diferencia que trajo el paso 6a: si alguien
-      // renegocia el ciclo de facturacion, el motor lo respeta.
+      // El día de corte sale de su columna.
       const diaCorte = diaDeCorte(fechaInicioCorte);
       if (diaCorte === null) {
         continue;
@@ -283,22 +125,17 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
 
       const periodo = periodoAFacturar(diaCorte, hoy);
 
-      // ¿Estamos dentro de la ventana de 2 dias antes del corte? ¿O el corte ya
-      // llego y no se ha cobrado?
+      // Sólo dentro de los 2 días previos al corte, o con el corte ya llegado.
       if (diasEntre(hoy, periodo.inicio) > 2) {
         continue;
       }
 
-      // EL PRIMER PERIODO ES DEL CONSUMIDOR DEL EVENTO, no de este barrido. Se
-      // salta SIEMPRE, exista ya la cuenta o no: ver la cabecera.
+      // El primer periodo es del consumidor del evento: se salta siempre.
       const primero = primerPeriodoDe(fechaInicioCorte);
       if (primero && primero.inicio === periodo.inicio) {
         continue;
       }
 
-      // La comprobacion es una igualdad sobre `inicio` en vez de un `date_part`
-      // sobre el mes: identifica el periodo exacto y ademas puede usar el indice
-      // unico que lo respalda.
       const yaExiste = await CuentaCobro.findOne({
         where: { id_contrato: contrato.id_contrato, inicio: periodo.inicio },
       });
@@ -307,10 +144,7 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
         continue;
       }
 
-      // La cuenta y su aviso, en una transaccion y por el UNICO camino que las
-      // crea. El correo ya no se manda desde aqui: `emitirCuentaCobro` anota
-      // `CuentaCobroGenerada` en la tabla de salida y ms-notificaciones decide a
-      // quien avisar. Ver `services/cuentas.ts`.
+      // La cuenta y su `CuentaCobroGenerada`, en una transacción.
       try {
         await emitirCuentaCobro({
           id_contrato: contrato.id_contrato,
@@ -321,9 +155,7 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
           fin: periodo.fin,
         });
       } catch (error) {
-        // Otra ejecucion del motor —un reintento solapado, el cron y el trabajo a la
-        // vez— la creo entre la comprobacion de arriba y este INSERT. El indice unico
-        // la freno, y la transaccion se llevo con ella su aviso: ya esta hecha.
+        // Otra ejecución la creó a la vez: el índice único la frenó y ya está hecha.
         if (error instanceof UniqueConstraintError) {
           continue;
         }
@@ -345,25 +177,8 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
 };
 
 /**
- * Los estados de una cuenta que todavia puede entrar en mora: debe algo y aun no
- * esta en mora.
- *
- * ── `PARCIAL` ESTA AQUI, Y DURANTE SIETE TRAMOS NO ESTUVO ──────────────────
- *
- * El barrido original filtraba `estado IN (1, 3)` —pendiente y en mora— y la
- * traduccion al catalogo lo conservo tal cual. El efecto era que una cuenta que
- * recibia un abono antes del sexto dia pasaba a `PARCIAL` y salia del motor para
- * siempre: debia el resto, el corte vencia y nunca entraba en mora. Bastaba abonar
- * un peso a tiempo.
- *
- * La regla es la del saldo, no la del historial: **una cuenta con saldo mayor que
- * cero y el corte vencido entra en mora, haya recibido abonos o no.** `PARCIAL`
- * siempre tiene saldo —`estadoSegunSaldo` la pasa a `PAGADA` al llegar a cero—, asi
- * que no hace falta mirarlo aparte. `EN_MORA` no esta porque ya lo esta, y que no
- * este es lo que impide que un segundo barrido repita el aviso.
- *
- * La usan este barrido y `verificarMora`, igual que `DIAS_PARA_MORA`, para que las
- * dos reglas no vuelvan a separarse. Ver la correccion en `docs/adr/0018`.
+ * Estados de una cuenta que puede entrar en mora. Saldo mayor que cero y corte
+ * vencido es mora, haya abonos o no. Lo usa también `verificarMora`.
  */
 export const ESTADOS_QUE_ENTRAN_EN_MORA: readonly string[] = [
   ESTADO_CUENTA_PENDIENTE,
@@ -372,16 +187,6 @@ export const ESTADOS_QUE_ENTRAN_EN_MORA: readonly string[] = [
 
 const puedeEntrarEnMora = (estado: string): boolean => ESTADOS_QUE_ENTRAN_EN_MORA.includes(estado);
 
-/**
- * Control de dias de gracia (requisito por confirmar en el SRS).
- * RF-12: alertas de vencimiento y vencido.
- *
- * Barre las cuentas que pueden entrar en mora (`ESTADOS_QUE_ENTRAN_EN_MORA`) y las
- * `EN_MORA`, que ya estaban en el filtro y ninguna rama de abajo modifica.
- *
- * Los dias se cuentan desde `inicio`, que es la fecha de corte y es exactamente
- * lo que guardaba `mes_correspondiente`.
- */
 /** Lo que deja un barrido de vencimientos. */
 export interface ResultadoVencimientos {
   /** Cuentas que ESTA ejecucion paso a EN_MORA. */
@@ -390,6 +195,10 @@ export interface ResultadoVencimientos {
   fallos: string[];
 }
 
+/**
+ * Vencimientos: el día `DIAS_AVISO_PREVIO` anota `CuentaCobroPorVencer` y desde
+ * `DIAS_PARA_MORA` pasa la cuenta a EN_MORA y anota `CuentaCobroEnMora`.
+ */
 export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
   const resultado: ResultadoVencimientos = { moras: 0, fallos: [] };
   const hoy = hoyEnZonaNegocio();
@@ -403,10 +212,7 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
       },
     });
 
-    // Los contratos de todas las cuentas del barrido en UNA peticion, por
-    // identificador y con su inmueble dentro. No uno por cuenta. Y NO hay segundo
-    // viaje a ms-identidad: lo que hacia falta de alli eran las direcciones de
-    // correo, y los eventos llevan el `id_usuario`.
+    // Los contratos de todas las cuentas en una petición, con su inmueble.
     contratos = await contratosPorIds(
       cuentasPendientes.map((cuenta) => cuenta.id_contrato),
       { conInmueble: true },
@@ -429,10 +235,7 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
 
       const diasDesdeCorte = diasEntre(cuenta.inicio, hoy);
 
-      // Lo que las dos ramas de abajo necesitan del inmueble. Si ms-contratos no lo
-      // compuso no hay a quien avisar por el lado del propietario, asi que el aviso
-      // se omite entero: un evento con `id_propietario` vacio acabaria apartado tras
-      // diez intentos sin que nadie pueda arreglarlo reintentando.
+      // Sin inquilino o sin propietario no se anota el aviso; la mora sí se evalúa.
       const puedeAvisar = Boolean(idInquilino && inmueble?.id_propietario);
 
       if (!puedeAvisar) {
@@ -446,10 +249,7 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
         id_cuenta_cobro: cuenta.id_cuenta_cobro,
         id_contrato: cuenta.id_contrato,
         id_inquilino: idInquilino as string,
-        // Foto del momento del hecho, no una denormalizacion: si el inmueble cambia
-        // de dueño manaña, este aviso seguira diciendo a quien se le avisó hoy. La
-        // distincion importa porque `docs/adr/0017` prohibe guardar este dato
-        // cuando se usa para AUTORIZAR, y aqui solo se usa para avisar.
+        // Foto del dueño en el momento del aviso.
         id_propietario: inmueble?.id_propietario as string,
         valor: Number(cuenta.valor),
         inicio: cuenta.inicio,
@@ -457,20 +257,9 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
         direccion_inmueble: inmueble?.direccion ?? 'Inmueble sin dirección registrada',
       };
 
-      // RF-12: vencimiento proximo (2 dias antes de que expire el tiempo de gracia).
-      //
-      // La igualdad exacta NO es una comodidad: es lo que hace que el aviso sea de un
-      // dia y no de todos los que quedan. Que no se repita si el motor corre dos veces
-      // ese dia lo garantiza el `id_evento` derivado de la cuenta, porque esta rama no
-      // escribe nada en la base que haga de bitacora. Ver `eventos/salida.ts`.
-      //
-      // Se avisa tambien a una cuenta PARCIAL: si va a entrar en mora dentro de dos
-      // dias, tiene el mismo derecho a enterarse que una que no ha abonado nada.
+      // Aviso previo, sólo el día exacto. Su `id_evento` determinista evita repetirlo.
       if (diasDesdeCorte === DIAS_AVISO_PREVIO && puedeEntrarEnMora(cuenta.estado)) {
         if (puedeAvisar) {
-          // UN evento para las DOS partes. Quien decide que al inquilino se le habla
-          // de «tu pago» y al propietario de «el pago del inmueble X» es
-          // ms-notificaciones: el emisor anuncia un hecho, no una lista de correos.
           await sequelize.transaction((transaccion) =>
             registrarCuentaCobroPorVencer(
               { ...partes, entra_en_mora_el: diaDeMora(cuenta.inicio) },
@@ -480,14 +269,9 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
         }
       }
 
-      // Cambio a mora. La MISMA constante que aplica `verificarMora`, que es lo
-      // que cierra la trampa de las dos reglas distintas.
+      // Mora: la cuenta se relee bloqueada y con el estado en el filtro, para que
+      // una ejecución simultánea no la marque ni avise dos veces.
       if (diasDesdeCorte >= DIAS_PARA_MORA && puedeEntrarEnMora(cuenta.estado)) {
-        // El UPDATE y su aviso van en UNA transaccion: no puede haber una mora sin
-        // aviso ni un aviso sin mora. El estado de la cuenta hace de bitacora, y para
-        // que lo haga tambien entre dos ejecuciones SIMULTANEAS la cuenta se relee
-        // dentro de la transaccion, bloqueada y con el estado en el filtro. La segunda
-        // ejecucion espera el bloqueo, ya no la encuentra y no marca ni avisa nada.
         const marcada = await sequelize.transaction(async (transaccion) => {
           const vigente = await CuentaCobro.findOne({
             where: {
@@ -539,13 +323,7 @@ export interface ResultadoMotor {
   fallos: string[];
 }
 
-/**
- * Una ejecucion completa: generacion y vencimientos.
- *
- * La usan el cron de desarrollo y `scripts/motor.ts`, que es el comando del trabajo
- * programado y el de las demostraciones. Se puede ejecutar las veces que haga falta el
- * mismo dia, seguidas o a la vez: ver la cabecera.
- */
+/** Una ejecución completa: generación y vencimientos. */
 export const ejecutarMotor = async (): Promise<ResultadoMotor> => {
   const generacion = await procesarContratos();
   const vencimientos = await procesarPagos();
@@ -560,13 +338,7 @@ export const ejecutarMotor = async (): Promise<ResultadoMotor> => {
 /** Como se programa el motor en este despliegue. */
 export type ModoProgramacion = 'cron' | 'trabajo';
 
-/**
- * El modo, de `MOTOR_PROGRAMACION`. LANZA si falta o no es uno de los dos.
- *
- * Sin valor por defecto, a proposito: que un entorno programe el motor dentro del
- * proceso y otro no es una diferencia que tiene que estar escrita en su configuracion,
- * no deducirse de si hay o no un contenedor encendido a medianoche.
- */
+/** El modo, de `MOTOR_PROGRAMACION`. Lanza si falta o no es uno de los dos. */
 export const modoDeProgramacion = (entorno: Entorno = process.env): ModoProgramacion => {
   const valor = leerEntorno('MOTOR_PROGRAMACION', entorno);
   if (valor === 'cron' || valor === 'trabajo') {
@@ -584,23 +356,9 @@ export const modoDeProgramacion = (entorno: Entorno = process.env): ModoPrograma
 export const HORARIO_CRON = '1 0 * * *';
 
 /**
- * Programa el barrido diario, SOLO si `MOTOR_PROGRAMACION=cron`.
- *
- * ── DOS ENTORNOS, DOS FORMAS, Y LAS DOS ESCRITAS ───────────────────────────
- *
- * `cron` (Compose y local): `node-cron` DENTRO del proceso, a las 00:01 de Bogota.
- * Funciona porque Compose mantiene el contenedor encendido, y hace el motor
- * demostrable sin desplegar nada.
- *
- * `trabajo` (Container Apps): este proceso NO programa nada. Container Apps escala a
- * cero sin trafico, y un contenedor dormido a las 00:01 no dispararia su cron: no se
- * generarian cuentas ni alertas, sin error ni log. Lo ejecuta el Job programado
- * `motor-financiero` (`infra/azure/apps.bicep`), que levanta la misma imagen, corre
- * `node dist/scripts/motor.js` y se apaga. Ver `docs/adr/0021`.
- *
- * La zona horaria va explicita: sin ella el cron usa la del contenedor, y en uno en UTC
- * las 00:01 son las 19:01 del dia anterior en Bogota. `noOverlap` evita que un barrido
- * lento se pise con el siguiente; si pasara igual, el motor es idempotente.
+ * Programa el barrido diario con node-cron a las 00:01 de Bogotá, sólo si
+ * `MOTOR_PROGRAMACION=cron`. Con `trabajo` no programa nada: lo ejecuta el Job
+ * `motor-financiero`.
  */
 export const iniciarMotorFinanciero = (entorno: Entorno = process.env): void => {
   const modo = modoDeProgramacion(entorno);

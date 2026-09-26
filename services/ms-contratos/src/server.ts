@@ -1,15 +1,6 @@
 /**
- * Arranque de MS-Contratos.
- *
- * Aplica sus migraciones antes de escuchar: el esquema `contratos` es suyo y de
- * nadie mas, asi que nadie mas puede prepararlo. Y ademas es lo que hace segura
- * la mudanza — el healthcheck de Compose solo responde despues de migrar, y el
- * gateway espera a ese healthcheck antes de aplicar `database/dominio/007`, que
- * es la que retira `public.contratos`.
- *
- * ARRANCA EL PUBLICADOR, que es lo que le hace ser el productor de verdad y no
- * solo el dueño de la tabla. Mientras esto no corra, los eventos se acumulan en
- * la bandeja y el estado de los inmuebles no converge.
+ * Arranque de MS-Contratos: valida el entorno, aplica o comprueba las
+ * migraciones, arranca la caché de revocación y el publicador del bus, y escucha.
  */
 
 import { app } from './app';
@@ -23,10 +14,8 @@ import { enteroDeEntorno, validarEntorno, siNoDeEntorno } from 'arriendos360-sha
 const PUERTO = enteroDeEntorno('PORT', 3013);
 
 /**
- * Lo que no tiene defecto razonable. Sin `MS_IDENTIDAD_URL` un token de una sesion
- * cerrada entraria; sin `MS_INMUEBLES_URL` no hay pertenencia; sin `MS_FINANCIERO_URL`
- * `ContratoFormalizado` se daria por entregado y ningun contrato facturaria. Antes el
- * primer caso arrancaba con un aviso y los otros dos ni eso.
+ * Variables obligatorias. Sin las `MS_*_URL` no se comprobaría la revocación ni la
+ * pertenencia, y `ContratoFormalizado` se daría por entregado sin facturar.
  */
 const OBLIGATORIAS = [
   'DB_PASSWORD',
@@ -45,9 +34,7 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-contratos: conexión a PostgreSQL exitosa');
 
-    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
-    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
-    // Ver docs/adr/0022.
+    // Con MIGRACIONES_AL_ARRANCAR=no sólo comprueba que no falte ninguna.
     if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
       const aplicadas = await aplicarMigraciones(sequelize);
       console.log(

@@ -29,9 +29,8 @@ const Logo = () => (
  * Armazón de las pantallas autenticadas: barra lateral y contenido.
  *
  * La barra se arma con `roles` del claim (ver `navegacion.js`). En pantallas
- * angostas se pliega bajo un botón de menú. En las anchas la barra es `sticky`
- * y el contenedor NO recorta (`overflow-hidden`): recortar ocultaba las tablas
- * anchas y anulaba el `sticky`; lo ancho se desplaza dentro de `main`.
+ * angostas se pliega bajo un botón de menú. En las anchas la barra es `sticky` y
+ * el contenedor no recorta (`overflow-hidden`): lo ancho se desplaza dentro de `main`.
  */
 export default function Layout({ children }) {
     const navigate = useNavigate();

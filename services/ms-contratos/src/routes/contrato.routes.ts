@@ -19,21 +19,15 @@ import { recibirArchivo } from '../middlewares/upload.middleware';
 
 const router: Router = Router();
 
-// Todas las rutas de contratos requieren autenticacion. Confianza cero: se
-// verifica aqui aunque el gateway ya lo haya hecho (regla dura 7).
+// Todas las rutas exigen token.
 router.use(verificarToken);
 
 // GET /api/contratos
 router.get('/', obtenerTodos);
 
 // ── Anexos ────────────────────────────────────────────────────────────────
-// Van ANTES de `/:id` para que `/:id/anexos` no lo capture la ruta de detalle.
-// Express casa por orden de declaracion.
-//
-// Leer los anexos es de las dos partes; subir y borrar, solo del propietario.
-// La matriz RBAC del gateway ya lo declara, y `esPropietario` lo vuelve a
-// comprobar aqui: son las dos capas de la regla dura 8, y ninguna sustituye a
-// la otra.
+// Antes de `/:id`, que los capturaría. Leer es de las dos partes; subir y
+// borrar, del propietario.
 router.get('/:id/anexos', listarAnexos);
 router.get('/:id/anexos/:idAnexo', descargarAnexo);
 router.post('/:id/anexos', esPropietario, ...recibirArchivo('file'), subirAnexo);

@@ -1,33 +1,8 @@
 /**
- * Cliente de MS-Contratos hacia MS-Identidad.
- *
- * Tres cosas, con tres politicas de fallo distintas, y la diferencia importa:
- *
- * 1. **`invalidacionesVigentes`** — que tokens dejaron de valer. La consume el
- *    refresco de la cache cada 15 s. El fallo SE PROPAGA: la cache necesita
- *    distinguir «no hay nada que invalidar» de «no pude preguntar», porque
- *    confundirlas dejaria entrar tokens de sesiones cerradas.
- *
- * 2. **`usuarioPorId`** — para comprobar que el inquilino de un contrato existe
- *    y tiene ese rol antes de firmar. El fallo se traduce en «no encontrado»,
- *    que es lo prudente: ante la duda no se firma un contrato contra un usuario
- *    que quiza no exista.
- *
- * 3. **`reemitirContrasenaTemporal`** — el fallo SE PROPAGA. Si la reemision no
- *    ocurrio, el propietario tiene que saberlo: devolverle una contraseña que no
- *    esta guardada seria peor que un error.
- *
- * ── POR QUE LA REEMISION VIVE EN ESTE SERVICIO DESDE EL PASO 6d ─────────────
- *
- * El `docs/adr/0010` la puso en el gateway con este argumento: la regla de
- * autorizacion es «solo sobre inquilinos con contrato en mis inmuebles», y
- * ms-identidad no puede comprobarla sin depender de un servicio de dominio e
- * invertir la direccion de las dependencias.
- *
- * El argumento sigue siendo valido y la conclusion cambia, porque cambio quien
- * tiene los datos. Ahora los contratos son de este servicio y preguntar por los
- * inmuebles es Core -> Soporte, que es la direccion buena. El gateway ya no
- * aporta nada al hacerlo el: solo reenvia. Ver `docs/adr/0017`.
+ * Cliente de MS-Contratos hacia MS-Identidad:
+ * - `invalidacionesVigentes`: lo que invalida tokens. Propaga el fallo.
+ * - `usuarioPorId`: datos de un usuario; `null` si falla.
+ * - `reemitirContrasenaTemporal`: propaga el fallo.
  */
 
 import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
@@ -59,13 +34,7 @@ export const urlBase = (entorno: NodeJS.ProcessEnv = process.env): string | null
   return limpio === '' ? null : limpio.replace(/\/+$/, '');
 };
 
-/**
- * Peticion a un endpoint `/interno`, firmada y con tiempo limite.
- *
- * La credencial se firma en cada llamada en vez de reutilizarla: el token dura
- * un minuto, asi que cachearlo ahorraria una firma HMAC —microsegundos— a cambio
- * de tener que gestionar su caducidad.
- */
+/** Petición a un endpoint `/interno`, firmada en cada llamada y con tiempo límite. */
 const pedirJson = async (
   url: string,
   metodo: 'GET' | 'POST' = 'GET',
@@ -92,12 +61,7 @@ const pedirJson = async (
   return respuesta.json();
 };
 
-/**
- * Trae los `jti` revocados y las sesiones caidas.
- *
- * El fallo SE PROPAGA: lo consume el refresco de la cache. Ver la nota 1 de la
- * cabecera.
- */
+/** Trae los `jti` revocados y las sesiones caídas, para la caché. Propaga el fallo. */
 export const invalidacionesVigentes = async (
   opciones: { urlBase?: string | null } = {},
 ): Promise<Invalidaciones> => {
@@ -110,12 +74,7 @@ export const invalidacionesVigentes = async (
   return (await pedirJson(`${base}/interno/revocados`)) as Invalidaciones;
 };
 
-/**
- * Datos de un usuario, o `null` si no existe o no se pudo preguntar.
- *
- * Degrada a `null` a proposito: quien llama lo traduce en «inquilino no
- * encontrado» y no firma. Ver la nota 2 de la cabecera.
- */
+/** Datos de un usuario, o `null` si no existe o no se pudo preguntar. */
 export const usuarioPorId = async (
   id: string,
   opciones: { urlBase?: string | null } = {},
@@ -147,13 +106,8 @@ export interface ReemisionContrasena {
 }
 
 /**
- * Pide a ms-identidad que regenere la contraseña temporal de un usuario.
- *
- * Quien puede pedirlo lo decide ESTE servicio antes de llamar: la regla es que
- * el usuario sea inquilino de un contrato sobre un inmueble del propietario, y
- * eso son datos de aqui mas una pregunta a ms-inmuebles.
- *
- * El fallo SE PROPAGA. Ver la nota 3 de la cabecera.
+ * Pide a ms-identidad que regenere la contraseña temporal de un usuario. La
+ * autorización la comprueba quien llama. Propaga el fallo.
  */
 export const reemitirContrasenaTemporal = async (
   idUsuario: string,
@@ -169,8 +123,7 @@ export const reemitirContrasenaTemporal = async (
   return (await pedirJson(
     `${base}/interno/usuarios/${encodeURIComponent(idUsuario)}/contrasena-temporal`,
     'POST',
-    // Quien lo pidio, para que la auditoria del otro lado registre a la persona
-    // y no al servicio que transmitio.
+    // Quién lo pidió, para la auditoría.
     { solicitado_por: solicitadoPor },
   )) as ReemisionContrasena;
 };

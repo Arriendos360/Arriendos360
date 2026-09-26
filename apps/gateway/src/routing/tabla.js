@@ -1,37 +1,12 @@
 /**
- * Tabla de enrutamiento del gateway.
- *
- * Declara, por cada prefijo de la API, si se resuelve en modo LOCAL (el codigo
- * del monolito que vive en este mismo proceso) o REMOTO (reenvio HTTP al
- * microservicio ya extraido).
- *
- * El modo no se configura a mano: se deriva de si la variable de entorno con la
- * URL del servicio esta definida y no vacia. Asi, extraer un servicio es
- * poner su URL en el entorno, sin tocar codigo ni redesplegar el gateway con
- * otra bandera.
- *
- * Hoy las cuatro variables estan vacias, de modo que los seis prefijos resuelven
- * en LOCAL y el comportamiento es identico al de antes de esta costura.
- *
- * `/api/auth` y `/api/usuarios` comparten variable: los dos son ms-identidad, y
- * se extraeran juntos en el paso 3b.
+ * Tabla de enrutamiento: por cada prefijo de la API, si se reenvía a su servicio
+ * (remoto, cuando su `MS_*_URL` tiene valor) o se atiende aquí (local).
  */
 
 const MODO_LOCAL = 'local';
 const MODO_REMOTO = 'remoto';
 
-/**
- * Un prefijo con `variableEntorno: null` es estructuralmente local: no existe un
- * microservicio al que reenviarlo.
- *
- * - `/api/dashboard` vive en el gateway por diseno (regla dura 5): no tiene
- *   tablas propias, solo agrega respuestas de Contratos y Financiero.
- *
- * `/api/admin` estuvo aqui hasta que se elimino el router que disparaba el motor
- * financiero por HTTP. Ahora el motor se lanza con `npm run motor` desde la
- * terminal, y cualquier peticion a ese prefijo la deniega la matriz RBAC por no
- * estar declarada.
- */
+/** Prefijos y su servicio. `variableEntorno: null` es siempre local. */
 const TABLA_RUTAS = [
     { prefijo: '/api/auth', servicio: 'ms-identidad', variableEntorno: 'MS_IDENTIDAD_URL' },
     { prefijo: '/api/usuarios', servicio: 'ms-identidad', variableEntorno: 'MS_IDENTIDAD_URL' },
@@ -42,11 +17,8 @@ const TABLA_RUTAS = [
 ];
 
 /**
- * Devuelve la URL de destino configurada para una entrada, o null si el prefijo
- * debe resolverse localmente.
- *
- * Una variable definida pero vacia (`MS_AUTH_URL=`) cuenta como no configurada:
- * es justo como quedan en `.env.example` mientras no exista el servicio.
+ * La URL de destino de una entrada, o null si se resuelve localmente. Una
+ * variable vacía cuenta como no configurada.
  */
 const urlDestino = (entrada, entorno = process.env) => {
     if (!entrada.variableEntorno) {
@@ -84,12 +56,7 @@ const ANCHO_PREFIJO = TABLA_RUTAS.reduce(
 );
 
 /**
- * Una linea por prefijo, con su modo resuelto y, si es remoto, la URL de destino.
- *
- * En modo local dice ademas por que: si el prefijo tiene variable de entorno,
- * nombra cual falta por definir; si no la tiene, que es local por diseno. Esa
- * pista ahorra el rato de depuracion clasico de "puse la URL y sigue yendo al
- * monolito" cuando en realidad la variable estaba mal escrita.
+ * Una línea por prefijo con su modo: la URL si es remoto, o por qué es local.
  */
 const lineasEnrutamiento = (entorno = process.env) =>
     TABLA_RUTAS.map((entrada) => {

@@ -1,16 +1,6 @@
 /**
- * Adaptador Express sobre la verificacion de token de `packages/shared`.
- *
- * CONFIANZA CERO (regla dura 7): este servicio verifica el token por su cuenta
- * aunque la peticion venga del gateway y el gateway ya lo haya verificado. No
- * es redundancia: el dia que alguien alcance la red interna sin pasar por el
- * gateway, esta es la unica comprobacion que queda en pie.
- *
- * Y verificar incluye la revocacion. Ese es el punto en el que ms-inmuebles se
- * diferencia de ms-identidad: alli la lista esta en su propia base y se
- * consulta en el momento; aqui es de otro servicio, asi que se lee de la copia
- * en memoria. La diferencia observable es la ventana de refresco — un logout
- * tarda hasta 15 segundos en surtir efecto aqui.
+ * Verificación del token de usuario en el servicio, aunque la petición venga del
+ * gateway. La revocación se consulta en la copia en memoria.
  */
 
 import type { NextFunction, Request, Response } from 'express';
@@ -42,14 +32,7 @@ export const verificarToken = async (
   return next();
 };
 
-/**
- * Exige el rol PROPIETARIO.
- *
- * El gateway ya aplica su matriz RBAC, pero eso es la Capa 2 y esto es la Capa
- * 3: las dos tienen que sostenerse solas. Ademas esto solo dice que ERES
- * propietario; que seas ESTE propietario lo comprueba el ABAC del controlador,
- * que es el segundo nivel de la regla dura 8.
- */
+/** Exige el rol PROPIETARIO. La pertenencia la comprueba el controlador. */
 export const esPropietario = (req: Request, res: Response, next: NextFunction): Response | void => {
   if (claimsSonDePropietario(req.usuario)) {
     return next();

@@ -1,13 +1,4 @@
-/**
- * DTOs compartidos de Arriendos360.
- *
- * Traduccion literal de los contratos de interfaz del Documento Principal
- * (Capitulo 2). Es la referencia unica de la forma de cada payload.
- *
- * Casi todo son tipos, que se borran al compilar. La excepcion son los
- * catalogos cerrados de `inmuebles.ts`, que emiten JavaScript porque hay que
- * poder recorrerlos en runtime para validar y para pintar un desplegable.
- */
+/** DTOs compartidos. Los catálogos cerrados emiten JavaScript; lo demás son tipos. */
 
 export type {
   DiaDelMes,
@@ -26,11 +17,6 @@ export type {
   UsuarioLogin,
 } from './identidad';
 
-/**
- * Inmuebles es el unico modulo que exporta VALORES y no solo tipos: el catalogo
- * de tipos de inmueble tiene que ser el mismo en el servicio, en el frontend y
- * en la migracion. Ver la cabecera de `inmuebles.ts`.
- */
 export {
   ESTADOS_INMUEBLE,
   TIPOS_INMUEBLE,
@@ -58,12 +44,6 @@ export type {
   TipoAnexo,
 } from './contratos';
 
-/**
- * Financiero exporta VALORES desde el paso 6c, por lo mismo que Inmuebles: sus
- * tres catalogos cerrados los comparten el modelo, el frontend y los `CHECK` de
- * la migracion. Ver la cabecera de `financiero.ts`, que explica ademas por que
- * estos van en MAYUSCULAS y los de Inmuebles y Contratos en minusculas.
- */
 export {
   ESTADOS_CUENTA_COBRO,
   ESTADOS_TRANSACCION,

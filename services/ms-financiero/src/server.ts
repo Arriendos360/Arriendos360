@@ -1,33 +1,7 @@
 /**
- * Arranque de MS-Financiero.
- *
- * Aplica sus migraciones antes de escuchar: el esquema `financiero` es suyo y de
- * nadie mas, asi que nadie mas puede prepararlo. Y ademas es lo que hace segura
- * la mudanza — `database/financiero/002` copia las cuentas de cobro que estaban
- * en `public` y retira el original en la misma transaccion, asi que el
- * healthcheck de Compose solo responde cuando eso ya ocurrio.
- *
- * ── ES CONSUMIDOR Y, DESDE EL PASO 7, TAMBIEN PRODUCTOR ────────────────────
- *
- * El parrafo que habia aqui decia: «el dia que el motor publique eventos en vez de
- * mandar correos (paso 7), este arranque ganara su publicador y `database/financiero/`
- * una tabla de salida». Ese dia es este.
- *
- * CONSUMIDOR de `ContratoFormalizado`, por `POST /interno/eventos`. Eso no necesita
- * arrancar nada: el consumidor es un manejador HTTP, no un proceso.
- *
- * PRODUCTOR de `CuentaCobroGenerada`, `CuentaCobroPorVencer` y `CuentaCobroEnMora`,
- * con su tabla de salida en `financiero.eventos_salida` y su publicador, que SI es un
- * proceso y arranca aqui. Como en los otros dos productores, se arranca en el servidor
- * y no al cargar el modulo: un temporizador corriendo durante una suite haria que las
- * entregas ocurrieran en momentos que la prueba no controla.
- *
- * ── EL MOTOR SE PROGRAMA AQUI SOLO EN COMPOSE ──────────────────────────────
- *
- * `iniciarMotorFinanciero()` lee `MOTOR_PROGRAMACION`: con `cron` programa el barrido
- * dentro de este proceso (Compose y local); con `trabajo` no programa nada, porque en
- * Container Apps lo ejecuta un Job con `npm run motor`. Ver `services/motor.ts` y
- * `docs/adr/0021`.
+ * Arranque de MS-Financiero: valida el entorno, aplica o comprueba las
+ * migraciones, arranca la caché de revocación y el publicador del bus, programa
+ * el motor si `MOTOR_PROGRAMACION=cron` y escucha.
  */
 
 import { app } from './app';
@@ -43,10 +17,8 @@ import { iniciarMotorFinanciero } from './services/motor';
 const PUERTO = enteroDeEntorno('PORT', 3014);
 
 /**
- * Lo que no tiene defecto razonable. Sin `MS_IDENTIDAD_URL` entraban tokens de
- * sesiones cerradas; sin `MS_NOTIFICACIONES_URL` los avisos del motor se daban por
- * entregados sin que saliera un correo; sin `MS_CONTRATOS_URL` no hay nada que
- * facturar. Los dos primeros arrancaban con un aviso en el log; ahora no arrancan.
+ * Variables obligatorias. Sin `MS_NOTIFICACIONES_URL` los avisos se darían por
+ * entregados sin enviar ningún correo.
  */
 const OBLIGATORIAS = [
   'DB_PASSWORD',
@@ -55,8 +27,7 @@ const OBLIGATORIAS = [
   'MS_CONTRATOS_URL',
   'MS_IDENTIDAD_URL',
   'MS_NOTIFICACIONES_URL',
-  // `cron` o `trabajo`. Sin defecto: la diferencia entre entornos se escribe. El valor
-  // lo valida `iniciarMotorFinanciero()`.
+  // `cron` o `trabajo`; el valor lo valida `iniciarMotorFinanciero()`.
   'MOTOR_PROGRAMACION',
   'MIGRACIONES_AL_ARRANCAR',
 ];
@@ -68,9 +39,7 @@ const iniciar = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ ms-financiero: conexión a PostgreSQL exitosa');
 
-    // En Compose migra el propio servicio; en Azure lo hace un Job ANTES de publicar la
-    // revision y el servicio solo comprueba, para que varias replicas no migren a la vez.
-    // Ver docs/adr/0022.
+    // Con MIGRACIONES_AL_ARRANCAR=no sólo comprueba que no falte ninguna.
     if (siNoDeEntorno('MIGRACIONES_AL_ARRANCAR')) {
       const aplicadas = await aplicarMigraciones(sequelize);
       console.log(
@@ -98,15 +67,13 @@ const iniciar = async (): Promise<void> => {
         }s` + `${estado.ultimoError ? ` — ÚLTIMO FALLO: ${estado.ultimoError}` : ''}`,
     );
 
-    // No arranca nada: el consumidor es un manejador HTTP. Se cuenta lo que
-    // lleva procesado porque es el numero que dice si el bus esta llegando.
+    // El consumidor es un manejador HTTP: sólo se informa lo procesado.
     console.log(
       `📥 ms-financiero: consumidor del bus con ${await consumidor.contar()} eventos procesados. ` +
         'Escucha ContratoFormalizado en POST /interno/eventos.',
     );
 
-    // Y desde el paso 7, la otra mitad: el publicador de sus propios eventos. Su
-    // suscriptor, `MS_NOTIFICACIONES_URL`, ya lo exigio `validarEntorno`.
+    // Publicador de sus propios eventos.
     const pendientes = await almacen.contar();
     await publicador.iniciar();
     const estadoPublicador = publicador.estado();

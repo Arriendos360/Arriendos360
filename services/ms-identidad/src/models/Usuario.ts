@@ -3,30 +3,19 @@ import { DataTypes, Model } from 'sequelize';
 import { sequelize } from '../config/database';
 import { claveUuid, columnasAuditoria, opcionesAuditoria, registrarHooksAuditoria } from './columnas';
 
-/**
- * Tabla `Usuarios` del modelo canonico.
- *
- * Sustituye a la trinidad `Usuario` + `Propietario` + `Inquilino` del monolito.
- * La distincion entre propietario e inquilino no es una tabla ni una columna:
- * es una fila en `RolesUsuario`, y por eso un mismo usuario puede ser las dos
- * cosas.
- */
+/** Tabla `Usuarios`. Propietario e inquilino son roles en `RolesUsuario`. */
 export class Usuario extends Model {
   declare id_usuario: string;
   declare nombres: string;
   declare apellidos: string;
   declare email: string;
-  /** Hash bcrypt. El nombre de la columna es el del modelo canonico. */
+  /** Hash bcrypt. */
   declare contrasena: string;
   declare telefono: string | null;
   declare documento: string;
-  /** Marca a quien no eligio su propia contrasena. Ver docs/adr/0007. */
+  /** Marca a quien no eligió su propia contraseña. */
   declare debe_cambiar_contrasena: boolean;
-  /**
-   * Cuando cambio la contrasena por ultima vez. Todo token emitido ANTES deja
-   * de valer: es como se tiran todas las sesiones de golpe al restablecerla.
-   * Ver docs/adr/0010.
-   */
+  /** Último cambio de contraseña; todo token emitido antes deja de valer. */
   declare contrasena_cambiada_en: Date | null;
   declare creado_por: string;
   declare actualizado_por: string;

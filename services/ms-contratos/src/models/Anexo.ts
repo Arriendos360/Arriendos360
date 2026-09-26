@@ -5,15 +5,8 @@ import { claveUuid, columnasAuditoria, opcionesAuditoria, registrarHooksAuditori
 import { Contrato } from './Contrato';
 
 /**
- * Anexos: los archivos que acompañan a un contrato.
- *
- * `archivo_anexo` NO es una ruta: es la referencia que devuelve el
- * almacenamiento, y solo el sabe interpretarla. Ver `services/almacenamiento.ts`.
- *
- * `tipo` es un enum ABIERTO. El Capitulo 2 enumera `CONTRATO_FIRMADO` y `OTROSI`
- * seguidos de «etc.», asi que no hay `isIn` ni `CHECK`: los valores conocidos
- * viven en `packages/contracts` como sugerencia. Es deliberadamente distinto de
- * `inmuebles.tipo`, que si es un catalogo cerrado.
+ * Tabla `Anexos`. `archivo_anexo` es la referencia opaca del almacenamiento;
+ * `tipo` es un catálogo abierto, sin validación.
  */
 export class Anexo extends Model {
   declare id_anexo: string;
@@ -46,12 +39,6 @@ Anexo.init(
 
 registrarHooksAuditoria(Anexo);
 
-/**
- * ESTA SI es una asociacion de verdad, y es la unica del servicio.
- *
- * `Anexos` y `Contratos` son las dos tablas de ms-contratos y viven en el mismo
- * esquema, asi que la clave foranea no cruza la frontera de ningun servicio y la
- * regla dura 1 no aplica.
- */
+// Asociación dentro del mismo esquema.
 Anexo.belongsTo(Contrato, { foreignKey: 'id_contrato' });
 Contrato.hasMany(Anexo, { foreignKey: 'id_contrato' });

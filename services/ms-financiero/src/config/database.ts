@@ -1,18 +1,6 @@
 /**
- * Conexion de MS-Financiero a PostgreSQL.
- *
- * Comparte instancia con el resto del sistema, pero NO esquema: las dos tablas
- * de este servicio viven en `financiero`, y el `searchPath` lo fija aqui para
- * que ninguna consulta pueda alcanzar `public` por descuido. Esa es la regla
- * dura 3 hecha configuracion en vez de disciplina.
- *
- * Importa especialmente durante el PR de extraccion: hasta que corre
- * `database/financiero/002` existen DOS pares de tablas —el de este esquema y el
- * que el gateway todavia tiene en `public`— y una consulta que resolviera al
- * esquema equivocado cobraria dos veces sin que nada lo dijera.
- *
- * El dia que este servicio se despliegue en Azure con su propia base, lo unico
- * que cambia es `DB_NAME`.
+ * Conexión de MS-Financiero a PostgreSQL. Todas sus tablas viven en el esquema
+ * `financiero`, fijado también como `search_path`.
  */
 
 import { Sequelize } from 'sequelize';
@@ -41,12 +29,10 @@ export const sequelize = new Sequelize(
     schema: ESQUEMA,
     dialectOptions: {
       options: `-c search_path=${ESQUEMA}`,
-      // En Azure la base exige TLS (`DB_SSL=si`), y se verifica el certificado: TLS sin
-      // verificar cifra, pero no dice con quien se habla.
+      // Con `DB_SSL=si`, TLS verificando el certificado.
       ...(siNoDeEntorno('DB_SSL', false) ? { ssl: { rejectUnauthorized: true } } : {}),
     },
-    // Cada replica cuenta contra el limite de conexiones de la base; en Azure B1ms son 35
-    // para los cinco servicios y sus Jobs (`DB_POOL_MAX`).
+    // `DB_POOL_MAX`: conexiones por réplica.
     pool: { max: enteroDeEntorno('DB_POOL_MAX', 5), min: 0, acquire: 30000, idle: 10000 },
   },
 );

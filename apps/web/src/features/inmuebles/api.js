@@ -1,15 +1,7 @@
 /**
- * MS-Inmuebles. Todo el recurso es del propietario (la matriz se lo niega al
- * inquilino).
- *
- * El cuerpo es el que acepta el endpoint, no el del Capítulo 2. El documento
- * lista `alias`, `ciudad` y `descripcion`, pero la tabla de ms-inmuebles tiene
- * `departamento`, `municipio`, `barrio` y la ficha física (`area_m2`,
- * `habitaciones`…); Sequelize descarta en silencio lo que no conoce, así que
- * mandar los nombres del documento guardaba un inmueble sin ubicación. La
- * divergencia está anotada en `packages/contracts/src/inmuebles.ts`.
- * `id_propietario` sale del token y `estado` lo mueven los eventos de contrato:
- * ninguno se envía.
+ * MS-Inmuebles, sólo para el propietario. El cuerpo usa los campos de la tabla
+ * (`departamento`, `municipio`, `barrio`, ficha física). `id_propietario` y
+ * `estado` no se envían.
  */
 
 import api from '../../services/api';
@@ -42,9 +34,8 @@ export const crearInmueble = (datos) =>
     cuerpo(api.post('/inmuebles', conEnteros(soloCampos(datos, CAMPOS_INMUEBLE))));
 
 /**
- * `PUT /api/inmuebles/:id`. A diferencia del alta, un campo opcional que el
- * formulario trae vacío se manda `null`: es alguien borrando el barrio, y
- * omitirlo lo dejaría como estaba. Los obligatorios nunca se vacían.
+ * `PUT /api/inmuebles/:id`. Un opcional vacío se manda `null` para borrarlo; los
+ * obligatorios nunca se vacían.
  *
  * @returns `{ mensaje, inmueble }`
  */
@@ -59,8 +50,5 @@ export const actualizarInmueble = (id, datos) => {
     return cuerpo(api.put(`/inmuebles/${id}`, cambios));
 };
 
-/**
- * `DELETE /api/inmuebles/:id`. Con un contrato activo el guardia del gateway
- * responde 409 —el inmueble no está en condiciones—, no 403.
- */
+/** `DELETE /api/inmuebles/:id`. Con un contrato activo responde 409. */
 export const eliminarInmueble = (id) => cuerpo(api.delete(`/inmuebles/${id}`));

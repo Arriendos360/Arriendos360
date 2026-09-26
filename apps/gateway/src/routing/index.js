@@ -1,17 +1,7 @@
 /**
- * Costura de enrutamiento del gateway.
- *
- * Un solo middleware decide, peticion por peticion, si el prefijo se atiende con
- * el codigo local del monolito o se reenvia por HTTP al microservicio extraido.
- *
- * `/api/auth`, `/api/usuarios` e `/api/inmuebles` estan cableados a sus
- * servicios; el resto sigue resolviendo en local, en el codigo del monolito.
- *
- * Orden de montaje (importa): va DESPUES de `cors()`, del control de acceso y de
- * los guardias, y ANTES de `express.json()`. Que el RBAC vaya primero no es un
- * detalle: una peticion denegada no debe llegar a la red interna. Los guardias
- * van entre medias porque deciden si la peticion llega a salir. Ver el
- * comentario de `proxy.js` sobre streaming del cuerpo.
+ * Costura de enrutamiento: decide por petición si el prefijo se reenvía a su
+ * servicio o se atiende aquí (`/api/dashboard`). Se monta después de `cors()`,
+ * del control de acceso y de los guardias, y antes de `express.json()`.
  */
 
 const { reenviar } = require('./proxy');
@@ -57,14 +47,14 @@ const crearEnrutadorGateway = (opciones = {}) => {
     return function enrutadorGateway(req, res, next) {
         const entrada = resolverPrefijo(req.path);
 
-        // Ruta fuera de la tabla (`/`, `/uploads/...`): la atiende el monolito.
+        // Ruta fuera de la tabla (`/`): la atiende Express en este proceso.
         if (!entrada) {
             return next();
         }
 
         const destino = urlDestino(entrada, entorno);
 
-        // Modo local: el prefijo todavia no se ha extraido.
+        // Modo local: el prefijo no tiene servicio propio (`/api/dashboard`).
         if (destino === null) {
             return next();
         }

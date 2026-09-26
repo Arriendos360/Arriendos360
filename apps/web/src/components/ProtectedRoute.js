@@ -4,11 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { useSesion } from '../auth/sesion';
 
 /**
- * Guardián de ruta (Capa 1 del módulo de seguridad).
- *
- * Lee la sesión de memoria en vez de `localStorage`. Como consecuencia, recargar
- * la página devuelve al login: el token no sobrevive al refresco, y eso es
- * deliberado.
+ * Guardián de ruta: exige sesión (en memoria) y, opcionalmente, un rol.
  *
  * `rolRequerido` permite cortar por rol además de por autenticación, para que
  * una URL escrita a mano no dé acceso a un módulo ajeno. No sustituye a la
@@ -21,8 +17,7 @@ const ProtectedRoute = ({ children, rolRequerido, permitirCambioPendiente = fals
         return <Navigate to="/login" replace />;
     }
 
-    // Quien entró con una contraseña temporal no puede ir a ninguna otra parte:
-    // la API le denegaría todo igualmente. Ver docs/adr/0007.
+    // Con la contraseña temporal sin cambiar, sólo se permite la pantalla de cambio.
     if (debeCambiar && !permitirCambioPendiente) {
         return <Navigate to="/cambiar-contrasena" replace />;
     }

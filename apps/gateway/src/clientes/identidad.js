@@ -1,9 +1,4 @@
-/**
- * Cliente del gateway hacia ms-identidad.
- *
- * Un solo uso: traer lo que invalida tokens para la caché de revocados
- * (`routing/cacheRevocados.js`). Ver `docs/adr/0008`.
- */
+/** Cliente del gateway hacia ms-identidad: trae lo que invalida tokens. */
 
 const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
 
@@ -23,13 +18,7 @@ const urlBase = (entorno = process.env) => {
     return limpio === '' ? null : limpio.replace(/\/+$/, '');
 };
 
-/**
- * Petición GET a un endpoint `/interno`, firmada y con tiempo límite.
- *
- * La credencial se firma en cada llamada en vez de reutilizarla: el token dura
- * un minuto, así que cachearlo ahorraría una firma HMAC —microsegundos— a cambio
- * de tener que gestionar su caducidad. No compensa.
- */
+/** GET a un endpoint `/interno`, firmado en cada llamada y con tiempo límite. */
 const pedirJson = async (url) => {
     const respuesta = await fetch(url, {
         headers: cabeceraDeServicio({
@@ -48,12 +37,8 @@ const pedirJson = async (url) => {
 };
 
 /**
- * Todo lo que invalida tokens: los `jti` revocados uno a uno y las marcas de
- * cambio de contraseña, que tumban en bloque las sesiones de un usuario.
- *
- * El fallo SÍ se propaga: quien llama es el refresco de la caché, y necesita
- * distinguir entre «no hay nada» y «no pude preguntar». Confundir las dos cosas
- * dejaría entrar tokens cerrados.
+ * Los `jti` revocados y las marcas de cambio de contraseña. Propaga el fallo,
+ * para distinguir «no hay nada» de «no pude preguntar».
  */
 const revocadosVigentes = async (opciones = {}) => {
     const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();

@@ -6,12 +6,8 @@
 import { mensajeDeError } from '../../ui/FormError';
 
 /**
- * Reintentos del login ante un servicio que está despertando.
- *
- * En Azure los servicios escalan a cero: el primer acceso del día puede recibir un 502,
- * 503 o 504 —o quedarse sin respuesta— mientras el gateway y ms-identidad arrancan. No
- * es un error de credenciales y no hay que mostrarlo como tal: se reintenta con espera
- * creciente y se dice lo que está pasando. Ver docs/adr/0022.
+ * Estados con los que responde un servicio que está despertando (escala a cero): el
+ * login los reintenta con espera creciente en vez de mostrarlos como error.
  */
 export const ESTADOS_DESPERTANDO = [502, 503, 504];
 export const ESPERAS_REINTENTO_MS = [3000, 6000, 12000];

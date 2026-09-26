@@ -1,18 +1,12 @@
 /**
  * MS-Contratos: contratos, anexos y reemisión de la contraseña del inquilino.
  *
- * El alta va en JSON, como fija el Capítulo 2. El formulario viejo la mandaba
- * como `multipart/form-data`, y ms-contratos sólo lee JSON en esa ruta (multer
- * sólo está en la de anexos): llegaba un cuerpo vacío.
- *
- * Alineado al modelo y al controlador de ms-contratos, que se apartan del
- * Capítulo 2 en esto:
- * - `inicio` y `fin` son `TIMESTAMPTZ`, no fechas: se mandan `YYYY-MM-DD` pero
- *   vuelven como instante a medianoche UTC. Se leen con `fechaDeContrato`.
+ * - El alta va en JSON.
+ * - `inicio` y `fin` vuelven como instante a medianoche UTC: se leen con
+ *   `fechaDeContrato`.
  * - `fecha_inicio_corte` y `fecha_limite_pago` son opcionales al crear: si no
  *   vienen, el servicio los deriva de `inicio`.
- * - `PUT /contratos/:id` acepta cualquier columna (también `estado` o las
- *   partes) y no valida fechas ni canon: el recorte y la validación son de aquí.
+ * - `PUT /contratos/:id` no valida: el recorte de campos y la validación son de aquí.
  */
 
 import api from '../../services/api';
@@ -20,9 +14,8 @@ import { descargarPdf } from '../../services/descargas';
 import { cuerpo, montoParaEnviar, soloCampos } from '../comun';
 
 /**
- * `inicio`/`fin` como día de calendario `YYYY-MM-DD`. Llegan como instante a
- * medianoche UTC; llevarlo a Bogotá lo correría al día anterior, así que se toma
- * la fecha UTC tal cual. `null` si no es una fecha.
+ * `inicio`/`fin` como día de calendario `YYYY-MM-DD`, tomando la fecha UTC tal
+ * cual. `null` si no es una fecha.
  */
 export const fechaDeContrato = (valor) => {
     const texto = typeof valor === 'string' ? valor : valor instanceof Date ? valor.toISOString() : '';
@@ -53,9 +46,8 @@ export const CAMPOS_CONTRATO_EDITABLES = [
 ];
 
 /**
- * `fecha_limite_pago` es un DÍA DEL MES (entero 1–31), no una fecha, y `canon`
- * viaja como número. Vacíos, se omiten: el servicio deriva el día límite y el
- * corte de la fecha de inicio.
+ * `fecha_limite_pago` es un día del mes (entero 1–31) y `canon` viaja como
+ * número. Vacíos, se omiten.
  */
 const normalizarContrato = (datos, campos) => {
     const limpio = soloCampos(datos, campos);
@@ -65,9 +57,8 @@ const normalizarContrato = (datos, campos) => {
 };
 
 /**
- * `GET /api/contratos`: donde el usuario es parte, como propietario o como
- * inquilino. Cada contrato llega decorado con sus partes; lo que no se pudo
- * decorar llega `null` y se pinta «—», no se inventa.
+ * `GET /api/contratos`: donde el usuario es propietario o inquilino. Cada
+ * contrato llega con sus partes, o `null` en las que no se pudieron componer.
  */
 export const listarContratos = () => cuerpo(api.get('/contratos'));
 
@@ -91,14 +82,13 @@ export const actualizarContrato = (id, datos) => {
 };
 
 /**
- * `PUT /api/contratos/:id/finalizar`. El inmueble vuelve a `disponible` cuando
- * ms-inmuebles consume el evento, unos segundos después: no afirmarlo en la
- * pantalla justo al volver (regla dura 9).
+ * `PUT /api/contratos/:id/finalizar`. El inmueble vuelve a `disponible` unos
+ * segundos después: no afirmarlo en pantalla justo al volver.
  */
 export const finalizarContrato = (id) => cuerpo(api.put(`/contratos/${id}/finalizar`));
 
 /**
- * `POST /api/contratos/:id/contrasena-inquilino` (docs/adr/0007).
+ * `POST /api/contratos/:id/contrasena-inquilino`.
  * @returns `{ mensaje, contrasena_temporal, inquilino }`: la contraseña sale en
  *   claro sólo aquí.
  */
@@ -110,8 +100,8 @@ export const listarAnexos = (idContrato) => cuerpo(api.get(`/contratos/${idContr
 
 /**
  * `POST /api/contratos/:id/anexos`, `multipart/form-data` con `file` (PDF) y
- * `tipo`. El tipo es un catálogo abierto (`TIPOS_ANEXO_CONOCIDOS` sólo sugiere).
- * El `Content-Type` lo pone el navegador con su `boundary`; fijarlo a mano lo rompe.
+ * `tipo`. El `Content-Type` lo pone el navegador con su `boundary`; fijarlo a
+ * mano lo rompe.
  * @returns `{ mensaje, anexo }`
  */
 export const subirAnexo = (idContrato, { archivo, tipo }) => {
@@ -121,7 +111,7 @@ export const subirAnexo = (idContrato, { archivo, tipo }) => {
     return cuerpo(api.post(`/contratos/${idContrato}/anexos`, formulario));
 };
 
-/** Los anexos sólo salen por la API autenticada, como blob (docs/adr/0014). */
+/** Descarga un anexo por la API autenticada, como blob. */
 export const descargarAnexo = (idContrato, anexo) =>
     descargarPdf(`/contratos/${idContrato}/anexos/${anexo.id_anexo}`, `${anexo.tipo || 'anexo'}_${anexo.id_anexo}.pdf`);
 

@@ -1,34 +1,8 @@
-/**
- * Contratos de interfaz de MS-Contratos.
- *
- * Fuente: Documento Principal, Capitulo 2, seccion "Contratos de interfaz".
- */
+/** Contratos de interfaz de MS-Contratos. */
 
 import type { DiaDelMes, FechaISO, MontoCOP, UUID } from './comunes';
 
-/**
- * Estados de un contrato.
- *
- * Catalogo CERRADO, igual que `ESTADOS_INMUEBLE`. Emite JavaScript porque lo
- * comparten tres consumidores: el modelo, que valida contra el; el frontend, que
- * pinta la etiqueta; y el `CHECK` de la migracion.
- *
- * SUSTITUYE A UN ENTERO. La columna guardaba `1`, `2` y `3` sin nada que dijera
- * que significaban: la traduccion vivia repartida entre el motor financiero, el
- * dashboard, el guardia de borrado y un ternario del frontend, cada uno con su
- * copia del mapa. Un `WHERE estado = 1` no se puede leer ni revisar; un
- * `WHERE estado = 'activo'` si.
- *
- * Los valores salen de la vieja tabla `estados_contrato` del modelo legado
- * —Activo, Finalizado, Cancelado— normalizados a minusculas, que es la
- * convencion del proyecto para catalogos de negocio y lo mismo que se hizo con
- * `TIPOS_INMUEBLE` cuando salio de `tipos_inmueble`. Las mayusculas se reservan
- * para los roles, que viajan en los claims y el Capitulo 2 fija asi.
- *
- * `cancelado` no lo produce ningun camino de codigo todavia —el frontend ya lo
- * pintaba, prevision de un flujo que no existe— pero se declara: un catalogo que
- * se queda corto obliga a otra migracion, y esta lista ya estaba escrita.
- */
+/** Estados de un contrato. Catálogo cerrado, espejo del `CHECK` de la migración. */
 export const ESTADOS_CONTRATO = ['activo', 'finalizado', 'cancelado'] as const;
 
 export type EstadoContrato = (typeof ESTADOS_CONTRATO)[number];
@@ -38,96 +12,38 @@ export const esEstadoContrato = (valor: unknown): valor is EstadoContrato =>
   typeof valor === 'string' && (ESTADOS_CONTRATO as readonly string[]).includes(valor);
 
 /**
- * Cuerpo de `POST /api/contratos`.
- *
- * `id_inmueble` e `id_inquilino` son referencias logicas: apuntan a datos que
- * viven en MS-Inmuebles y MS-Identidad, sin clave foranea fisica (regla dura 1).
- * MS-Contratos asume que el ID existe; la validacion ocurre en el gateway o en
- * una llamada sincrona previa.
+ * Cuerpo de `POST /api/contratos`. `id_inmueble` e `id_inquilino` son referencias
+ * a otros servicios, sin clave foránea.
  */
 export interface CrearContratoRequest {
   id_inmueble: UUID;
   id_inquilino: UUID;
   inicio: FechaISO;
   fin: FechaISO;
-  /**
-   * Primera fecha de corte del ciclo de facturacion. Opcional en la peticion:
-   * si no viene, se deriva de `inicio`. Ver `fechasContrato` en el gateway.
-   */
+  /** Primera fecha de corte. Si no viene, se deriva de `inicio`. */
   fecha_inicio_corte?: FechaISO;
-  /**
-   * Dia del mes (entero, 1-31) en que vence el pago. NO es una fecha, aunque
-   * los campos anteriores si lo sean. El documento lo ejemplifica con `5`.
-   *
-   * Opcional: si no viene, se deriva del dia de `inicio`. Que se pueda mandar es
-   * lo que permite que el formulario lo ofrezca como sugerencia editable.
-   */
+  /** Día del mes (1-31) en que vence el pago. Si no viene, se deriva de `inicio`. */
   fecha_limite_pago?: DiaDelMes;
   canon: MontoCOP;
-  /**
-   * Deudor solidario. OPCIONALES los dos: no todo arriendo tiene codeudor, y
-   * exigirlos impediria registrar los que no lo tienen.
-   *
-   * No es desviacion del Capitulo 2. El documento los lista como atributos de
-   * `Contratos` y los muestra en el payload de ejemplo, pero no dice que sean
-   * obligatorios; la seccion de Persistencia no fija nulabilidad de ningun
-   * campo. Y CLAUDE.md ya establece como se leen esos ejemplos: lo vinculante
-   * son los campos y sus nombres, no los valores de muestra.
-   */
+  /** Deudor solidario, opcional. */
   nombre_deudor_solidario?: string;
   documento_deudor_solidario?: string;
   /** Texto libre con las condiciones particulares. Opcional. */
   info_contrato?: string;
 }
 
-/**
- * Tipos de anexo CONOCIDOS. No es un catalogo cerrado.
- *
- * Es la diferencia deliberada con `TIPOS_INMUEBLE` y `ESTADOS_CONTRATO`, que si
- * lo son: alli la lista esta fijada y un valor nuevo es un error, aqui el
- * documento enumera `CONTRATO_FIRMADO` y `OTROSI` seguidos de "etc.". Por eso
- * la tabla `anexos` no lleva CHECK sobre `tipo` y el modelo no valida contra
- * esta lista — un otrosi de una modalidad que nadie previo no puede quedar
- * bloqueado por una migracion.
- *
- * Lo que si hace esta lista es alimentar el desplegable del formulario, que es
- * donde tiene sentido sugerir sin obligar.
- */
+/** Tipos de anexo sugeridos en el formulario. Catálogo abierto: nada valida contra él. */
 export const TIPOS_ANEXO_CONOCIDOS = ['CONTRATO_FIRMADO', 'OTROSI'] as const;
 
-/**
- * Tipo de anexo de un contrato.
- *
- * La interseccion `string & {}` conserva el autocompletado de los valores
- * conocidos sin cerrar el tipo a solo esos dos.
- */
+/** Tipo de anexo: sugiere los conocidos sin cerrar el tipo. */
 export type TipoAnexo = (typeof TIPOS_ANEXO_CONOCIDOS)[number] | (string & {});
 
-/**
- * Tope de tamano por anexo, en megabytes.
- *
- * Un contrato de arriendo escaneado son entre 5 y 15 paginas; a 300 ppp en
- * escala de grises cada una ronda los 300 KB, asi que 10 MB dan para unas
- * treinta. Vive aqui y no solo en el gateway para que el formulario pueda
- * avisar ANTES de subir 10 MB por una red movil y recibir un 413.
- */
+/** Tope de tamaño por anexo, en megabytes. */
 export const TAMANO_MAXIMO_ANEXO_MB = 10;
 
 /**
- * Campos del `multipart/form-data` de
- * `POST /api/contratos/{id_contrato}/anexos`.
- *
- * No es un cuerpo JSON: viaja como multipart porque lleva un archivo. El
- * servicio valida que sea PDF y que el contrato exista, sube el archivo a
- * almacenamiento en la nube y guarda la URL devuelta en `archivo_anexo`.
- *
- * `file` queda como `unknown` a proposito: su representacion concreta depende
- * del runtime (`Buffer` o stream en Node, `File` en el navegador) y este paquete
- * es solo de tipos, sin dependencias de entorno.
- *
- * El archivo se valida POR CONTENIDO, no por el `Content-Type` que declare el
- * cliente ni por la extension del nombre: las dos son afirmaciones de quien
- * sube, no comprobaciones. Ver `middlewares/upload.middleware.js`.
+ * Campos del `multipart/form-data` de `POST /api/contratos/{id_contrato}/anexos`.
+ * `file` es `unknown` porque su forma depende del entorno.
  */
 export interface CrearAnexoFormData {
   file: unknown;

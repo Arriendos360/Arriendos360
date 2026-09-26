@@ -1,15 +1,6 @@
 /**
- * Cliente del gateway hacia ms-contratos.
- *
- * Dos consumidores: el dashboard, que necesita los contratos del propietario, y
- * el guardia de borrado, que pregunta si un inmueble tiene contratos activos. Las
- * dos consultas alimentan cifras o deciden si algo se permite, así que un fallo
- * NO se degrada: devolver una lista vacía sería una respuesta creíble y falsa.
- * Las dos PROPAGAN.
- *
- * La pertenencia no se calcula aquí: la responde ms-contratos, que tiene la mitad
- * cara y sabe pedir la otra. Lo que devuelve son HECHOS —estos contratos son
- * suyos— y el código de estado lo sigue eligiendo el gateway. Ver `docs/adr/0017`.
+ * Cliente del gateway hacia ms-contratos, para el dashboard y el guardia de
+ * borrado. Los fallos se propagan: una lista vacía sería creíble y falsa.
  */
 
 const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
@@ -66,8 +57,6 @@ const consultar = async (query, opciones = {}) => {
 /**
  * Los contratos sobre los inmuebles de un propietario.
  *
- * La usa el dashboard, que sólo atiende a propietarios.
- *
  * @throws si ms-contratos no responde.
  */
 const contratosDePropietario = (sub, opciones = {}) =>
@@ -76,13 +65,7 @@ const contratosDePropietario = (sub, opciones = {}) =>
 /**
  * Los contratos activos de un inmueble.
  *
- * Lo que el guardia de borrado necesita saber, y nada más. La comprobación de
- * pertenencia del inmueble NO es cosa suya: de eso responde ms-inmuebles cuando
- * le llegue el borrado.
- *
- * @throws si ms-contratos no responde. El guardia lo traduce en 502: no se deja
- *   pasar el borrado «por si acaso», porque sería permitir justo lo que existe
- *   para impedir.
+ * @throws si ms-contratos no responde.
  */
 const activosDeInmueble = (idInmueble, opciones = {}) =>
     consultar(

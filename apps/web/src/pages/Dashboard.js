@@ -10,7 +10,7 @@ import { Button, Card, EmptyState, FormError, formatearDinero, formatearMes } fr
 import { unir } from '../ui/clases';
 
 /**
- * Dashboard del propietario (mockup docs/mockups/dashboard.png).
+ * Dashboard del propietario.
  *
  * Dos fuentes, y ninguna se degrada a cero: si una falla se ve el error y
  * «—» en lo que dependía de ella, nunca un «$0» que parezca una respuesta.
@@ -26,9 +26,7 @@ import { unir } from '../ui/clases';
  * gateway ya filtra por propietario, y de `/api/pagos` se descartan las cuentas
  * donde es inquilino (`actuaComoPropietario`).
  *
- * El gráfico de ingresos por mes del mockup no está: ninguna ruta lo da y
- * sumarlo en el navegador sería agregar fuera del gateway (regla dura 2).
- * Tampoco el botón «Motor financiero»: el motor se lanza por línea de comandos.
+ * No hay gráfico de ingresos por mes: ninguna ruta lo da.
  */
 
 const ESTADOS_PAGO = [

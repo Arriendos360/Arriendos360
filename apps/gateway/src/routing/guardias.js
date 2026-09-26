@@ -1,35 +1,6 @@
 /**
- * Comprobaciones que el gateway hace ANTES de reenviar a un servicio.
- *
- * POR QUÉ EXISTE ESTE ARCHIVO. Hay reglas que ningún servicio puede aplicar
- * solo, porque dependen de datos de otro contexto. «No borres un inmueble que
- * tiene contrato activo» es una de ellas: la escribe Inmuebles pero la decide
- * Contratos.
- *
- * Ms-inmuebles es subdominio de Soporte y Contratos es Core. Si ms-inmuebles
- * consultara contratos para decidir, un servicio de Soporte dependería de uno de
- * Core y se invertiría la dirección de las dependencias.
- *
- * Así que la regla vive donde se puede componer la respuesta: el gateway.
- *
- * DÓNDE SE MONTA. Entre el control de acceso y la costura. Después del RBAC,
- * porque necesita saber quién pregunta; antes de la costura, porque su trabajo
- * es decidir si la petición llega siquiera a salir a la red.
- *
- * Un guardia que no opina llama a `next()` y la costura sigue su curso normal.
- *
- * ── QUÉ CAMBIA EN EL PASO 6d ────────────────────────────────────────────────
- *
- * El dato que decide dejó de ser local. Esto era un `Contrato.count(...)` contra
- * la base del gateway; ahora es una pregunta a ms-contratos, que es una de las
- * tres comprobaciones de pertenencia que el paso 6d colapsa en un solo sitio
- * —`services/pertenencia.ts` de ese servicio— en vez de tenerlas repartidas.
- *
- * Lo que NO cambia es dónde vive la regla ni por qué. El guardia sigue aquí,
- * porque sigue siendo el gateway quien cruza los dos contextos: pregunta a
- * Contratos y decide si deja pasar el borrado hacia Inmuebles. Moverlo a
- * ms-inmuebles seguiría invirtiendo la dirección de las dependencias, y moverlo
- * a ms-contratos lo pondría a opinar sobre una petición que no es suya.
+ * Guardias: reglas que dependen de dos contextos y se comprueban antes de
+ * reenviar. Se montan después del RBAC y antes de la costura.
  */
 
 const { activosDeInmueble } = require('../clientes/contratos');
@@ -42,18 +13,8 @@ const MENSAJE_CON_CONTRATO =
 const PATRON_BORRADO = /^\/api\/inmuebles\/([^/]+)\/?$/;
 
 /**
- * Veta el borrado de un inmueble que tenga contrato activo.
- *
- * Responde **409 y no 403**: no es un problema de permisos —el inmueble es suyo
- * y su rol es el correcto, las dos capas de autorización ya dijeron que sí—,
- * sino del estado del recurso. Un 403 le diría al propietario que no tiene
- * derecho a borrar su propio inmueble, que es falso y no le dice qué hacer.
- *
- * NO comprueba la pertenencia: de eso se encarga ms-inmuebles, y responde 404 si
- * el inmueble es de otro. Aquí solo se mira el estado. El orden tiene una
- * consecuencia menor y aceptable: alguien que pida borrar un inmueble ajeno CON
- * contrato activo recibe 409 en vez de 404, y con ello aprende que ese
- * identificador existe. Es un identificador que ya tenía en la mano.
+ * Veta con 409 el borrado de un inmueble con contrato activo. La pertenencia la
+ * comprueba ms-inmuebles.
  *
  * @param {object} [opciones]
  * @param {(id: string) => Promise<Array>} [opciones.activosDeInmueble] para que
@@ -74,9 +35,7 @@ const crearGuardiaDeBorrado = (opciones = {}) => {
 
         const id = coincidencia[1];
 
-        // Un identificador con forma inválida no puede tener contratos. Se deja
-        // pasar para que sea ms-inmuebles quien responda 404, y así el gateway
-        // no adivina respuestas que no son suyas.
+        // Un id mal formado no tiene contratos: que ms-inmuebles responda 404.
         if (!esUuid(id)) {
             return next();
         }
@@ -90,14 +49,7 @@ const crearGuardiaDeBorrado = (opciones = {}) => {
 
             return next();
         } catch (error) {
-            // Antes esta consulta era local y un fallo significaba «algo va mal
-            // en el gateway». Ahora es de red y significa «no se pudo
-            // comprobar», que es peor: el borrado es irreversible.
-            //
-            // NO se deja pasar «por si acaso» — sería permitir justo lo que este
-            // guardia existe para impedir. Y no se responde 409, que afirmaría
-            // que hay un contrato activo sin haberlo visto. **502**: no se pudo
-            // preguntar, y quien lo lea sabe que el problema no es su inmueble.
+            // Si no se pudo comprobar, 502: ni se deja pasar el borrado ni se afirma un 409.
             console.error('Error al comprobar contratos del inmueble:', error.message);
             return res
                 .status(502)

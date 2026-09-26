@@ -1,14 +1,13 @@
 /**
- * MS-Identidad: personas, desde el lado del propietario que va a firmar un
- * contrato. `Contratos.id_inquilino` es un UUID que nadie teclea, así que antes de
- * firmar se traduce la cédula al usuario, o se da de alta al inquilino.
+ * MS-Identidad, para el propietario que va a firmar un contrato: busca al
+ * inquilino por documento o lo da de alta.
  */
 
 import api from '../../services/api';
 import { cuerpo, soloCampos } from '../comun';
 
 /**
- * Campos del alta de inquilino: los del registro sin `contrasena` (docs/adr/0007).
+ * Campos del alta de inquilino: los del registro sin `contrasena`.
  * El servicio exige `nombres`, `apellidos`, `email` y `documento`; `telefono` es
  * opcional. Un email o documento repetido responde 400, no 409.
  */

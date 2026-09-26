@@ -1,50 +1,10 @@
 /**
- * MS-Notificaciones como CONSUMIDOR del bus. Es lo unico que este servicio es.
+ * MS-Notificaciones como consumidor del bus. Cada manejador valida la carga,
+ * resuelve los destinatarios en ms-identidad y deja los correos como filas
+ * `pendiente` en `notificaciones.envios`, dentro de la transacción del consumidor.
+ * No envía nada: eso lo hace `services/enviador.ts`.
  *
- * ── LO QUE EL PASO 7 CAMBIA, Y POR QUE ERA NECESARIO ────────────────────────
- *
- * Hasta aqui habia dos servicios de dominio abriendo conexiones SMTP:
- * ms-identidad, para el enlace de recuperacion (`docs/adr/0010`), y ms-financiero,
- * para los cuatro avisos del motor (`docs/adr/0018`). Los dos lo declaraban
- * provisional en el propio codigo y los dos apuntaban al mismo sitio: el paso 7.
- *
- * Ahora los dos PUBLICAN y este servicio decide a quien avisar y por que canal.
- * Coreografia, no orquestacion: ms-identidad no llama a nadie al emitir un token,
- * y el motor no sabe que existe este servicio.
- *
- * ── LA IDEMPOTENCIA IMPORTA AQUI MAS QUE EN NINGUN OTRO CONSUMIDOR ──────────
- *
- * Es la tercera vuelta de una escalada que el proyecto lleva anotada desde el paso
- * 4. `database/inmuebles/003` decia que poner un inmueble en `arrendado` dos veces
- * no hace daño «hoy»; `database/financiero/003` decia que insertar una cuenta de
- * cobro dos veces si, porque factura el mismo mes dos veces. Este es el peor de los
- * tres: un correo lo lee una persona y no hay `UPDATE` que lo recoja.
- *
- * Y no es una posibilidad remota. `ContratoFormalizado` tiene tres suscriptores
- * desde este paso, y la fila de la tabla de salida se marca entregada cuando
- * aceptan TODOS: si ms-inmuebles esta caido, este servicio recibe el evento otra
- * vez. Con entrega al-menos-una-vez, la reentrega es una certeza.
- *
- * ── PERO LA IDEMPOTENCIA SOLA NO BASTA, Y ESO ES LO IMPORTANTE DE AQUI ──────
- *
- * `crearConsumidor` mete la marca del evento y el efecto del manejador en una
- * transaccion. Eso funciona cuando el efecto es una fila. Un `sendMail` no lo es:
- * enviar dentro de la transaccion y que esta falle manda un correo que nadie
- * registro, y marcar el evento y enviar despues pierde el aviso si el envio falla.
- *
- * Asi que NINGUN MANEJADOR DE ESTE ARCHIVO ENVIA NADA. Cada uno resuelve el
- * destinatario, redacta el mensaje y lo deja como fila `pendiente` en
- * `notificaciones.envios`, dentro de la transaccion del consumidor. El `sendMail`
- * lo hace `services/enviador.ts`, que es otro barrido. Ver la cabecera de
- * `models/Envio.ts`.
- *
- * ── EL DESTINATARIO SE PREGUNTA, NO SE LEE DEL SOBRE ───────────────────────
- *
- * Ningun evento lleva una direccion de correo. Llevan `id_usuario`, y aqui se
- * pregunta a ms-identidad. Si no responde, el manejador LANZA: la transaccion se
- * va entera —incluida la marca del `id_evento`— el consumidor devuelve 500 y el
- * productor reintenta el evento con su espera creciente. El aviso no se pierde.
- * Ver la cabecera de `clientes/identidad.ts`.
+ * Si ms-identidad no responde, el manejador lanza y el productor reintenta.
  */
 
 import crypto from 'crypto';
@@ -74,7 +34,7 @@ import * as plantillas from '../plantillas';
 import type { Mensaje } from '../plantillas';
 import { esUuid } from '../models/uuid';
 
-/** La bitacora de este consumidor. Ver `database/notificaciones/001`. */
+/** Bitácora de eventos procesados de este consumidor. */
 export const TABLA_PROCESADOS = `${ESQUEMA}.eventos_procesados`;
 
 /** Un correo por redactar: a quien y con que. */
@@ -84,17 +44,8 @@ interface PorRedactar {
 }
 
 /**
- * Escribe los envios en la transaccion del consumidor.
- *
- * `bulkCreate` y no un `create` por fila: los dos avisos de una mora son un solo
- * hecho y tienen que quedar o no quedar juntos. Con dos INSERT sueltos en la misma
- * transaccion la atomicidad seria la misma, pero esto dice mejor lo que se quiere.
- *
- * Si no hay a quien avisar, se registra ALTO y no se escribe nada. No se lanza: un
- * usuario sin correo no se arregla reintentando, y diez intentos acabarian
- * apartando el evento del emisor por un dato que es de ms-identidad. Pero tampoco
- * se calla, porque «este aviso no llego a nadie» es exactamente lo que hay que
- * poder mirar cuando alguien pregunta por un correo que no recibio.
+ * Escribe los envíos en la transacción del consumidor, todos juntos. Si no hay a
+ * quién avisar, lo registra y no escribe nada.
  */
 const redactar = async (
   { sobre, transaccion }: ContextoManejo,
@@ -129,16 +80,7 @@ const redactar = async (
   );
 };
 
-/**
- * Comprueba que la carga trae un identificador de usuario usable.
- *
- * CONFIANZA CERO (regla dura 7): que lo entregue otro servicio con credencial
- * valida no hace confiable lo que hay dentro del sobre. Una carga sin destinatario
- * LANZA a proposito, igual que en ms-financiero: es un error de programacion del
- * emisor, y el mecanismo ya sabe que hacer con un evento que falla siempre — lo
- * aparta tras diez intentos y lo deja a la vista. Tragarselo dejaria a alguien sin
- * su aviso y sin rastro de por que.
- */
+/** Exige un UUID en la carga; lanza si no lo es, para que el evento acabe apartado. */
 const exigirUuid = (valor: unknown, campo: string, tipo: string): string => {
   if (!esUuid(valor)) {
     throw new Error(`${tipo} con ${campo} inválido: ${JSON.stringify(valor)}`);
@@ -154,24 +96,9 @@ const exigirTexto = (valor: unknown, campo: string, tipo: string): string => {
   return valor;
 };
 
-/**
- * Un manejador por tipo. Cinco, y los cinco con la misma forma:
- * validar la carga, resolver destinatarios, redactar.
- *
- * Los tipos que no estan aqui —`ContratoFormalizado`, `ContratoFinalizado`— llegan
- * igualmente si alguien suscribe este servicio a ellos, y el consumidor los ignora
- * con un 200. Es lo correcto en una coreografia: un tipo sin manejador significa
- * que la suscripcion sobra, no que la entrega haya fallado.
- */
+/** Un manejador por tipo: validar la carga, resolver destinatarios y redactar. */
 export const manejadores: Record<string, Manejador> = {
-  /**
-   * Recuperacion de contrasena.
-   *
-   * El `token` se valida pero NO se registra en ningun log, nunca: es la credencial
-   * que permite restablecer una contrasena. Por la misma razon, el mensaje de error
-   * de una carga invalida no lo incluye — se comprueba el campo y se nombra, no se
-   * imprime.
-   */
+  /** Recuperación de contraseña. El `token` nunca se escribe en un log. */
   [TIPO_RECUPERACION_SOLICITADA]: async (payload, contexto) => {
     const carga = payload as Partial<RecuperacionSolicitada>;
     const tipo = TIPO_RECUPERACION_SOLICITADA;
@@ -179,7 +106,7 @@ export const manejadores: Record<string, Manejador> = {
     const idUsuario = exigirUuid(carga?.id_usuario, 'id_usuario', tipo);
 
     if (typeof carga.token !== 'string' || carga.token.length < 16) {
-      // Sin el token no hay enlace que mandar, y el correo seria un aviso vacio.
+      // Sin token no hay enlace que mandar.
       throw new Error(`${tipo} sin token utilizable para el usuario ${idUsuario}`);
     }
     exigirTexto(carga.expira_en, 'expira_en', tipo);
@@ -260,14 +187,8 @@ export const manejadores: Record<string, Manejador> = {
   },
 
   /**
-   * Vencimiento proximo. DOS destinatarios, con plantillas distintas.
-   *
-   * Que el mismo hecho produzca dos correos con textos distintos es la razon de que
-   * el evento lleve los dos identificadores y no una lista de correos: decidir a
-   * quien se avisa y como se le habla es de este servicio, no del emisor.
-   *
-   * Si solo se resuelve uno de los dos, sale ese. Un aviso a medias es mejor que
-   * ninguno, y el que falta queda registrado por `redactar` solo si faltan los dos.
+   * Vencimiento próximo: un correo al inquilino y otro al propietario, con
+   * plantillas distintas. Sale el de quien se pueda resolver.
    */
   [TIPO_CUENTA_COBRO_POR_VENCER]: async (payload, contexto) => {
     const carga = payload as Partial<CuentaCobroPorVencer>;
@@ -334,14 +255,7 @@ export const manejadores: Record<string, Manejador> = {
   },
 };
 
-/**
- * El consumidor del servicio.
- *
- * `crearConsumidor` es quien pone la idempotencia: anota el `id_evento` en
- * `notificaciones.eventos_procesados` y aplica el manejador en la MISMA
- * transaccion, asi que una segunda entrega no redacta nada. Este archivo solo dice
- * que significa cada evento aqui.
- */
+/** El consumidor del servicio: descarta repetidos y aplica el manejador. */
 export const consumidor: Consumidor = crearConsumidor({
   conexion: comoConexion(sequelize),
   tabla: TABLA_PROCESADOS,
