@@ -9,8 +9,7 @@ import MarcoAuth, { EnlaceAuth, Encabezado } from './MarcoAuth';
  * Solicitud de recuperación.
  *
  * La pantalla NO dice si el correo existe: muestra el mismo mensaje siempre,
- * porque el backend responde lo mismo siempre. Si la interfaz distinguiera,
- * daría el dato que la API se cuida de no dar. Ver docs/adr/0010.
+ * igual que el backend.
  */
 export default function RecuperarContrasena() {
     const [email, setEmail] = useState('');

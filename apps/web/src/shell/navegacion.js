@@ -4,7 +4,7 @@
  * Se lee `roles` y no el `rol` singular: un usuario puede ser propietario e
  * inquilino a la vez, y el singular sólo dice cuál es el principal. Esconder un
  * enlace es comodidad, no seguridad: el guardián de ruta y el backend lo vuelven
- * a comprobar (regla dura 8).
+ * a comprobar.
  */
 
 import { LayoutDashboard, Home, FileText, CreditCard } from 'lucide-react';

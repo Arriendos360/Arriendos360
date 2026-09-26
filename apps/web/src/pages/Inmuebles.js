@@ -9,11 +9,10 @@ import { listarCuentasCobro } from '../features/pagos/api';
 import { Badge, Button, EmptyState, FormError, Input, Modal, Select, formatearDinero } from '../ui';
 
 /**
- * UI de Inmuebles (mockup docs/mockups/inmuebles.png): KPIs, lista y el alta,
+ * Inmuebles: KPIs, lista y el alta,
  * edición y borrado.
  *
- * Los campos son los del endpoint de ms-inmuebles, no los del Capítulo 2 (ver
- * `features/inmuebles/api.js`). El canon y el estado del cobro sólo
+ * Los campos son los del endpoint de ms-inmuebles. El canon y el estado del cobro sólo
  * DECORAN la fila: si Contratos o Financiero no responden, la fila sale sin
  * ellos y la lista sigue en pie. Los inmuebles sí son el contenido: si fallan,
  * se dice.

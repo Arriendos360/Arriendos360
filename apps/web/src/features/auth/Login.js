@@ -11,7 +11,7 @@ import { conReintentos, mensajeDeLogin, validarContrasenaNueva } from './reglas'
 
 const MODOS = [
     { clave: 'login', etiqueta: 'Iniciar sesión' },
-    // Sólo los propietarios se registran: al inquilino lo da de alta su arrendador (ADR 0004).
+    // Sólo los propietarios se registran: al inquilino lo da de alta su arrendador.
     { clave: 'registro', etiqueta: 'Soy propietario' }
 ];
 
@@ -55,8 +55,7 @@ function FormularioLogin() {
             // El token queda en memoria, no en localStorage: recargar la página
             // cierra la sesión, y es a propósito.
             guardarSesion({ token: respuesta.token, usuario: respuesta.usuario });
-            // Con una contraseña temporal no hay otro sitio al que ir: la API
-            // denegaría todo lo demás (ADR 0007).
+            // Con una contraseña temporal, directo a la pantalla de cambio.
             navigate(respuesta.usuario?.debe_cambiar_contrasena ? '/cambiar-contrasena' : '/', { replace: true });
         } catch (err) {
             setError(mensajeDeLogin(err));
@@ -180,7 +179,7 @@ function FormularioRegistro({ alTerminar }) {
     );
 }
 
-/** UI-01: inicio de sesión y autorregistro de propietarios. */
+/** Inicio de sesión y autorregistro de propietarios. */
 export default function Login() {
     const [modo, setModo] = useState('login');
 

@@ -12,7 +12,7 @@ import { fechaDeContrato } from './api';
 /**
  * ¿Actúa como propietario sobre ESTE contrato? No basta el rol: un usuario con
  * los dos roles es inquilino en los contratos donde figura como tal, y ahí no
- * ve acciones de propietario. El backend lo vuelve a decidir (regla dura 8).
+ * ve acciones de propietario. El backend lo vuelve a decidir.
  */
 export const actuaComoPropietario = (contrato, sesion) =>
     Boolean(sesion.esPropietario && contrato && contrato.id_inquilino !== sesion.usuario?.id);
@@ -41,7 +41,7 @@ export function AreaTexto({ etiqueta, ayuda, error, id, className, ...resto }) {
 }
 
 /**
- * La contraseña temporal, que viaja en claro una sola vez (docs/adr/0007). Se
+ * La contraseña temporal, que viaja en claro una sola vez. Se
  * muestra para entregarla en mano; el correo sólo avisa que la cuenta existe.
  */
 export function ContrasenaTemporal({ contrasena, persona }) {

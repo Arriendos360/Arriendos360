@@ -15,18 +15,17 @@ import {
 import { unir } from '../ui/clases';
 
 /**
- * UI de Pagos (mockup docs/mockups/pagos.png): las cuentas de cobro, sus
+ * Pagos: las cuentas de cobro, sus
  * transacciones y sus PDF.
  *
  * - El saldo es `saldo_pendiente` tal como llega: lo deriva ms-financiero y aquí
  *   no se suma ni se resta nada. Después de escribir se vuelve a pedir.
- * - Registrar, cobrar a mano y anular son del propietario (docs/adr/0006), y no
+ * - Registrar, cobrar a mano y anular son del propietario, y no
  *   basta el rol: quien tiene los dos es inquilino en algunos contratos
  *   (`actuaComoPropietario`). Una cuenta cuyo contrato no llegó decorado no
  *   ofrece acciones: sin contrato no se sabe de quién es.
- * - Anular no borra ni reescribe `saldo_restante_momento`: el comprobante ya
- *   emitido sigue diciendo lo que decía (docs/adr/0016). El endpoint no recibe
- *   cuerpo, así que no se pide un motivo que se perdería.
+ * - Anular no borra ni cambia `saldo_restante_momento`, y no pide motivo: el
+ *   endpoint no recibe cuerpo.
  * - Los PDF salen por blob con el token (services/descargas.js).
  */
 

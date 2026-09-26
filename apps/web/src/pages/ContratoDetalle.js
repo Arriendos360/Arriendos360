@@ -20,11 +20,11 @@ import {
  * Detalle de un contrato: sus datos, sus anexos y, para el propietario, editar,
  * finalizar, reemitir la contraseña del inquilino y adjuntar o borrar anexos.
  *
- * Los anexos se descargan como blob por la API autenticada (`descargarAnexo`,
- * docs/adr/0014): nunca `window.open` ni una URL con el token.
+ * Los anexos se descargan como blob por la API autenticada (`descargarAnexo`):
+ * nunca `window.open` ni una URL con el token.
  *
  * Las acciones de propietario dependen de este contrato, no sólo del rol
- * (`actuaComoPropietario`). El backend lo vuelve a decidir (regla dura 8).
+ * (`actuaComoPropietario`). El backend lo vuelve a decidir.
  */
 
 const ETIQUETA_TIPO_ANEXO = { CONTRATO_FIRMADO: 'Contrato firmado', OTROSI: 'Otrosí' };

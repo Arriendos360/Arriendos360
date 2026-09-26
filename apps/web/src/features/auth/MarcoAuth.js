@@ -28,7 +28,7 @@ const Logo = () => (
 );
 
 /**
- * Marco de las pantallas públicas y del cambio de contraseña (mockup UI-01):
+ * Marco de las pantallas públicas y del cambio de contraseña:
  * formulario a la izquierda y panel de marca a la derecha, que se oculta en
  * pantallas angostas.
  */

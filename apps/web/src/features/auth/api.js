@@ -1,10 +1,8 @@
 /**
  * MS-Identidad: autenticación y recuperación de la contraseña.
  *
- * Devuelve lo que responde la API; guardar el token en memoria es de quien llama
- * (`guardarSesion` de `auth/sesion.js`), no de esta capa. Los reintentos del login
- * mientras Azure despierta los servicios también quedan en la pantalla, porque lo
- * que hacen es explicarle a la persona que espere (docs/adr/0022).
+ * Devuelve lo que responde la API; guardar el token es de quien llama
+ * (`guardarSesion`), y los reintentos del login, de la pantalla.
  */
 
 import api from '../../services/api';
@@ -29,12 +27,12 @@ export const registrarse = (datos) => cuerpo(api.post('/auth/registro', soloCamp
 /**
  * `POST /api/auth/cambiar-contrasena`. El servicio revoca el token viejo y
  * devuelve otro (`{ token, usuario }`) que hay que guardar en su lugar: el viejo
- * aún afirma que el cambio está pendiente (docs/adr/0007).
+ * aún afirma que el cambio está pendiente.
  */
 export const cambiarContrasena = ({ contrasena_actual, contrasena_nueva }) =>
     cuerpo(api.post('/auth/cambiar-contrasena', { contrasena_actual, contrasena_nueva }));
 
-/** `POST /api/auth/recuperar`. Responde lo mismo exista o no la cuenta (docs/adr/0010). */
+/** `POST /api/auth/recuperar`. Responde lo mismo exista o no la cuenta. */
 export const solicitarRecuperacion = ({ email }) => cuerpo(api.post('/auth/recuperar', { email: email.trim() }));
 
 /** `POST /api/auth/restablecer` con el token de un solo uso que llegó por correo. */
