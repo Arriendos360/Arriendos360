@@ -1,17 +1,7 @@
 /**
- * Costura de enrutamiento del gateway.
- *
- * Un solo middleware decide, peticion por peticion, si el prefijo se atiende en
- * este proceso o se reenvia por HTTP a su microservicio.
- *
- * `/api/auth`, `/api/usuarios`, `/api/inmuebles`, `/api/contratos` y
- * `/api/pagos` van a sus servicios; `/api/dashboard` se atiende aqui.
- *
- * Orden de montaje (importa): va DESPUES de `cors()`, del control de acceso y de
- * los guardias, y ANTES de `express.json()`. Que el RBAC vaya primero no es un
- * detalle: una peticion denegada no debe llegar a la red interna. Los guardias
- * van entre medias porque deciden si la peticion llega a salir. Ver el
- * comentario de `proxy.js` sobre streaming del cuerpo.
+ * Costura de enrutamiento: decide por petición si el prefijo se reenvía a su
+ * servicio o se atiende aquí (`/api/dashboard`). Se monta después de `cors()`,
+ * del control de acceso y de los guardias, y antes de `express.json()`.
  */
 
 const { reenviar } = require('./proxy');

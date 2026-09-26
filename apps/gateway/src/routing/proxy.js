@@ -1,15 +1,7 @@
 /**
- * Reenvio HTTP transparente hacia un microservicio.
- *
- * Usa los modulos `http`/`https` de Node y hace streaming del cuerpo con `pipe`,
- * en vez de leerlo en memoria. Esa decision es la que permite soportar
- * `multipart/form-data` sin caso especial: los bytes del PDF de un anexo pasan
- * tal cual, sin que el gateway tenga que parsear el multipart ni volver a
- * componerlo.
- *
- * Por eso este middleware DEBE montarse antes de `express.json()`. Si un parser
- * de cuerpo corre primero, consume el stream y aqui no quedaria nada que
- * reenviar.
+ * Reenvío HTTP transparente hacia un microservicio, con el cuerpo en streaming
+ * (sirve también para multipart). Debe montarse antes de `express.json()`, que
+ * consumiría el cuerpo.
  */
 
 const http = require('http');
@@ -21,11 +13,8 @@ const { enteroDeEntorno } = require('arriendos360-shared');
 const { CABECERAS_DE_ORIGEN, cabecerasDeOrigen } = require('./origen');
 
 /**
- * Cabeceras salto-a-salto (RFC 7230, seccion 6.1): describen la conexion, no el
- * mensaje, y no deben propagarse a traves de un proxy.
- *
- * `transfer-encoding` se omite tambien para que Node decida el marco de la
- * peticion saliente segun haya o no `content-length`.
+ * Cabeceras salto-a-salto (RFC 7230, sección 6.1): no se propagan a través de un
+ * proxy.
  */
 const CABECERAS_SALTO_A_SALTO = new Set([
     'connection',
@@ -42,15 +31,8 @@ const CABECERAS_SALTO_A_SALTO = new Set([
 const TIMEOUT_POR_DEFECTO_MS = 10000;
 
 /**
- * Copia las cabeceras entrantes, quitando las de salto-a-salto y reescribiendo
- * `host` al del destino.
- *
- * `authorization` no recibe trato especial: se copia como cualquier otra, que es
- * justo lo que se necesita para que el servicio destino verifique el token por
- * su cuenta con el secreto compartido.
- *
- * Las cabeceras de ORIGEN no se copian nunca: las escribiría el cliente. Llegan en
- * `origen`, calculadas por el gateway. Ver `origen.js`.
+ * Copia las cabeceras entrantes sin las de salto-a-salto ni las de origen, añade
+ * las de origen del gateway y reescribe `host`.
  */
 const construirCabeceras = (cabecerasEntrantes, urlDestino, origen = {}) => {
     const salida = {};
@@ -67,13 +49,7 @@ const construirCabeceras = (cabecerasEntrantes, urlDestino, origen = {}) => {
     return salida;
 };
 
-/**
- * Responde 502 siguiendo la convencion de errores del proyecto.
- *
- * Comprueba `headersSent` porque el fallo puede ocurrir despues de haber
- * empezado a transmitir la respuesta del servicio; en ese caso ya no se puede
- * cambiar el codigo de estado y lo unico correcto es cortar la conexion.
- */
+/** Responde 502, o corta la conexión si la respuesta ya empezó a transmitirse. */
 const responderFalloDeRed = (res, servicio, causa) => {
     if (res.headersSent) {
         res.destroy();
@@ -100,9 +76,7 @@ const responderFalloDeRed = (res, servicio, causa) => {
  * @param {{ timeoutMs?: number, secretoServicio?: string }} [opciones]
  */
 const reenviar = (req, res, urlBase, servicio, opciones = {}) => {
-    // `PROXY_TIMEOUT_MS` sube el límite en Azure: un servicio dormido tarda en despertar
-    // más que los 10 s de desarrollo, y cortar antes es devolver un 502 a una petición que
-    // iba a salir bien. Ver `docs/adr/0022`.
+    // `PROXY_TIMEOUT_MS` permite esperar más a un servicio que despierta.
     const timeoutMs = opciones.timeoutMs || enteroDeEntorno('PROXY_TIMEOUT_MS', TIMEOUT_POR_DEFECTO_MS);
 
     let destino;

@@ -1,20 +1,7 @@
 /**
  * Cliente del gateway hacia ms-inmuebles.
- *
- * DOS USOS, DOS POLÍTICAS DE FALLO. Decide qué se hace cuando el servicio no
- * responde.
- *
- * **Contar** — «¿qué inmuebles tiene este propietario?», para las cifras del
- * dashboard. Un fallo NO puede degradarse: una lista vacía se leería como «0
- * inmuebles», una respuesta creíble y falsa. Por eso `dePropietario` PROPAGA.
- *
- * **Decorar** — «dame los datos de estos inmuebles» para pintar un listado. Aquí
- * sí se degrada: `porIds` devuelve un mapa vacío y el consumidor pinta lo que
- * pueda.
- *
- * Los dos usos son consultas. El estado de ocupación no se escribe por aquí: lo
- * mueven los eventos `ContratoFormalizado` y `ContratoFinalizado`, que consume
- * ms-inmuebles.
+ * - `dePropietario` alimenta cifras: propaga el fallo.
+ * - `porIds` decora listados: ante un fallo devuelve un mapa vacío.
  */
 
 const { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } = require('arriendos360-shared');
@@ -56,7 +43,7 @@ const pedirJson = async (url) => {
  * Los inmuebles de un propietario.
  *
  * @returns {Promise<Array<object>>}
- * @throws si el servicio no responde. Ver la nota de cabecera.
+ * @throws si el servicio no responde.
  */
 const dePropietario = async (sub, opciones = {}) => {
     const base = opciones.urlBase !== undefined ? opciones.urlBase : urlBase();
@@ -73,10 +60,7 @@ const dePropietario = async (sub, opciones = {}) => {
 };
 
 /**
- * Datos de varios inmuebles, indexados por id.
- *
- * En lote a propósito: un listado de veinte contratos pediría veinte veces lo
- * mismo si la consulta fuera de una en una.
+ * Datos de varios inmuebles, indexados por id, en una sola petición.
  *
  * @returns {Promise<Map<string, object>>} vacío si el servicio no responde.
  */
