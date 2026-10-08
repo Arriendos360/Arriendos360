@@ -9,7 +9,7 @@
 # arranca con `node`. Ver `docs/adr/0022`.
 
 # ═══════════════════════════════════════════════════════════════ dependencias
-FROM node:18-alpine AS dependencias
+FROM node:22-alpine AS dependencias
 
 WORKDIR /repo
 
@@ -63,7 +63,7 @@ RUN rm -rf node_modules apps/*/node_modules services/*/node_modules packages/*/n
     && mkdir -p apps/gateway/node_modules packages/shared/node_modules packages/contracts/node_modules
 
 # ═════════════════════════════════════════════════════════════════ produccion
-FROM node:18-alpine AS produccion
+FROM node:22-alpine AS produccion
 
 ENV NODE_ENV=production
 WORKDIR /repo

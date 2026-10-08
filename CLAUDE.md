@@ -545,8 +545,11 @@ Borrar esa cuenta al terminar.
   app, así que hay que encenderla antes de una demostración. `pg_dump` antes de cada hito.
 - **El token de GHCR vence.** Cuando pase, Container Apps no podrá descargar imágenes y las
   réplicas nuevas no arrancarán: renovarlo y actualizar el secreto `ghcr-token`.
-- **Node 18 sin soporte** en las imágenes, y **34 vulnerabilidades** que GitHub reporta en las
-  dependencias de `main`. Un PR aparte, antes de la sustentación.
+- **34 vulnerabilidades** que GitHub reporta en las dependencias de `main`. Un PR aparte,
+  antes de la sustentación.
+- **Las imágenes y la CI van en Node 22**, el mínimo que exige el SDK de Azure Blob: en
+  Node 18 subir un anexo fallaba sólo en Azure, porque en local los anexos van a disco y
+  el SDK no corre. Al subir una dependencia, mirar su `engines`.
 - **Recargar la página cierra la sesión**: el token vive en memoria, por diseño (Capa 1).
 
 **Trabajar desde la máquina de desarrollo:** los scripts de `infra/azure` corren en Git Bash y

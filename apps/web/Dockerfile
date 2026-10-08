@@ -6,7 +6,7 @@
 # manda es el de la raiz: npm en modo workspaces ignora los anidados, que este
 # mismo PR elimina.
 
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /repo
 

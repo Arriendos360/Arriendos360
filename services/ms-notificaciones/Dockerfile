@@ -8,7 +8,7 @@
 # publicos—, pero el workspace entra igual para que el lockfile resuelva el mismo grafo.
 
 # ═══════════════════════════════════════════════════════════════ dependencias
-FROM node:18-alpine AS dependencias
+FROM node:22-alpine AS dependencias
 
 WORKDIR /repo
 
@@ -59,7 +59,7 @@ RUN npm run build --workspace=services/ms-notificaciones \
 # Solo JavaScript compilado y dependencias de produccion. Las migraciones las aplica
 # un Job con `node dist/database/aplicar.js`; el barrido manual de envios es
 # `node dist/scripts/enviar.js`.
-FROM node:18-alpine AS produccion
+FROM node:22-alpine AS produccion
 
 ENV NODE_ENV=production
 WORKDIR /repo
