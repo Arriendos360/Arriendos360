@@ -25,6 +25,7 @@
  */
 
 import request from 'supertest';
+import { hoyEnZonaNegocio, sumarDias } from 'arriendos360-shared';
 
 import { Transaccion } from '../src/models/Transaccion';
 import {
@@ -421,10 +422,13 @@ describe('verificar-mora aplica la MISMA regla que el motor', () => {
     // dejaba cuentas en mora que el motor no habria marcado.
     //
     // Ahora los dos usan `DIAS_PARA_MORA`.
-    const hoy = new Date();
-    const haceTresDias = new Date(hoy.getTime() - 3 * 86400000).toISOString().slice(0, 10);
+    //
+    // «Hoy» es el de Bogotá, como en el controlador, y el contrato corta ese
+    // mismo dia: un `inicio` que no es corte da un periodo recortado, y el
+    // ultimo dia del mes uno que termina el dia en que empieza.
+    const haceTresDias = sumarDias(hoyEnZonaNegocio(), -3);
 
-    const { propietario: duenio, idContrato } = escenario();
+    const { propietario: duenio, idContrato } = escenario({ fecha_inicio_corte: haceTresDias });
     const { id } = await crearCuenta(duenio.token, idContrato, { inicio: haceTresDias });
 
     const respuesta = await request(app)
@@ -444,10 +448,9 @@ describe('verificar-mora aplica la MISMA regla que el motor', () => {
   });
 
   test('marca una cuya corte paso hace mas de 6', async () => {
-    const hoy = new Date();
-    const haceOchoDias = new Date(hoy.getTime() - 8 * 86400000).toISOString().slice(0, 10);
+    const haceOchoDias = sumarDias(hoyEnZonaNegocio(), -8);
 
-    const { propietario: duenio, idContrato } = escenario();
+    const { propietario: duenio, idContrato } = escenario({ fecha_inicio_corte: haceOchoDias });
     const { id } = await crearCuenta(duenio.token, idContrato, { inicio: haceOchoDias });
 
     const respuesta = await request(app)
@@ -470,10 +473,9 @@ describe('verificar-mora aplica la MISMA regla que el motor', () => {
   test('marca tambien una PARCIAL: un abono no la saca de la mora', async () => {
     // Mismos estados que el motor (`ESTADOS_QUE_ENTRAN_EN_MORA`). Hasta
     // feature/fix-mora-parcial este endpoint sólo miraba las PENDIENTE.
-    const hoy = new Date();
-    const haceOchoDias = new Date(hoy.getTime() - 8 * 86400000).toISOString().slice(0, 10);
+    const haceOchoDias = sumarDias(hoyEnZonaNegocio(), -8);
 
-    const { propietario: duenio, idContrato } = escenario();
+    const { propietario: duenio, idContrato } = escenario({ fecha_inicio_corte: haceOchoDias });
     const { id } = await crearCuenta(duenio.token, idContrato, {
       inicio: haceOchoDias,
       valor: 1000,
