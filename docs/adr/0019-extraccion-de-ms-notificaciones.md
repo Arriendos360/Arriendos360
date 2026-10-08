@@ -310,3 +310,27 @@ el transporte JSON de nodemailer; el mensaje se acepta, se registra como `enviad
 sale entero por el log —el único sitio donde se lee el enlace de recuperación en
 desarrollo—, pero no sale de la máquina, y el arranque lo avisa. Con credenciales de
 verdad, el transporte es SMTP.
+
+## Anotación posterior (2026-10-08): las plantillas se rediseñan con el manual de marca
+
+`plantillas/index.ts` deja la envoltura mínima y aplica el manual de identidad de marca:
+encabezado, tarjeta, bloque de valor con el estado del pago y botón, en HTML de correo
+(tablas, estilos en línea, `bgcolor`). **Los asuntos y textos cambian a propósito**, sin
+emojis, y el remitente por defecto también los pierde. No se aparta del Capítulo 2: las
+plantillas siguen siendo funciones puras y las tres invariantes de este ADR —enlace con
+caducidad absoluta, contraseña temporal fuera del correo, fecha y no «mañana»— siguen
+fijadas por las pruebas.
+
+Tres cosas que no son de diseño y salieron al hacerlo:
+
+- **El nombre, el correo y la dirección del inmueble se insertaban sin escapar.** Los
+  escribe una persona, así que un `<` en una dirección era HTML en el correo de otra.
+  Ahora pasan por `escapar()`.
+- **El asunto con la dirección se recorta a 255 caracteres.** `notificaciones.envios.asunto`
+  es `VARCHAR(255)` como la dirección misma, y con el prefijo no cabría: la inserción
+  fallaría y el evento se reintentaría hasta quedar apartado.
+- **Los botones llevan a rutas que existen en la SPA**: `/restablecer`, `/login` y
+  `/pagos`, que es la lista de cuentas de cobro para los dos roles; no hay ruta por
+  cuenta. Desde un correo no hay sesión —el token vive en memoria— y, tras el login, la
+  SPA no vuelve a la ruta pedida: el botón de un aviso de pago abre la aplicación, no la
+  pantalla de pagos. Arreglarlo es de la SPA, no de la plantilla.
