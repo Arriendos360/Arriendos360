@@ -29,11 +29,16 @@ export interface Mensaje {
   cuerpoHtml: string;
 }
 
-/** Remitente de los correos. */
-export const REMITENTE = textoDeEntorno(
-  'EMAIL_REMITENTE',
-  '"Arriendos360" <noreply@arriendos360.com>',
-);
+const remitenteConfigurado = textoDeEntorno('EMAIL_REMITENTE', 'noreply@arriendos360.com').trim();
+
+/**
+ * Remitente de los correos, siempre con el nombre de Arriendos360. En Azure
+ * `EMAIL_REMITENTE` es sólo la dirección de la cuenta de Gmail, que cambia la dirección
+ * si no es la que se autentica pero conserva el nombre. Si ya trae uno, se respeta.
+ */
+export const REMITENTE = remitenteConfigurado.includes('<')
+  ? remitenteConfigurado
+  : `"Arriendos360" <${remitenteConfigurado}>`;
 
 /** Base pública de la SPA, para los enlaces. Se lee en cada llamada. */
 const urlApp = (): string =>

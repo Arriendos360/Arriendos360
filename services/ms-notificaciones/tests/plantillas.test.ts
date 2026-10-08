@@ -290,3 +290,38 @@ describe('Diseño', () => {
     }
   });
 });
+
+describe('Remitente', () => {
+  /** `REMITENTE` se calcula al cargar el módulo: se carga de nuevo con el valor dado. */
+  const remitenteCon = (valor: string): string => {
+    const anterior = process.env['EMAIL_REMITENTE'];
+    process.env['EMAIL_REMITENTE'] = valor;
+
+    try {
+      let remitente = '';
+      jest.isolateModules(() => {
+        remitente = (require('../src/plantillas') as typeof import('../src/plantillas')).REMITENTE;
+      });
+      return remitente;
+    } finally {
+      if (anterior === undefined) {
+        delete process.env['EMAIL_REMITENTE'];
+      } else {
+        process.env['EMAIL_REMITENTE'] = anterior;
+      }
+    }
+  };
+
+  test('una dirección sola sale con el nombre de Arriendos360', () => {
+    // Es el caso de Azure: `EMAIL_REMITENTE` sale del secreto con la dirección de Gmail.
+    expect(remitenteCon('cuenta@gmail.com')).toBe('"Arriendos360" <cuenta@gmail.com>');
+  });
+
+  test('un remitente que ya trae nombre se respeta', () => {
+    expect(remitenteCon('"Otro" <otro@test.com>')).toBe('"Otro" <otro@test.com>');
+  });
+
+  test('vacía, como la deja Compose, cae al buzón por defecto con el nombre', () => {
+    expect(remitenteCon('')).toBe('"Arriendos360" <noreply@arriendos360.com>');
+  });
+});
