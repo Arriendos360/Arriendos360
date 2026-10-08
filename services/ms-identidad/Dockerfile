@@ -7,7 +7,7 @@
 # como workspaces. Las etapas y por que son estas estan en `docs/adr/0022`.
 
 # ═══════════════════════════════════════════════════════════════ dependencias
-FROM node:18-alpine AS dependencias
+FROM node:22-alpine AS dependencias
 
 WORKDIR /repo
 
@@ -67,7 +67,7 @@ RUN npm run build --workspace=services/ms-identidad \
 # aqui (`MIGRACIONES_AL_ARRANCAR=no`): las aplica un Job con
 # `node dist/database/aplicar.js`, y los datos de demostracion otro con
 # `node dist/database/seed.js`.
-FROM node:18-alpine AS produccion
+FROM node:22-alpine AS produccion
 
 ENV NODE_ENV=production
 WORKDIR /repo

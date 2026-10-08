@@ -7,7 +7,7 @@
 # `docs/adr/0022`.
 
 # ═══════════════════════════════════════════════════════════════ dependencias
-FROM node:18-alpine AS dependencias
+FROM node:22-alpine AS dependencias
 
 WORKDIR /repo
 
@@ -57,7 +57,7 @@ RUN npm run build --workspace=services/ms-contratos \
 # ═════════════════════════════════════════════════════════════════ produccion
 # Solo JavaScript compilado y dependencias de produccion. Las migraciones las aplica
 # un Job con `node dist/database/aplicar.js`.
-FROM node:18-alpine AS produccion
+FROM node:22-alpine AS produccion
 
 ENV NODE_ENV=production
 WORKDIR /repo
