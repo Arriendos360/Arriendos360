@@ -265,6 +265,15 @@ describe('Diseño', () => {
     }
   });
 
+  test('el encabezado lleva sólo el nombre, sin una inicial suelta delante', () => {
+    // El cuadro con la «A» que sustituía al icono se leía «A Arriendos360» en Outlook en
+    // modo oscuro, que recoloreaba el cuadro hasta confundirlo con el encabezado.
+    for (const [{ cuerpoHtml }] of cadaPlantilla(quien)) {
+      expect(texto(cuerpoHtml)).toContain(' Arriendos360 ');
+      expect(texto(cuerpoHtml)).not.toMatch(/(^|\s)A Arriendos360/);
+    }
+  });
+
   test('la cuenta de cobro generada no habla de un inmueble: el evento no lo trae', () => {
     expect(cuentaCobroGenerada(generada, quien).cuerpoHtml).not.toMatch(/inmueble/i);
   });

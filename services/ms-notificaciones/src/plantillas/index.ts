@@ -122,9 +122,6 @@ const COLOR = {
   texto: '#241F4D',
   secundario: '#6B6580',
   blanco: '#FFFFFF',
-  // El rgba(255,255,255,0.16) del manual sobre el índigo, ya mezclado: Outlook no
-  // entiende rgba.
-  logo: '#5C5494',
 } as const;
 
 /** Estados de pago: lo único que lleva ámbar o rojo. */
@@ -296,6 +293,9 @@ const envolver = (piezas: Piezas): string => {
               <tr><td style="padding-top:${i === 0 ? 0 : antes}px;">${html}</td></tr>`)
     .join('');
 
+  // El encabezado lleva sólo el nombre. El icono del logo no se dibuja sin imagen ni
+  // SVG, y la inicial que lo sustituía quedaba suelta cuando el cliente recoloreaba su
+  // cuadro, como Outlook en modo oscuro.
   return `
 <table ${TABLA} width="100%" bgcolor="${COLOR.lavanda}" style="background:${COLOR.lavanda};">
   <tr>
@@ -304,12 +304,7 @@ const envolver = (piezas: Piezas): string => {
       <!--[if mso]><table ${TABLA} width="600" align="center"><tr><td><![endif]-->
       <table ${TABLA} width="100%" style="width:100%;max-width:600px;">
         <tr>
-          <td bgcolor="${COLOR.indigo}" style="background:${COLOR.indigo};border-radius:14px 14px 0 0;padding:20px 32px;">
-            <table ${TABLA}><tr>
-              <td width="32" height="32" align="center" valign="middle" bgcolor="${COLOR.logo}" style="width:32px;height:32px;background:${COLOR.logo};border-radius:9px;text-align:center;${letra(16, COLOR.blanco, 'font-weight:600;', '32px')}">A</td>
-              <td valign="middle" style="padding-left:12px;${letra(16, COLOR.blanco, 'font-weight:500;', '32px')}">Arriendos360</td>
-            </tr></table>
-          </td>
+          <td bgcolor="${COLOR.indigo}" style="background:${COLOR.indigo};border-radius:14px 14px 0 0;padding:20px 32px;${letra(16, COLOR.blanco, 'font-weight:500;', '32px')}">Arriendos360</td>
         </tr>
         <tr>
           <td bgcolor="${COLOR.blanco}" style="background:${COLOR.blanco};border-radius:0 0 14px 14px;padding:32px;text-align:left;">
