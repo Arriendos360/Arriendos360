@@ -77,7 +77,7 @@ describe('Alta de inquilino', () => {
         nombres: 'Bruno',
         apellidos: 'Inquilino',
         email: 'bruno@temporal.test',
-        telefono: '3001',
+        telefono: '3001112233',
         documento: '70000002',
       });
 
@@ -247,7 +247,7 @@ describe('POST /api/auth/cambiar-contrasena', () => {
     const respuesta = await request(app)
       .post('/api/auth/cambiar-contrasena')
       .set(...conToken(sesion.body.token))
-      .send({ contrasena_actual: 'pass123', contrasena_nueva: 'OtraClave123' });
+      .send({ contrasena_actual: 'pass1234', contrasena_nueva: 'OtraClave123' });
 
     expect(respuesta.status).toBe(200);
     expect((await iniciarSesion('dueno@temporal.test', 'OtraClave123')).status).toBe(200);

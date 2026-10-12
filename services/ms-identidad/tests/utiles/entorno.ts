@@ -28,7 +28,7 @@ import { recrearEsquema } from '../../src/database/migraciones';
 import { TABLA_SALIDA, crearPublicadorDeSalida } from '../../src/eventos';
 import { LIMITES_POR_DEFECTO, usarLimites, type NombreLimite } from '../../src/services/limites';
 
-export const CONTRASENA_POR_DEFECTO = 'pass123';
+export const CONTRASENA_POR_DEFECTO = 'pass1234';
 
 export { app, sequelize };
 

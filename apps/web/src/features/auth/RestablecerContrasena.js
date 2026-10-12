@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { LONGITUD_MINIMA_CONTRASENA } from 'arriendos360-contracts';
 
 import { Button, FormError, PasswordField } from '../../ui';
 import { restablecerContrasena } from './api';
 import MarcoAuth, { EnlaceAuth, Encabezado } from './MarcoAuth';
-import { LONGITUD_MINIMA, validarContrasenaNueva } from './reglas';
+import { validarContrasenaNueva } from './reglas';
 
 /**
  * Restablecimiento desde el enlace del correo.
@@ -77,8 +78,8 @@ export default function RestablecerContrasena() {
                         autoComplete="new-password"
                         required
                         autoFocus
-                        minLength={LONGITUD_MINIMA}
-                        ayuda={`Mínimo ${LONGITUD_MINIMA} caracteres.`}
+                        minLength={LONGITUD_MINIMA_CONTRASENA}
+                        ayuda={`Mínimo ${LONGITUD_MINIMA_CONTRASENA} caracteres.`}
                         value={nueva}
                         onChange={(e) => setNueva(e.target.value)}
                     />

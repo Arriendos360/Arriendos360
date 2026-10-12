@@ -7,6 +7,12 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
+import {
+  LONGITUD_MINIMA_CONTRASENA,
+  errorDeValidacion,
+  validarRegistro,
+} from 'arriendos360-contracts';
+import type { ErrorCampo } from 'arriendos360-contracts';
 
 import { sequelize } from '../config/database';
 import { ROLES, ROL_PROPIETARIO } from '../models/constantes';
@@ -42,14 +48,6 @@ import {
   rolPrincipal,
 } from '../services/tokenService';
 
-export const CAMPOS_OBLIGATORIOS = ['nombres', 'apellidos', 'email', 'contrasena', 'documento'] as const;
-
-/** Los mismos, menos la contrasena: en el alta por terceros la genera el servicio. */
-export const CAMPOS_SIN_CONTRASENA = ['nombres', 'apellidos', 'email', 'documento'] as const;
-
-/** Minimo de la contrasena que elige la persona. */
-export const LONGITUD_MINIMA_CONTRASENA = 8;
-
 /** Unica respuesta del login fallido, exista o no la cuenta. */
 export const MENSAJE_CREDENCIALES = 'Correo o contraseña incorrectos';
 
@@ -60,12 +58,6 @@ export const MENSAJE_CREDENCIALES = 'Correo o contraseña incorrectos';
 let hashFicticio: string | null = null;
 const hashDeComparacion = (): string =>
   (hashFicticio ??= bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 10));
-
-/** Devuelve el nombre del primer campo obligatorio que falte, o null. */
-export const campoFaltante = (
-  cuerpo: Record<string, unknown> | undefined,
-  campos: readonly string[] = CAMPOS_OBLIGATORIOS,
-): string | null => campos.find((campo) => !cuerpo || !cuerpo[campo]) ?? null;
 
 /** Nombres de rol de un usuario, en mayusculas, tal como van en los claims. */
 export const rolesDe = async (idUsuario: string): Promise<string[]> => {
@@ -81,7 +73,8 @@ export interface ResultadoAlta {
   usuario?: Usuario;
   /** Sólo cuando la generó el servicio. No se guarda ni se registra en ningún sitio. */
   contrasenaTemporal?: string;
-  error?: { estado: number; mensaje: string };
+  /** Email o documento ya registrados: un 400 en su campo. */
+  error?: ErrorCampo;
 }
 
 /**
@@ -106,11 +99,11 @@ export const crearUsuarioConRol = async ({
     : (cuerpo['contrasena'] as string);
 
   if (await Usuario.findOne({ where: { email } })) {
-    return { error: { estado: 400, mensaje: 'El email ya está registrado' } };
+    return { error: { campo: 'email', mensaje: 'El email ya está registrado' } };
   }
 
   if (await Usuario.findOne({ where: { documento } })) {
-    return { error: { estado: 400, mensaje: 'El documento ya está registrado' } };
+    return { error: { campo: 'documento', mensaje: 'El documento ya está registrado' } };
   }
 
   const idUsuario = crypto.randomUUID();
@@ -159,18 +152,18 @@ export const crearUsuarioConRol = async ({
  */
 export const registrar = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const faltante = campoFaltante(req.body);
-    if (faltante) {
-      return res.status(400).json(crearError(`El campo ${faltante} es obligatorio`));
+    const { datos, errores } = validarRegistro(req.body);
+    if (errores.length) {
+      return res.status(400).json(errorDeValidacion(errores));
     }
 
     const { error, usuario } = await crearUsuarioConRol({
-      cuerpo: req.body,
+      cuerpo: { ...req.body, ...datos },
       rol: ROL_PROPIETARIO,
     });
 
     if (error) {
-      return res.status(error.estado).json(crearError(error.mensaje));
+      return res.status(400).json(errorDeValidacion([error]));
     }
 
     return res.status(201).json({

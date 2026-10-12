@@ -265,7 +265,7 @@ describe('Caminos críticos', () => {
                 email: `integracion_${SELLO}@test.com`,
                 contrasena: 'Prueba123',
                 telefono: '3000000000',
-                documento: `I${SELLO}`
+                documento: `1${SELLO}`
             }
         });
         assert.equal(registro.estado, 201, 'el registro debería crear el usuario');
@@ -298,7 +298,7 @@ describe('Caminos críticos', () => {
                 email: `inq_${SELLO}@test.com`,
                 contrasena: 'Prueba123',
                 telefono: '3001111111',
-                documento: `Q${SELLO}`
+                documento: `2${SELLO}`
             }
         });
         assert.equal(alta.estado, 201);
@@ -344,7 +344,7 @@ describe('Caminos críticos', () => {
 
         assert.ok(suyo, 'el contrato debería aparecer en el listado');
         assert.equal(suyo.Inquilino.nombres, 'Inqui');
-        assert.equal(suyo.Inquilino.documento, `Q${SELLO}`);
+        assert.equal(suyo.Inquilino.documento, `2${SELLO}`);
 
         // Y el inmueble tampoco: viene de ms-inmuebles por el mismo camino.
         assert.equal(suyo.Inmueble.direccion, 'Calle Integración 1');
@@ -718,7 +718,7 @@ describe('Caminos críticos', () => {
 
         // De ms-identidad, por HTTP.
         assert.match(texto, /Inqui Lino/, 'el arrendatario lo compone ms-identidad');
-        assert.match(texto, new RegExp(`Q${SELLO}`), 'con su documento');
+        assert.match(texto, new RegExp(`2${SELLO}`), 'con su documento');
 
         // De ms-inmuebles, a traves de ms-contratos con `incluir=inmueble`.
         assert.match(texto, /Calle Integraci/, 'el inmueble viaja dentro del contrato');
@@ -871,7 +871,7 @@ describe('Recuperación de contraseña, de punta a punta', () => {
                 email,
                 contrasena: 'Original123',
                 telefono: '3001234567',
-                documento: `REC${SELLO}`
+                documento: `3${SELLO}`
             }
         });
 

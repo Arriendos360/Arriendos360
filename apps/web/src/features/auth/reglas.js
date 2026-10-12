@@ -3,6 +3,8 @@
  * probarlas sin montar componentes.
  */
 
+import { LONGITUD_MINIMA_CONTRASENA, validarRegistro } from 'arriendos360-contracts';
+
 import { mensajeDeError } from '../../ui/FormError';
 
 /**
@@ -42,16 +44,21 @@ export const mensajeDeLogin = (error) => {
     return mensajeDeError(error);
 };
 
-/** Mínimo que exige ms-identidad al cambiar o restablecer (LONGITUD_MINIMA_CONTRASENA). */
-export const LONGITUD_MINIMA = 8;
-
 /**
  * Valida una contraseña nueva antes de mandarla. Devuelve el mensaje del
  * primer problema, o `null`. `actual` sólo se compara si viene.
  */
 export const validarContrasenaNueva = ({ nueva, confirmar, actual }) => {
-    if (nueva.length < LONGITUD_MINIMA) return `La contraseña debe tener al menos ${LONGITUD_MINIMA} caracteres.`;
+    if (nueva.length < LONGITUD_MINIMA_CONTRASENA) {
+        return `La contraseña debe tener al menos ${LONGITUD_MINIMA_CONTRASENA} caracteres.`;
+    }
     if (nueva !== confirmar) return 'Las contraseñas no coinciden.';
     if (actual !== undefined && nueva === actual) return 'La contraseña nueva debe ser distinta de la actual.';
     return null;
 };
+
+/** Errores del formulario de registro: las reglas de ms-identidad y que la confirmación coincida. */
+export const validarFormularioRegistro = (datos) => [
+    ...validarRegistro(datos).errores,
+    ...(datos.confirmar === datos.contrasena ? [] : [{ campo: 'confirmar', mensaje: 'Las contraseñas no coinciden.' }])
+];

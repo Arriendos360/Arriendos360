@@ -5,6 +5,7 @@
 
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
+import { errorDeValidacion, validarContrato } from 'arriendos360-contracts';
 
 import { reemitirContrasenaTemporal, usuarioPorId } from '../clientes/identidad';
 import { propioDe } from '../clientes/inmuebles';
@@ -62,14 +63,20 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
   try {
     const sub = req.usuario?.sub as string;
     const cuerpo = req.body as Record<string, unknown>;
-    const { id_inmueble, id_inquilino, inicio, fin, canon } = cuerpo;
+    const { id_inmueble, id_inquilino } = cuerpo;
+
+    // 0. La forma, antes de consultar a ms-inmuebles.
+    const { datos, errores } = validarContrato(cuerpo);
+    if (errores.length) {
+      return res.status(400).json(errorDeValidacion(errores));
+    }
 
     // Las columnas de auditoria no se aceptan del cliente: las pone el hook.
     const { creado_por, actualizado_por, ...contratoData } = cuerpo;
     void creado_por;
     void actualizado_por;
 
-    // 0. El inmueble tiene que ser del propietario autenticado. Si ms-inmuebles
+    // 1. El inmueble tiene que ser del propietario autenticado. Si ms-inmuebles
     //    no responde, 502.
     let inmueble = null;
     try {
@@ -80,34 +87,6 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
 
     if (!inmueble) {
       return res.status(403).json(crearError('No tienes permisos sobre este inmueble'));
-    }
-
-    // 1. Validaciones de negocio.
-    if (new Date(fin as string) <= new Date(inicio as string)) {
-      return res
-        .status(400)
-        .json(crearError('La fecha de fin debe ser posterior a la de inicio'));
-    }
-
-    if (parseFloat(canon as string) <= 0) {
-      return res.status(400).json(crearError('El canon debe ser un número positivo'));
-    }
-
-    // Día límite: se valida si viene; si no, lo deriva el hook.
-    if (
-      contratoData['fecha_limite_pago'] !== undefined &&
-      contratoData['fecha_limite_pago'] !== ''
-    ) {
-      const dia = Number(contratoData['fecha_limite_pago']);
-
-      if (!Number.isInteger(dia) || dia < 1 || dia > 31) {
-        return res
-          .status(400)
-          .json(crearError('La fecha límite de pago debe ser un día del mes (1-31)'));
-      }
-
-      // `multipart/form-data` lo entrega como cadena; la columna es entera.
-      contratoData['fecha_limite_pago'] = dia;
     }
 
     // 2. El inquilino tiene que existir y tener el rol INQUILINO.
@@ -123,7 +102,8 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
 
     // 3. El contrato y su `ContratoFormalizado`, en una sola transacción.
     t = await sequelize.transaction();
-    const nuevoContrato = await Contrato.create(contratoData, {
+    // `datos` va normalizado: deudor recortado, día límite y canon como números.
+    const nuevoContrato = await Contrato.create({ ...contratoData, ...datos }, {
       transaction: t,
       usuarioAuditor: sub,
     });

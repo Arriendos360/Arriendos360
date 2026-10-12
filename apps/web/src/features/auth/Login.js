@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, UserRound } from 'lucide-react';
+import { LONGITUD_MINIMA_CONTRASENA } from 'arriendos360-contracts';
 
 import { guardarSesion } from '../../auth/sesion';
 import { Button, FormError, Input, PasswordField } from '../../ui';
 import { FOCO, unir } from '../../ui/clases';
+import { useValidacion } from '../../ui/validacion';
 import { iniciarSesion, registrarse } from './api';
 import MarcoAuth, { EnlaceAuth, Encabezado } from './MarcoAuth';
-import { conReintentos, mensajeDeLogin, validarContrasenaNueva } from './reglas';
+import { conReintentos, mensajeDeLogin, validarFormularioRegistro } from './reglas';
 
 const MODOS = [
     { clave: 'login', etiqueta: 'Iniciar sesión' },
@@ -119,27 +121,29 @@ function FormularioRegistro({ alTerminar }) {
     const [error, setError] = useState(null);
     const [enviando, setEnviando] = useState(false);
     const [creada, setCreada] = useState(false);
+    const validacion = useValidacion(validarFormularioRegistro, Object.keys(REGISTRO_VACIO));
 
     const campo = (nombre) => ({
         value: datos[nombre],
-        onChange: (e) => setDatos((antes) => ({ ...antes, [nombre]: e.target.value }))
+        error: validacion.errores[nombre],
+        onChange: (e) => {
+            validacion.limpiar(nombre);
+            setDatos((antes) => ({ ...antes, [nombre]: e.target.value }));
+        },
+        onBlur: () => validacion.alSalir(nombre, datos)
     });
 
     const registrar = async (evento) => {
         evento.preventDefault();
-        const invalida = validarContrasenaNueva({ nueva: datos.contrasena, confirmar: datos.confirmar });
-        if (invalida) {
-            setError(invalida);
-            return;
-        }
         setError(null);
+        if (!validacion.alEnviar(datos)) return;
         setEnviando(true);
         try {
             // `confirmar` no viaja: `registrarse` recorta a los campos del contrato.
             await registrarse({ ...datos, email: datos.email.trim() });
             setCreada(true);
         } catch (err) {
-            setError(err);
+            setError(validacion.delServidor(err));
         } finally {
             setEnviando(false);
         }
@@ -158,22 +162,24 @@ function FormularioRegistro({ alTerminar }) {
         <>
             <Encabezado titulo="Crear cuenta">Regístrate como propietario para gestionar tus inmuebles.</Encabezado>
 
-            <form onSubmit={registrar} className="flex flex-col gap-4">
+            {/* `noValidate`: los errores los pinta el formulario bajo cada campo, no el navegador. */}
+            <form onSubmit={registrar} noValidate className="flex flex-col gap-4">
                 <FormError error={error} />
                 <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">
                     <Input etiqueta="Nombres" autoComplete="given-name" required {...campo('nombres')} />
                     <Input etiqueta="Apellidos" autoComplete="family-name" required {...campo('apellidos')} />
                 </div>
                 <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">
-                    <Input etiqueta="Documento" required {...campo('documento')} />
-                    <Input etiqueta="Teléfono" type="tel" autoComplete="tel" {...campo('telefono')} />
+                    <Input etiqueta="Documento" inputMode="numeric" required ayuda="Cédula, sólo números." {...campo('documento')} />
+                    <Input etiqueta="Celular" type="tel" autoComplete="tel" {...campo('telefono')} />
                 </div>
                 <Input etiqueta="Correo electrónico" type="email" autoComplete="email" required {...campo('email')} />
                 <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">
-                    <PasswordField etiqueta="Contraseña" autoComplete="new-password" required ayuda="Mínimo 8 caracteres." {...campo('contrasena')} />
+                    <PasswordField etiqueta="Contraseña" autoComplete="new-password" required
+                        ayuda={`Mínimo ${LONGITUD_MINIMA_CONTRASENA} caracteres.`} {...campo('contrasena')} />
                     <PasswordField etiqueta="Confirmar" autoComplete="new-password" required {...campo('confirmar')} />
                 </div>
-                <Button type="submit" cargando={enviando} className="w-full">Crear cuenta</Button>
+                <Button type="submit" cargando={enviando} disabled={validacion.hayErrores} className="w-full">Crear cuenta</Button>
             </form>
         </>
     );

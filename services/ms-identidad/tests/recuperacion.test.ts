@@ -306,7 +306,7 @@ describe('Al restablecer caen las sesiones abiertas', () => {
     const usuario = await registrarPropietario({
       email: 'sesiones2@test.com',
       nombres: 'Con',
-      apellidos: 'Sesiones2',
+      apellidos: 'Sesiones Dos',
       documento: '80000003',
     });
 

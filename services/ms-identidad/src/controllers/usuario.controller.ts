@@ -5,6 +5,7 @@
 import bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
+import { errorDeValidacion, validarAltaInquilino } from 'arriendos360-contracts';
 
 import { sequelize } from '../config/database';
 import { registrarContrasenaTemporalEmitida } from '../eventos';
@@ -14,7 +15,7 @@ import { Rol } from '../models/Rol';
 import { Usuario } from '../models/Usuario';
 import { generarContrasenaTemporal } from '../services/contrasenaTemporal';
 import { marcaDeCambio } from '../services/tokenService';
-import { CAMPOS_SIN_CONTRASENA, campoFaltante, crearUsuarioConRol } from './auth.controller';
+import { crearUsuarioConRol } from './auth.controller';
 
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -68,20 +69,20 @@ export const buscarPorDocumento = async (req: Request, res: Response): Promise<R
 export const crearInquilino = async (req: Request, res: Response): Promise<Response> => {
   try {
     // La contraseña la genera el servicio; si el cliente manda una, se ignora.
-    const faltante = campoFaltante(req.body, CAMPOS_SIN_CONTRASENA);
-    if (faltante) {
-      return res.status(400).json(crearError(`El campo ${faltante} es obligatorio`));
+    const { datos, errores } = validarAltaInquilino(req.body);
+    if (errores.length) {
+      return res.status(400).json(errorDeValidacion(errores));
     }
 
     const { error, usuario, contrasenaTemporal } = await crearUsuarioConRol({
-      cuerpo: req.body,
+      cuerpo: { ...req.body, ...datos },
       rol: ROL_INQUILINO,
       idAutor: req.usuario!.sub,
       generarContrasena: true,
     });
 
     if (error) {
-      return res.status(error.estado).json(crearError(error.mensaje));
+      return res.status(400).json(errorDeValidacion([error]));
     }
 
     return res.status(201).json({

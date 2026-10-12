@@ -430,7 +430,10 @@ npm run demo                                              # cartera de demostrac
 - **Rutas REST:** `/api/{recurso}` en plural.
 - **Errores:** `{ mensaje: "..." }`. 401 sin token o revocado, 403 rol insuficiente o
   recurso ajeno, 400 validación, 404 no encontrado, 409 recurso que no está en
-  condiciones.
+  condiciones. El 400 de validación de un alta es `{ mensaje, errores: [{ campo, mensaje }] }`
+  (`errorDeValidacion`), con todos los errores y `mensaje` igual al primero. Las reglas
+  viven en `packages/contracts/src/validacion/` y sólo se aplican al crear
+  (`docs/adr/0024`).
 - **Roles en mayúsculas**: `PROPIETARIO`, `INQUILINO`.
 - **Catálogos cerrados en `packages/contracts`, en minúsculas** (Inmuebles), compartidos
   con el frontend y el `CHECK` de la migración. **Nada los sincroniza**: toca los dos.

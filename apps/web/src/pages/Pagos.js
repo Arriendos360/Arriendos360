@@ -8,11 +8,13 @@ import {
     MEDIOS_PAGO_CONOCIDOS, abrirComprobante, abrirRecibo, anularTransaccion, crearCuentaCobro,
     listarCuentasCobro, registrarPago, transaccionesDeCuenta
 } from '../features/pagos/api';
+import { validarFormularioCobro, validarFormularioPago } from '../features/pagos/reglas';
 import {
     Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table,
     aDecimal, formatearDinero, formatearFecha, formatearFechaHora, formatearMes, hoyEnBogota
 } from '../ui';
 import { unir } from '../ui/clases';
+import { useValidacion } from '../ui/validacion';
 
 /**
  * Pagos: las cuentas de cobro, sus
@@ -83,35 +85,36 @@ const ID_COBRO = 'formulario-cobro';
 
 /**
  * `POST /api/pagos`. El monto se propone con el saldo (se copia, no se calcula) y
- * el tope lo hace cumplir el servicio: «Monto inválido o superior al saldo».
- * `medio_pago` es un catálogo abierto; `tipo` lo pone la capa de datos.
+ * el tope lo hace cumplir el servicio. `medio_pago` es un catálogo abierto; `tipo`
+ * lo pone la capa de datos. `onEnviar` devuelve el error de la API, o `null`.
  */
-function FormularioPago({ cuenta, error, onEnviar }) {
+function FormularioPago({ cuenta, onEnviar, onErrores }) {
     const hoy = hoyEnBogota();
     const [form, setForm] = useState({
         monto: aDecimal(cuenta.saldo_pendiente), medio_pago: MEDIOS_PAGO_CONOCIDOS[0], fecha_pago: hoy, observaciones: ''
     });
-    const [errores, setErrores] = useState({});
+    const [error, setError] = useState(null);
+    const validacion = useValidacion((datos) => validarFormularioPago(datos, hoy), ['monto', 'fecha_pago', 'medio_pago']);
+
+    useEffect(() => { onErrores(validacion.hayErrores); }, [validacion.hayErrores, onErrores]);
 
     const poner = (nombre, valor) => {
         setForm((actual) => ({ ...actual, [nombre]: valor }));
-        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+        validacion.limpiar(nombre);
     };
+    const alSalir = (nombre) => () => validacion.alSalir(nombre, form);
 
-    const enviar = (evento) => {
+    const enviar = async (evento) => {
         evento.preventDefault();
-        const encontrados = {};
-        if (form.monto === null || !(Number(form.monto) > 0)) encontrados.monto = 'Escribe un monto mayor que cero.';
-        if (!form.fecha_pago) encontrados.fecha_pago = 'Indica la fecha del pago.';
-        else if (form.fecha_pago > hoy) encontrados.fecha_pago = 'No puede ser posterior a hoy.';
-        setErrores(encontrados);
-        if (Object.keys(encontrados).length > 0) return;
+        setError(null);
+        if (!validacion.alEnviar(form)) return;
         // Hoy no viaja: el servicio registra el momento exacto.
-        onEnviar({
+        const fallo = await onEnviar({
             ...form,
             id_cuenta_cobro: cuenta.id_cuenta_cobro,
             fecha_pago: form.fecha_pago === hoy ? undefined : form.fecha_pago
         });
+        if (fallo) setError(validacion.delServidor(fallo));
     };
 
     return (
@@ -123,13 +126,15 @@ function FormularioPago({ cuenta, error, onEnviar }) {
                 <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>
             </div>
             <Fila>
-                <MoneyField etiqueta="Monto recibido" value={form.monto} error={errores.monto}
-                    ayuda="Puede ser un abono: el resto queda pendiente." onChange={(valor) => poner('monto', valor)} />
+                <MoneyField etiqueta="Monto recibido" value={form.monto} error={validacion.errores.monto}
+                    ayuda="Puede ser un abono: el resto queda pendiente." onChange={(valor) => poner('monto', valor)}
+                    onBlur={alSalir('monto')} />
                 <DateField etiqueta="Fecha del pago" name="fecha_pago" value={form.fecha_pago} max={hoy}
-                    error={errores.fecha_pago} onChange={(valor) => poner('fecha_pago', valor)} />
+                    error={validacion.errores.fecha_pago} onChange={(valor) => poner('fecha_pago', valor)}
+                    onBlur={alSalir('fecha_pago')} />
             </Fila>
             <Select etiqueta="Medio de pago" opciones={MEDIOS_PAGO_CONOCIDOS} value={form.medio_pago}
-                onChange={(evento) => poner('medio_pago', evento.target.value)} />
+                error={validacion.errores.medio_pago} onChange={(evento) => poner('medio_pago', evento.target.value)} />
             <AreaTexto etiqueta="Referencia (opcional)" name="observaciones" value={form.observaciones}
                 ayuda="Número de transferencia o consignación. Sale en el comprobante."
                 onChange={(evento) => poner('observaciones', evento.target.value)} />
@@ -140,14 +145,18 @@ function FormularioPago({ cuenta, error, onEnviar }) {
 /**
  * `POST /api/pagos/cuentas-cobro`. Sin `inicio` el servicio cobra el periodo en
  * curso; el `fin` lo calcula siempre él con el día de corte del contrato.
+ * `onEnviar` devuelve el error de la API, o `null`.
  */
-function FormularioCobro({ contratos, error, onEnviar }) {
+function FormularioCobro({ contratos, onEnviar, onErrores }) {
     const [form, setForm] = useState({ id_contrato: '', valor: null, detalle: '', inicio: '' });
-    const [errores, setErrores] = useState({});
+    const [error, setError] = useState(null);
+    const validacion = useValidacion(validarFormularioCobro, ['id_contrato', 'valor']);
+
+    useEffect(() => { onErrores(validacion.hayErrores); }, [validacion.hayErrores, onErrores]);
 
     const poner = (nombre, valor) => {
         setForm((actual) => ({ ...actual, [nombre]: valor }));
-        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+        validacion.limpiar(nombre);
     };
 
     /** El valor se propone con el canon del contrato elegido. */
@@ -155,16 +164,16 @@ function FormularioCobro({ contratos, error, onEnviar }) {
         const id = evento.target.value;
         const contrato = contratos.find((c) => c.id_contrato === id);
         setForm((actual) => ({ ...actual, id_contrato: id, valor: contrato ? aDecimal(contrato.canon) : actual.valor }));
-        setErrores({});
+        validacion.limpiar('id_contrato');
+        validacion.limpiar('valor');
     };
 
-    const enviar = (evento) => {
+    const enviar = async (evento) => {
         evento.preventDefault();
-        const encontrados = {};
-        if (!form.id_contrato) encontrados.id_contrato = 'Elige el contrato.';
-        if (form.valor === null || !(Number(form.valor) > 0)) encontrados.valor = 'Escribe un valor mayor que cero.';
-        setErrores(encontrados);
-        if (Object.keys(encontrados).length === 0) onEnviar(form);
+        setError(null);
+        if (!validacion.alEnviar(form)) return;
+        const fallo = await onEnviar(form);
+        if (fallo) setError(validacion.delServidor(fallo));
     };
 
     const opciones = contratos.map((c) => ({
@@ -176,9 +185,11 @@ function FormularioCobro({ contratos, error, onEnviar }) {
             <FormError error={error} />
             <Select etiqueta="Contrato" vacio={contratos.length ? 'Selecciona…' : 'No tienes contratos activos'}
                 opciones={opciones} disabled={!contratos.length} value={form.id_contrato}
-                error={errores.id_contrato} onChange={elegirContrato} />
+                error={validacion.errores.id_contrato} onChange={elegirContrato}
+                onBlur={() => validacion.alSalir('id_contrato', form)} />
             <Fila>
-                <MoneyField etiqueta="Valor" value={form.valor} error={errores.valor} onChange={(valor) => poner('valor', valor)} />
+                <MoneyField etiqueta="Valor" value={form.valor} error={validacion.errores.valor}
+                    onChange={(valor) => poner('valor', valor)} onBlur={() => validacion.alSalir('valor', form)} />
                 <DateField etiqueta="Inicio del periodo (opcional)" name="inicio" value={form.inicio}
                     ayuda="Vacío: el periodo en curso." onChange={(valor) => poner('inicio', valor)} />
             </Fila>
@@ -208,6 +219,8 @@ export default function Pagos() {
     const [dialogo, setDialogo] = useState(null);
     const [enviando, setEnviando] = useState(false);
     const [errorDialogo, setErrorDialogo] = useState(null);
+    // Errores a la vista en el formulario de pago o de cobro: deshabilitan su botón.
+    const [conErrores, setConErrores] = useState(false);
     // Las del detalle abierto: `null` mientras cargan.
     const [transacciones, setTransacciones] = useState(null);
     // Contratos activos propios, para el cobro manual. `null` = no se pudieron cargar.
@@ -268,15 +281,17 @@ export default function Pagos() {
         }
     };
 
-    /** Envuelve una escritura: bloquea el diálogo, recarga la lista y deja el error en el diálogo. */
+    /** Envuelve una escritura: bloquea el diálogo y recarga la lista. Devuelve el error, o `null`. */
     const escribir = async (operacion) => {
         setEnviando(true);
         setErrorDialogo(null);
         try {
             await operacion();
             await cargar();
+            return null;
         } catch (error) {
             setErrorDialogo(error);
+            return error;
         } finally {
             setEnviando(false);
         }
@@ -445,11 +460,11 @@ export default function Pagos() {
                 acciones={
                     <>
                         <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
-                        <Button type="submit" form={ID_PAGO} cargando={enviando}>Registrar pago</Button>
+                        <Button type="submit" form={ID_PAGO} cargando={enviando} disabled={conErrores}>Registrar pago</Button>
                     </>
                 }
             >
-                {dialogo?.modo === 'pagar' && <FormularioPago cuenta={cuenta} error={errorDialogo} onEnviar={pagar} />}
+                {dialogo?.modo === 'pagar' && <FormularioPago cuenta={cuenta} onEnviar={pagar} onErrores={setConErrores} />}
             </Modal>
 
             <Modal
@@ -459,14 +474,14 @@ export default function Pagos() {
                 acciones={
                     <>
                         <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
-                        <Button type="submit" form={ID_COBRO} cargando={enviando}>Registrar cobro</Button>
+                        <Button type="submit" form={ID_COBRO} cargando={enviando} disabled={conErrores}>Registrar cobro</Button>
                     </>
                 }
             >
                 {dialogo?.modo === 'cobro' && (
                     <div className="flex flex-col gap-4">
                         {contratosPropios === null && <FormError error="No se pudieron cargar tus contratos. Cierra e inténtalo de nuevo." />}
-                        <FormularioCobro contratos={contratosPropios || []} error={errorDialogo} onEnviar={cobrar} />
+                        <FormularioCobro contratos={contratosPropios || []} onEnviar={cobrar} onErrores={setConErrores} />
                     </div>
                 )}
             </Modal>
