@@ -1,4 +1,4 @@
-import { conReintentos, mensajeDeLogin, validarContrasenaNueva } from './reglas';
+import { conReintentos, mensajeDeLogin, validarContrasenaNueva, validarFormularioRegistro } from './reglas';
 
 const errorHttp = (status, data) => Object.assign(new Error(`HTTP ${status}`), { response: { status, data } });
 const sinRespuesta = () => new Error('Network Error');
@@ -60,5 +60,26 @@ describe('validarContrasenaNueva', () => {
 
     test('una válida pasa', () => {
         expect(validarContrasenaNueva({ nueva: 'nueva1234', confirmar: 'nueva1234', actual: 'vieja1234' })).toBeNull();
+    });
+});
+
+describe('validarFormularioRegistro', () => {
+    const valido = {
+        nombres: 'Ana', apellidos: 'Ruiz', documento: '1020304050', telefono: '', email: 'ana@correo.com',
+        contrasena: 'segura123', confirmar: 'segura123'
+    };
+    const campos = (datos) => validarFormularioRegistro(datos).map((error) => error.campo);
+
+    test('un formulario válido no da errores', () => {
+        expect(validarFormularioRegistro(valido)).toEqual([]);
+    });
+
+    test('INC-001: cada dato basura da error en su campo', () => {
+        expect(campos({ ...valido, nombres: 'Juan123', documento: 'jnkjbn3kj2b3jh234b2j', telefono: 'n2jk4b24jh2b34j2' }))
+            .toEqual(['nombres', 'documento', 'telefono']);
+    });
+
+    test('la confirmación distinta va en su campo', () => {
+        expect(campos({ ...valido, confirmar: 'otra1234' })).toEqual(['confirmar']);
     });
 });

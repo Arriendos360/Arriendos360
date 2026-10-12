@@ -7,11 +7,13 @@ import { crearContrato, finalizarContrato, listarContratos } from '../features/c
 import {
     AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
+import { errorDeDocumento, validarAlta, validarFormularioContrato } from '../features/contratos/reglas';
 import { listarInmuebles } from '../features/inmuebles/api';
 import { buscarPorDocumento, crearInquilino } from '../features/usuarios/api';
 import {
     Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table, formatearDinero
 } from '../ui';
+import { useValidacion } from '../ui/validacion';
 
 /**
  * Contratos: la lista, el alta y la
@@ -29,37 +31,16 @@ const FORM_VACIO = {
     fecha_inicio_corte: '', info_contrato: '', nombre_deudor_solidario: '', documento_deudor_solidario: ''
 };
 
+/** Los campos del contrato que pueden traer error; `info_contrato` es texto libre. */
+const CAMPOS_CON_ERROR = Object.keys(FORM_VACIO).filter((campo) => campo !== 'info_contrato');
+
 const ALTA_VACIA = { nombres: '', apellidos: '', email: '', telefono: '' };
+
+/** `documento` es el del contrato: su error se pinta bajo el documento del inquilino. */
+const CAMPOS_ALTA = [...Object.keys(ALTA_VACIA), 'documento'];
 
 /** Día del mes de una fecha `YYYY-MM-DD`, leído del texto: `new Date()` lo correría a la víspera. */
 const diaDe = (fecha) => (/^\d{4}-\d{2}-\d{2}$/.test(fecha) ? String(Number(fecha.slice(8, 10))) : '');
-
-/**
- * Errores por campo, o `{}`. El servicio valida fechas, canon y día límite, pero
- * responde uno a la vez; aquí se señalan todos juntos.
- */
-function validar(form, inquilino) {
-    const errores = {};
-    if (!form.id_inmueble) errores.id_inmueble = 'Elige el inmueble.';
-    if (!inquilino) errores.documento = 'Busca al inquilino por su documento.';
-    if (!form.inicio) errores.inicio = 'Indica la fecha de inicio.';
-    if (!form.fin) errores.fin = 'Indica la fecha de fin.';
-    else if (form.inicio && form.fin <= form.inicio) errores.fin = 'Debe ser posterior al inicio.';
-    if (form.canon === null || !(Number(form.canon) > 0)) errores.canon = 'Escribe un canon mayor que cero.';
-    const dia = form.fecha_limite_pago.trim();
-    if (dia && !(/^\d{1,2}$/.test(dia) && Number(dia) >= 1 && Number(dia) <= 31)) {
-        errores.fecha_limite_pago = 'Un día del mes, de 1 a 31.';
-    }
-    return errores;
-}
-
-function validarAlta(alta) {
-    const errores = {};
-    if (!alta.nombres.trim()) errores.nombres = 'Obligatorio.';
-    if (!alta.apellidos.trim()) errores.apellidos = 'Obligatorio.';
-    if (!/^\S+@\S+\.\S+$/.test(alta.email.trim())) errores.email = 'Escribe un correo válido.';
-    return errores;
-}
 
 const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
 
@@ -71,28 +52,35 @@ const Seccion = ({ titulo, children }) => (
 );
 
 /**
- * El botón de envío vive en el pie del modal: `form={idFormulario}` lo enlaza.
+ * El botón de envío vive en el pie del modal: `form={idFormulario}` lo enlaza, y
+ * `onErrores` le avisa al padre para deshabilitarlo. `onEnviar` devuelve el error
+ * de la API, o `null`, para pintarlo aquí bajo su campo.
  * El alta del inquilino no es un <form> anidado sino botones sueltos.
  */
-function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormulario }) {
+function FormularioContrato({ inmuebles, onEnviar, onContrasena, onErrores, idFormulario }) {
     const [form, setForm] = useState(FORM_VACIO);
-    const [errores, setErrores] = useState({});
+    const [error, setError] = useState(null);
     // null | { id, nombre }
     const [inquilino, setInquilino] = useState(null);
     // 'inicial' | 'buscando' | 'no-existe' | 'registrando'
     const [busqueda, setBusqueda] = useState('inicial');
     const [errorInquilino, setErrorInquilino] = useState(null);
     const [alta, setAlta] = useState(ALTA_VACIA);
-    const [erroresAlta, setErroresAlta] = useState({});
     const [contrasena, setContrasena] = useState(null);
+    const validacion = useValidacion((datos) => validarFormularioContrato(datos, inquilino), CAMPOS_CON_ERROR);
+    const validacionAlta = useValidacion((datos) => validarAlta({ ...datos, documento: form.documento }), CAMPOS_ALTA);
+
+    useEffect(() => { onErrores(validacion.hayErrores); }, [validacion.hayErrores, onErrores]);
 
     const poner = (nombre, valor) => {
         setForm((actual) => ({ ...actual, [nombre]: valor }));
-        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+        validacion.limpiar(nombre);
     };
+    const alSalir = (nombre) => () => validacion.alSalir(nombre, form);
     const campo = (nombre) => ({
-        name: nombre, value: form[nombre], error: errores[nombre],
-        onChange: (evento) => poner(nombre, evento.target.value)
+        name: nombre, value: form[nombre], error: validacion.errores[nombre],
+        onChange: (evento) => poner(nombre, evento.target.value),
+        onBlur: alSalir(nombre)
     });
 
     /** El día límite se sugiere desde el inicio hasta que el propietario escribe otro. */
@@ -103,11 +91,13 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
                 ? diaDe(valor) : actual.fecha_limite_pago;
             return { ...actual, inicio: valor, fecha_limite_pago: limite };
         });
-        setErrores((actuales) => ({ ...actuales, inicio: undefined, fecha_limite_pago: undefined }));
+        validacion.limpiar('inicio');
+        validacion.limpiar('fecha_limite_pago');
     };
 
     const cambiarDocumento = (evento) => {
         poner('documento', evento.target.value);
+        validacionAlta.limpiar('documento');
         if (!contrasena) {
             setInquilino(null);
             setBusqueda('inicial');
@@ -116,17 +106,18 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
     };
 
     const buscar = async () => {
-        const documento = form.documento.trim();
-        if (!documento) {
-            setErrores((actuales) => ({ ...actuales, documento: 'Escribe el documento.' }));
+        // Un documento que no es cédula no se consulta.
+        if (errorDeDocumento(form.documento)) {
+            validacion.revisar('documento', form);
             return;
         }
         setBusqueda('buscando');
         setErrorInquilino(null);
         try {
-            const persona = await buscarPorDocumento(documento);
+            const persona = await buscarPorDocumento(form.documento.trim());
             if (persona) {
                 setInquilino({ id: persona.id, nombre: nombreDe(persona) });
+                validacion.limpiar('documento');
                 setBusqueda('inicial');
             } else {
                 setInquilino(null);
@@ -139,39 +130,42 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
     };
 
     const registrar = async () => {
-        const encontrados = validarAlta(alta);
-        setErroresAlta(encontrados);
-        if (Object.keys(encontrados).length > 0) return;
-        setBusqueda('registrando');
         setErrorInquilino(null);
+        if (!validacionAlta.alEnviar(alta)) return;
+        setBusqueda('registrando');
         try {
             const respuesta = await crearInquilino({ ...alta, documento: form.documento });
             const nombre = nombreDe(respuesta.usuario);
             setInquilino({ id: respuesta.usuario.id, nombre });
+            validacion.limpiar('documento');
             setContrasena({ contrasena: respuesta.contrasena_temporal, persona: nombre });
             onContrasena({ contrasena: respuesta.contrasena_temporal, persona: nombre });
             setBusqueda('inicial');
         } catch (fallo) {
-            setErrorInquilino(fallo);
+            setErrorInquilino(validacionAlta.delServidor(fallo));
             setBusqueda('no-existe');
         }
     };
 
-    const enviar = (evento) => {
+    const enviar = async (evento) => {
         evento.preventDefault();
-        const encontrados = validar(form, inquilino);
-        setErrores(encontrados);
+        setError(null);
+        if (!validacion.alEnviar(form)) return;
         // `documento` no viaja: la capa de datos recorta a `CAMPOS_CONTRATO`.
-        if (Object.keys(encontrados).length === 0) onEnviar({ ...form, id_inquilino: inquilino.id });
+        const fallo = await onEnviar({ ...form, id_inquilino: inquilino.id });
+        if (fallo) setError(validacion.delServidor(fallo));
     };
 
     const campoAlta = (nombre) => ({
-        name: nombre, value: alta[nombre], error: erroresAlta[nombre],
+        name: nombre, value: alta[nombre], error: validacionAlta.errores[nombre],
         onChange: (evento) => {
             setAlta((actual) => ({ ...actual, [nombre]: evento.target.value }));
-            setErroresAlta((actuales) => ({ ...actuales, [nombre]: undefined }));
-        }
+            validacionAlta.limpiar(nombre);
+        },
+        onBlur: () => validacionAlta.alSalir(nombre, alta)
     });
+
+    const errorDocumento = validacion.errores.documento ?? validacionAlta.errores.documento;
 
     const opcionesInmueble = inmuebles.map((i) => ({
         valor: i.id_inmueble, texto: [nombreDeInmueble(i), ubicacionDe(i)].filter(Boolean).join(' · ')
@@ -194,7 +188,7 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
                             <Button variante="secundario" icono={Search} onClick={buscar} cargando={busqueda === 'buscando'}>Buscar</Button>
                         )}
                     </div>
-                    {errores.documento && <p role="alert" className="m-0 mt-1 text-xs text-rojo-texto">{errores.documento}</p>}
+                    {errorDocumento && <p role="alert" className="m-0 mt-1 text-xs text-rojo-texto">{errorDocumento}</p>}
                 </div>
                 <FormError error={errorInquilino} />
 
@@ -215,11 +209,11 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
                         </Fila>
                         <Fila>
                             <Input etiqueta="Correo" type="email" {...campoAlta('email')} />
-                            <Input etiqueta="Teléfono (opcional)" type="tel" {...campoAlta('telefono')} />
+                            <Input etiqueta="Celular (opcional)" type="tel" {...campoAlta('telefono')} />
                         </Fila>
                         <div>
                             <Button variante="secundario" icono={UserPlus} onClick={registrar}
-                                cargando={busqueda === 'registrando'}>Registrar inquilino</Button>
+                                disabled={validacionAlta.hayErrores} cargando={busqueda === 'registrando'}>Registrar inquilino</Button>
                         </div>
                     </div>
                 )}
@@ -229,25 +223,28 @@ function FormularioContrato({ inmuebles, error, onEnviar, onContrasena, idFormul
 
             <Seccion titulo="Condiciones">
                 <Fila>
-                    <DateField etiqueta="Inicio" name="inicio" value={form.inicio} error={errores.inicio} onChange={cambiarInicio} />
-                    <DateField etiqueta="Fin" name="fin" value={form.fin} error={errores.fin} onChange={(valor) => poner('fin', valor)} />
+                    <DateField etiqueta="Inicio" name="inicio" value={form.inicio} error={validacion.errores.inicio}
+                        onChange={cambiarInicio} onBlur={alSalir('inicio')} />
+                    <DateField etiqueta="Fin" name="fin" value={form.fin} error={validacion.errores.fin}
+                        onChange={(valor) => poner('fin', valor)} onBlur={alSalir('fin')} />
                 </Fila>
                 <Fila>
-                    <MoneyField etiqueta="Canon mensual" value={form.canon} error={errores.canon}
-                        onChange={(valor) => poner('canon', valor)} />
+                    <MoneyField etiqueta="Canon mensual" value={form.canon} error={validacion.errores.canon}
+                        onChange={(valor) => poner('canon', valor)} onBlur={alSalir('canon')} />
                     <Input etiqueta="Día límite de pago" inputMode="numeric" placeholder="1 a 31"
                         ayuda="Día del mes. Se sugiere el del inicio." {...campo('fecha_limite_pago')} />
                 </Fila>
                 <DateField etiqueta="Primer corte (opcional)" name="fecha_inicio_corte" value={form.fecha_inicio_corte}
                     ayuda="Si lo dejas vacío, el ciclo de cobro empieza el día de inicio."
-                    onChange={(valor) => poner('fecha_inicio_corte', valor)} />
+                    error={validacion.errores.fecha_inicio_corte}
+                    onChange={(valor) => poner('fecha_inicio_corte', valor)} onBlur={alSalir('fecha_inicio_corte')} />
                 <AreaTexto etiqueta="Condiciones particulares (opcional)" {...campo('info_contrato')} />
             </Seccion>
 
             <Seccion titulo="Deudor solidario (opcional)">
                 <Fila>
                     <Input etiqueta="Nombre" {...campo('nombre_deudor_solidario')} />
-                    <Input etiqueta="Documento" inputMode="numeric" {...campo('documento_deudor_solidario')} />
+                    <Input etiqueta="Documento" inputMode="numeric" ayuda="Cédula, sólo números." {...campo('documento_deudor_solidario')} />
                 </Fila>
             </Seccion>
         </form>
@@ -269,6 +266,8 @@ export default function Contratos() {
     const [dialogo, setDialogo] = useState(null);
     const [enviando, setEnviando] = useState(false);
     const [errorDialogo, setErrorDialogo] = useState(null);
+    // Errores a la vista en el formulario de alta: deshabilitan «Firmar contrato».
+    const [conErrores, setConErrores] = useState(false);
     // La del inquilino recién dado de alta, para mostrarla otra vez al firmar.
     const [contrasenaNueva, setContrasenaNueva] = useState(null);
 
@@ -304,17 +303,18 @@ export default function Contratos() {
     const cerrar = () => { if (!enviando) setDialogo(null); };
     const abrirAlta = () => { setContrasenaNueva(null); abrir({ modo: 'crear' }); };
 
+    /** Devuelve el error de la API, o `null`: el formulario lo pinta bajo su campo. */
     const crear = async (datos) => {
         setEnviando(true);
-        setErrorDialogo(null);
         try {
             await crearContrato(datos);
             setAviso('Contrato firmado. El inmueble pasará a «Arrendado» en unos segundos.');
             setDialogo(contrasenaNueva ? { modo: 'contrasena', ...contrasenaNueva } : null);
             setContrasenaNueva(null);
             await cargar();
+            return null;
         } catch (error) {
-            setErrorDialogo(error);
+            return error;
         } finally {
             setEnviando(false);
         }
@@ -424,7 +424,7 @@ export default function Contratos() {
                 acciones={
                     <>
                         <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
-                        <Button type="submit" form={ID_FORMULARIO} cargando={enviando}>Firmar contrato</Button>
+                        <Button type="submit" form={ID_FORMULARIO} cargando={enviando} disabled={conErrores}>Firmar contrato</Button>
                     </>
                 }
             >
@@ -434,9 +434,9 @@ export default function Contratos() {
                         <FormularioContrato
                             idFormulario={ID_FORMULARIO}
                             inmuebles={disponibles}
-                            error={errorDialogo}
                             onEnviar={crear}
                             onContrasena={setContrasenaNueva}
+                            onErrores={setConErrores}
                         />
                     </div>
                 )}

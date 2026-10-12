@@ -8,7 +8,13 @@
 
 import type { Request, Response } from 'express';
 import { crearError } from 'arriendos360-shared';
-import { LONGITUD_MAXIMA_ALIAS, TIPOS_INMUEBLE, esTipoInmueble } from 'arriendos360-contracts';
+import {
+  LONGITUD_MAXIMA_ALIAS,
+  TIPOS_INMUEBLE,
+  errorDeValidacion,
+  esTipoInmueble,
+  validarInmueble,
+} from 'arriendos360-contracts';
 
 import { Inmueble } from '../models/Inmueble';
 import { esUuid } from '../models/uuid';
@@ -87,24 +93,15 @@ export const obtenerPorId = async (req: Request, res: Response): Promise<Respons
 export const crear = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { sub } = req.usuario!;
-    const datos = soloCamposDeNegocio(req.body);
 
-    // Se valida antes del modelo para responder 400 con el catálogo.
-    if (!esTipoInmueble(datos['tipo'])) {
-      return res.status(400).json(crearError(mensajeTipoInvalido()));
-    }
-
-    if (typeof datos['direccion'] !== 'string' || datos['direccion'].trim() === '') {
-      return res.status(400).json(crearError('La dirección es obligatoria'));
-    }
-
-    const errorAlias = errorDeAlias(datos['alias']);
-    if (errorAlias) {
-      return res.status(400).json(crearError(errorAlias));
+    // Antes del modelo, para que ningún dato del cliente llegue a la base como un 500.
+    const { datos, errores } = validarInmueble(req.body);
+    if (errores.length) {
+      return res.status(400).json(errorDeValidacion(errores));
     }
 
     const inmueble = await Inmueble.create(
-      { ...datos, alias: (datos['alias'] as string).trim(), id_propietario: sub },
+      { ...soloCamposDeNegocio(req.body), ...datos, id_propietario: sub },
       { usuarioAuditor: sub } as never,
     );
 

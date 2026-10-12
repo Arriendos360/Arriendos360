@@ -126,7 +126,7 @@ describe('GET /api/usuarios?documento=', () => {
   test('exige rol PROPIETARIO', async () => {
     const sesion = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'inquilino@test.com', contrasena: 'pass123' });
+      .send({ email: 'inquilino@test.com', contrasena: 'pass1234' });
 
     const respuesta = await request(app)
       .get('/api/usuarios?documento=10000001')

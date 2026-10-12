@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LONGITUD_MINIMA_CONTRASENA } from 'arriendos360-contracts';
 
 import { guardarSesion, limpiarSesion, useSesion } from '../../auth/sesion';
 import { Button, FormError, PasswordField } from '../../ui';
 import { cambiarContrasena, cerrarSesion } from './api';
 import MarcoAuth, { Encabezado } from './MarcoAuth';
-import { LONGITUD_MINIMA, validarContrasenaNueva } from './reglas';
+import { validarContrasenaNueva } from './reglas';
 
 /**
  * Cambio de contraseña.
@@ -85,8 +86,8 @@ export default function CambiarContrasena() {
                     etiqueta="Contraseña nueva"
                     autoComplete="new-password"
                     required
-                    minLength={LONGITUD_MINIMA}
-                    ayuda={`Mínimo ${LONGITUD_MINIMA} caracteres, distinta de la ${debeCambiar ? 'temporal' : 'actual'}.`}
+                    minLength={LONGITUD_MINIMA_CONTRASENA}
+                    ayuda={`Mínimo ${LONGITUD_MINIMA_CONTRASENA} caracteres, distinta de la ${debeCambiar ? 'temporal' : 'actual'}.`}
                     value={nueva}
                     onChange={(e) => setNueva(e.target.value)}
                 />

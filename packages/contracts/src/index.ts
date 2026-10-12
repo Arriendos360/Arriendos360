@@ -63,3 +63,17 @@ export type {
   RegistrarPagoRequest,
   TipoTransaccion,
 } from './financiero';
+
+export { LONGITUD_MINIMA_CONTRASENA } from './validacion/reglas';
+
+export {
+  errorDeValidacion,
+  validarAltaInquilino,
+  validarContrato,
+  validarCuentaCobro,
+  validarInmueble,
+  validarPago,
+  validarRegistro,
+} from './validacion/cuerpos';
+
+export type { ErrorCampo, ErrorValidacion, Validacion } from './validacion/cuerpos';

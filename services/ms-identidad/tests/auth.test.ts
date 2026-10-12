@@ -33,7 +33,7 @@ beforeAll(async () => {
     email: 'logout@test.com',
     nombres: 'Cierra',
     apellidos: 'Sesion',
-    documento: '4001',
+    documento: '400001',
   });
 });
 
@@ -48,7 +48,7 @@ describe('Registro', () => {
       apellidos: 'User',
       email: 'test_unit@example.com',
       contrasena: 'password123',
-      telefono: '1234567',
+      telefono: '3001234567',
       documento: '999888',
     });
 
@@ -200,7 +200,7 @@ describe('Logout y revocación', () => {
     expect(() => jwt.verify(token, process.env['JWT_SECRET'] as string)).not.toThrow();
 
     const despues = await request(app)
-      .get('/api/usuarios?documento=4001')
+      .get('/api/usuarios?documento=400001')
       .set(...conToken(token));
     expect(despues.status).toBe(401);
   });
@@ -212,7 +212,7 @@ describe('Logout y revocación', () => {
     await request(app).post('/api/auth/logout').set(...conToken(movil.body.token));
 
     const respuesta = await request(app)
-      .get('/api/usuarios?documento=4001')
+      .get('/api/usuarios?documento=400001')
       .set(...conToken(escritorio.body.token));
 
     expect(respuesta.status).toBe(200);
@@ -227,7 +227,7 @@ describe('Logout y revocación', () => {
     await TokenRevocado.create({ jti: claims.jti, expira_en: new Date(Date.now() - 60_000) });
 
     const respuesta = await request(app)
-      .get('/api/usuarios?documento=4001')
+      .get('/api/usuarios?documento=400001')
       .set(...conToken(sesion.body.token));
 
     expect(respuesta.status).toBe(200);
@@ -241,7 +241,7 @@ describe('Logout y revocación', () => {
     );
 
     const respuesta = await request(app)
-      .get('/api/usuarios?documento=4001')
+      .get('/api/usuarios?documento=400001')
       .set(...conToken(antiguo));
 
     expect(respuesta.status).toBe(403);
@@ -273,7 +273,7 @@ describe('Roles múltiples', () => {
       email: 'ambos@test.com',
       nombres: 'Carmen',
       apellidos: 'Ambos',
-      documento: '4002',
+      documento: '400002',
     });
 
     await RolUsuario.create(
@@ -294,7 +294,7 @@ describe('Confianza cero', () => {
   test('el servicio verifica el token por su cuenta, sin fiarse del gateway', async () => {
     // Una petición que llega directamente al servicio, sin pasar por el gateway
     // y sin token, se rechaza igual.
-    const respuesta = await request(app).get('/api/usuarios?documento=4001');
+    const respuesta = await request(app).get('/api/usuarios?documento=400001');
     expect(respuesta.status).toBe(401);
   });
 
@@ -306,7 +306,7 @@ describe('Confianza cero', () => {
     );
 
     const respuesta = await request(app)
-      .get('/api/usuarios?documento=4001')
+      .get('/api/usuarios?documento=400001')
       .set(...conToken(falso));
 
     expect(respuesta.status).toBe(403);
@@ -317,7 +317,7 @@ describe('Confianza cero', () => {
       email: 'inq_alta@test.com',
       nombres: 'Inq',
       apellidos: 'Alta',
-      documento: '4003',
+      documento: '400003',
     });
 
     const sesion = await iniciarSesion('inq_alta@test.com');
@@ -326,10 +326,10 @@ describe('Confianza cero', () => {
       .set(...conToken(sesion.body.token))
       .send({
         email: 'otro@test.com',
-        contrasena: 'pass123',
+        contrasena: 'pass1234',
         nombres: 'Otro',
         apellidos: 'Usuario',
-        documento: '4004',
+        documento: '400004',
       });
 
     expect(intento.status).toBe(403);

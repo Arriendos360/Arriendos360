@@ -6,8 +6,10 @@ import { colombiaData } from '../data/colombia';
 import { listarContratos } from '../features/contratos/api';
 import { AreaTexto, nombreDeInmueble, ubicacionDe } from '../features/contratos/piezas';
 import { actualizarInmueble, crearInmueble, eliminarInmueble, listarInmuebles } from '../features/inmuebles/api';
+import { paraEnviar, validarFormularioInmueble } from '../features/inmuebles/reglas';
 import { listarCuentasCobro } from '../features/pagos/api';
 import { Badge, Button, EmptyState, FormError, Input, Modal, Select, formatearDinero } from '../ui';
+import { useValidacion } from '../ui/validacion';
 
 /**
  * Inmuebles: KPIs, lista y el alta,
@@ -35,29 +37,8 @@ const aTexto = (valor) => (valor === null || valor === undefined ? '' : String(v
 const formDeInmueble = (inmueble) =>
     Object.fromEntries(Object.keys(FORM_VACIO).map((campo) => [campo, aTexto(inmueble[campo])]));
 
-/**
- * Errores por campo, o `{}` si el formulario se puede enviar. El servicio sólo
- * valida `alias`, `direccion` y `tipo`; un entero mal escrito le llegaría como
- * 500, así que la forma se revisa aquí.
- */
-function validar(form) {
-    const errores = {};
-    if (!form.alias.trim()) errores.alias = 'El alias es obligatorio.';
-    else if (form.alias.trim().length > LONGITUD_MAXIMA_ALIAS) errores.alias = `Hasta ${LONGITUD_MAXIMA_ALIAS} caracteres.`;
-    if (!form.direccion.trim()) errores.direccion = 'La dirección es obligatoria.';
-    if (!TIPOS_INMUEBLE.includes(form.tipo)) errores.tipo = 'Elige un tipo.';
-    if (form.area_m2.trim() && !/^\d{1,8}([.,]\d{1,2})?$/.test(form.area_m2.trim())) {
-        errores.area_m2 = 'Escribe el área en m², con hasta dos decimales.';
-    }
-    for (const campo of ['habitaciones', 'banos', 'parqueaderos', 'deposito']) {
-        if (form[campo].trim() && !/^\d{1,3}$/.test(form[campo].trim())) errores[campo] = 'Un número entero.';
-    }
-    if (form.estrato.trim() && !/^[1-6]$/.test(form.estrato.trim())) errores.estrato = 'De 1 a 6.';
-    return errores;
-}
-
-/** La coma decimal se escribe en Colombia; NUMERIC la espera con punto. */
-const paraEnviar = (form) => ({ ...form, area_m2: form.area_m2.trim().replace(',', '.') });
+/** Los campos que pueden traer error; `descripcion` es texto libre. */
+const CAMPOS_CON_ERROR = Object.keys(FORM_VACIO).filter((campo) => campo !== 'descripcion');
 
 /**
  * La cuenta que resume el cobro de cada contrato: la más antigua en mora si hay
@@ -125,28 +106,39 @@ function FilaInmueble({ inmueble, contrato, cuenta, onEditar, onEliminar }) {
 /** Dos o tres campos en fila en pantallas anchas, apilados en las angostas. */
 const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
 
-/** El botón de envío vive en el pie del modal, fuera del <form>: `form={idFormulario}` lo enlaza. */
-function FormularioInmueble({ inicial, error, onEnviar, idFormulario }) {
+/**
+ * El botón de envío vive en el pie del modal, fuera del <form>: `form={idFormulario}`
+ * lo enlaza y `onErrores` le avisa al padre para deshabilitarlo. `onEnviar`
+ * devuelve el error de la API, o `null`, para pintarlo aquí bajo su campo.
+ */
+function FormularioInmueble({ inicial, onEnviar, onErrores, idFormulario }) {
     const [form, setForm] = useState(inicial);
-    const [errores, setErrores] = useState({});
+    const [error, setError] = useState(null);
+    const validacion = useValidacion(validarFormularioInmueble, CAMPOS_CON_ERROR);
+
+    useEffect(() => { onErrores(validacion.hayErrores); }, [validacion.hayErrores, onErrores]);
 
     const cambiar = (evento) => {
         const { name, value } = evento.target;
         setForm((actual) => (name === 'departamento' ? { ...actual, departamento: value, ciudad: '' } : { ...actual, [name]: value }));
-        setErrores((actuales) => ({ ...actuales, [name]: undefined }));
+        validacion.limpiar(name);
     };
 
-    const enviar = (evento) => {
+    const enviar = async (evento) => {
         evento.preventDefault();
-        const encontrados = validar(form);
-        setErrores(encontrados);
-        if (Object.keys(encontrados).length === 0) onEnviar(paraEnviar(form));
+        setError(null);
+        if (!validacion.alEnviar(form)) return;
+        const fallo = await onEnviar(paraEnviar(form));
+        if (fallo) setError(validacion.delServidor(fallo));
     };
 
     const ciudades = colombiaData[form.departamento] || [];
     // Una ciudad guardada que no está en la lista se sigue ofreciendo.
     const opcionesCiudad = form.ciudad && !ciudades.includes(form.ciudad) ? [form.ciudad, ...ciudades] : ciudades;
-    const campo = (nombre) => ({ name: nombre, value: form[nombre], onChange: cambiar, error: errores[nombre] });
+    const campo = (nombre) => ({
+        name: nombre, value: form[nombre], onChange: cambiar, error: validacion.errores[nombre],
+        onBlur: () => validacion.alSalir(nombre, form)
+    });
 
     return (
         <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-4">
@@ -195,6 +187,8 @@ export default function Inmuebles() {
     const [dialogo, setDialogo] = useState(null);
     const [enviando, setEnviando] = useState(false);
     const [errorDialogo, setErrorDialogo] = useState(null);
+    // Errores a la vista en el formulario: deshabilitan el botón de guardar.
+    const [conErrores, setConErrores] = useState(false);
 
     const cargar = useCallback(async () => {
         setErrorCarga(null);
@@ -223,9 +217,9 @@ export default function Inmuebles() {
         await cargar();
     };
 
+    /** Devuelve el error de la API, o `null`: el formulario lo pinta bajo su campo. */
     const guardar = async (datos) => {
         setEnviando(true);
-        setErrorDialogo(null);
         try {
             if (dialogo.modo === 'editar') {
                 await actualizarInmueble(dialogo.inmueble.id_inmueble, datos);
@@ -234,8 +228,9 @@ export default function Inmuebles() {
                 await crearInmueble(datos);
                 await terminar('Inmueble registrado.');
             }
+            return null;
         } catch (error) {
-            setErrorDialogo(error);
+            return error;
         } finally {
             setEnviando(false);
         }
@@ -323,7 +318,7 @@ export default function Inmuebles() {
                 acciones={
                     <>
                         <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
-                        <Button type="submit" form={ID_FORMULARIO} cargando={enviando}>
+                        <Button type="submit" form={ID_FORMULARIO} cargando={enviando} disabled={conErrores}>
                             {dialogo?.modo === 'editar' ? 'Guardar cambios' : 'Registrar'}
                         </Button>
                     </>
@@ -334,8 +329,8 @@ export default function Inmuebles() {
                         key={dialogo.inmueble?.id_inmueble || 'nuevo'}
                         idFormulario={ID_FORMULARIO}
                         inicial={dialogo.inmueble ? formDeInmueble(dialogo.inmueble) : FORM_VACIO}
-                        error={errorDialogo}
                         onEnviar={guardar}
+                        onErrores={setConErrores}
                     />
                 )}
             </Modal>

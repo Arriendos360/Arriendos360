@@ -9,7 +9,7 @@
 import type { Request, Response } from 'express';
 import { Op } from 'sequelize';
 import PDFDocument from 'pdfkit';
-import { TIPOS_TRANSACCION } from 'arriendos360-contracts';
+import { errorDeValidacion, validarCuentaCobro, validarPago } from 'arriendos360-contracts';
 import {
   crearError,
   diaDeCorte,
@@ -203,13 +203,17 @@ export const obtenerTransacciones = async (
 export const crearCuentaCobro = async (req: Request, res: Response): Promise<Response | void> => {
   try {
     const sub = subDe(req);
-    const { id_contrato, valor, detalle } = req.body as {
+    const { id_contrato, detalle } = req.body as {
       id_contrato?: string;
-      valor?: number;
       detalle?: string;
       inicio?: string;
       fin?: string;
     };
+
+    const { datos, errores } = validarCuentaCobro(req.body);
+    if (errores.length) {
+      return res.status(400).json(errorDeValidacion(errores));
+    }
 
     // Cobrar es sólo del dueño del inmueble.
     const contrato =
@@ -234,7 +238,7 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
     const { cuenta } = await emitirCuentaCobro({
       id_contrato: id_contrato as string,
       id_inquilino: contrato.id_inquilino,
-      valor: valor as number,
+      valor: datos.valor as number,
       inicio: periodo.inicio,
       fin,
       detalle: detalle ?? `Canon de arrendamiento del ${periodo.inicio} al ${fin}`,
@@ -264,21 +268,19 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
  */
 export const registrarPago = async (req: Request, res: Response): Promise<Response | void> => {
   const sub = subDe(req);
-  const { id_cuenta_cobro, monto, medio_pago, observaciones } = req.body as {
+  const { id_cuenta_cobro, observaciones } = req.body as {
     id_cuenta_cobro?: string;
-    monto?: number | string;
-    medio_pago?: string;
     observaciones?: string;
-    tipo?: string;
-    fecha_pago?: string;
   };
-  const tipo = req.body.tipo ?? TIPO_TRANSACCION_INGRESO;
 
-  if (!(TIPOS_TRANSACCION as readonly string[]).includes(tipo)) {
-    return res
-      .status(400)
-      .json(crearError(`El tipo de transacción debe ser uno de: ${TIPOS_TRANSACCION.join(', ')}`));
+  // La forma, antes de la pertenencia: `fecha_pago` no puede caer después de hoy en Bogotá.
+  const { datos, errores } = validarPago(req.body, hoyEnZonaNegocio());
+  if (errores.length) {
+    return res.status(400).json(errorDeValidacion(errores));
   }
+
+  const monto = datos.monto as number;
+  const tipo = datos.tipo ?? TIPO_TRANSACCION_INGRESO;
 
   // La pertenencia (una llamada de red) se resuelve antes de bloquear la fila.
   let misContratos: string[];
@@ -308,9 +310,11 @@ export const registrarPago = async (req: Request, res: Response): Promise<Respon
 
     const saldoActual = await saldoDe(cuenta, { transaction: t });
 
-    if (parseFloat(String(monto)) <= 0 || parseFloat(String(monto)) > saldoActual) {
+    if (monto > saldoActual) {
       await t.rollback();
-      return res.status(400).json(crearError('Monto inválido o superior al saldo'));
+      return res
+        .status(400)
+        .json(errorDeValidacion([{ campo: 'monto', mensaje: 'Monto inválido o superior al saldo' }]));
     }
 
     if (!puedeVerCuenta(cuenta, misContratos)) {
@@ -318,15 +322,15 @@ export const registrarPago = async (req: Request, res: Response): Promise<Respon
       return res.status(403).json(crearError('No autorizado'));
     }
 
-    const nuevoSaldo = Math.round((saldoActual - parseFloat(String(monto))) * 100) / 100;
-    const momento = req.body.fecha_pago ? new Date(req.body.fecha_pago) : new Date();
+    const nuevoSaldo = Math.round((saldoActual - monto) * 100) / 100;
+    const momento = datos.fecha_pago ? new Date(datos.fecha_pago) : new Date();
 
     const transaccion = await Transaccion.create(
       {
         id_cuenta_cobro: cuenta.id_cuenta_cobro,
         monto,
         tipo,
-        medio_pago,
+        medio_pago: datos.medio_pago,
         observaciones,
         fecha_pago: momento,
         estado: ESTADO_TRANSACCION_CONFIRMADA,

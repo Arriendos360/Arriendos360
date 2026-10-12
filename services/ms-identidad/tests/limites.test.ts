@@ -38,7 +38,7 @@ const avanzar = (segundos: number): void => {
   ahora += segundos * 1000;
 };
 
-const CONTRASENA = 'pass123';
+const CONTRASENA = 'pass1234';
 const VICTIMA = 'victima@test.com';
 
 /** Cabecera de origen tal como la pondría el gateway para una petición desde `ip`. */
