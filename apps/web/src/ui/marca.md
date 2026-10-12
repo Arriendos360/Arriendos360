@@ -7,7 +7,7 @@ Referencia de implementación. Los valores de esta página son los vigentes.
 ```css
 :root {
   /* Marca */
-  --indigo-profundo: #3D3480;   /* sidebar, paneles oscuros, panel del login */
+  --indigo-profundo: #3D3480;   /* sidebar, paneles oscuros */
   --indigo-medio:    #5B52A3;   /* botones primarios, links, iconos activos, cifras KPI */
   --indigo-hover:    #4A4289;   /* hover del boton primario */
   --lavanda:         #F4F3FC;   /* fondo general de la aplicacion */
