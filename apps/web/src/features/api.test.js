@@ -5,11 +5,12 @@
  */
 
 import { actualizarInmueble, crearInmueble, eliminarInmueble } from './inmuebles/api';
-import { actualizarContrato, crearContrato, fechaDeContrato, subirAnexo } from './contratos/api';
+import { actualizarContrato, crearContrato, descargarContratoGenerado, fechaDeContrato, subirAnexo } from './contratos/api';
 import { anularTransaccion, crearCuentaCobro, registrarPago } from './pagos/api';
 import { buscarPorDocumento, crearInquilino } from './usuarios/api';
 import { montoParaEnviar, soloCampos } from './comun';
 import api from '../services/api';
+import { descargarPdf } from '../services/descargas';
 
 jest.mock('../services/api', () => ({
     __esModule: true,
@@ -107,6 +108,11 @@ test('el anexo va en multipart con `file` y `tipo`', async () => {
     expect(ruta).toBe('/contratos/c1/anexos');
     expect(formulario.get('file')).toBeInstanceOf(File);
     expect(formulario.get('tipo')).toBe('OTROSI');
+});
+
+test('el contrato generado se descarga por la API autenticada', async () => {
+    await descargarContratoGenerado('c1');
+    expect(descargarPdf).toHaveBeenCalledWith('/contratos/c1/documento', 'Contrato_c1.pdf');
 });
 
 test('un pago lleva tipo INGRESO aparte del medio de pago', async () => {

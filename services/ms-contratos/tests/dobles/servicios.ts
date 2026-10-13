@@ -32,6 +32,12 @@ export interface InmuebleFalso {
   ciudad?: string;
   tipo?: string;
   estado?: string;
+  barrio?: string | null;
+  departamento?: string | null;
+  habitaciones?: number | null;
+  banos?: number | null;
+  parqueaderos?: number | null;
+  estrato?: number | null;
 }
 
 export interface UsuarioFalso {

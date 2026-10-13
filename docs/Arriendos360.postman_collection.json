@@ -534,6 +534,26 @@
           }
         },
         {
+          "name": "Generar Contrato (PDF)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/documento",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "documento"
+              ]
+            },
+            "description": "El contrato de arrendamiento en PDF, armado con los datos registrados en ese momento. Lo descargan el propietario y el inquilino. 502 si ms-identidad o ms-inmuebles no responden: no se emite a medias."
+          }
+        },
+        {
           "name": "Eliminar Anexo",
           "request": {
             "method": "DELETE",

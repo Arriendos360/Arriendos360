@@ -9,6 +9,7 @@ import { IPC_ANUAL, errorDeValidacion, validarContrato } from 'arriendos360-cont
 
 import { reemitirContrasenaTemporal, usuarioPorId } from '../clientes/identidad';
 import { propioDe } from '../clientes/inmuebles';
+import type { InmuebleAjeno } from '../clientes/inmuebles';
 import { sequelize } from '../config/database';
 import {
   registrarCanonAjustado,
@@ -19,6 +20,8 @@ import { Contrato } from '../models/Contrato';
 import { ESTADO_CONTRATO_ACTIVO, ESTADO_CONTRATO_FINALIZADO } from '../models/constantes';
 import { esUuid } from '../models/uuid';
 import { adjuntarPartes, adjuntarPartesA, conAjusteCanon } from '../services/composicion';
+import { documentoContrato } from '../services/documentoContrato';
+import type { DatosContrato, Persona } from '../services/documentoContrato';
 import {
   contratoDondeEsParte,
   contratoPropio,
@@ -59,6 +62,44 @@ export const obtenerPorId = async (req: Request, res: Response): Promise<Respons
     return res.json(conAjusteCanon(await adjuntarPartesA(contrato), sub));
   } catch (error) {
     return responderServicioCaido(res, error, 'obtener contrato');
+  }
+};
+
+/**
+ * GET /api/contratos/:id/documento — el contrato en PDF, para las dos partes. Si falta una
+ * parte, 502: un contrato a medias no sirve para firmar.
+ */
+export const documento = async (req: Request, res: Response): Promise<Response | void> => {
+  let datos: DatosContrato;
+  try {
+    const contrato = await contratoDondeEsParte(req.params['id'] as string, req.usuario?.sub as string);
+
+    if (!contrato) {
+      return res.status(404).json(crearError('Contrato no encontrado'));
+    }
+
+    const { Inmueble, Inquilino } = await adjuntarPartesA(contrato);
+    const inmueble = Inmueble as InmuebleAjeno | null;
+    const arrendador = inmueble ? await usuarioPorId(inmueble.id_propietario) : null;
+
+    if (!inmueble || !Inquilino || !arrendador) {
+      return res.status(502).json(crearError('No se pudieron obtener los datos de las partes del contrato'));
+    }
+
+    datos = { contrato, inmueble, arrendador, arrendatario: Inquilino as Persona };
+  } catch (error) {
+    return responderServicioCaido(res, error, 'generar el documento del contrato');
+  }
+
+  try {
+    const pdf = documentoContrato(datos);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="contrato-${datos.contrato.id_contrato.slice(0, 8)}.pdf"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    pdf.pipe(res);
+  } catch (error) {
+    console.error('Error al generar el documento del contrato:', (error as Error).message);
+    return res.status(500).json(crearError('Error al generar el documento del contrato'));
   }
 };
 

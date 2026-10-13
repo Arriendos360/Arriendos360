@@ -34,7 +34,7 @@ Azure**, con su despliegue automatizado. Ver «Despliegue en Azure» y `docs/des
 |---|---|---|---|---|
 | `ms-identidad` | Soporte | 3011 | `identidad`: Usuarios, Roles, RolesUsuario, TokensRevocados | `/api/auth`, `/api/usuarios`. Productor. |
 | `ms-inmuebles` | Soporte | 3012 | `inmuebles`: Inmuebles | `/api/inmuebles`. Consume los eventos de contrato → estado. |
-| `ms-contratos` | Core | 3013 | `contratos`: Contratos, Anexos | `/api/contratos` (anexos, reemisión de contraseña temporal). Productor. |
+| `ms-contratos` | Core | 3013 | `contratos`: Contratos, Anexos | `/api/contratos` (anexos, contrato generado en PDF, reemisión de contraseña temporal). Productor. |
 | `ms-financiero` | Core | 3014 | `financiero`: Cuentas_cobro, Transacciones | `/api/pagos` (comprobantes, anulación) y el motor. Consume y produce. |
 | `ms-notificaciones` | Genérico | 3015 | `notificaciones`: ninguna (sólo `envios`, outbox de correos) | Sin API pública: sólo `POST /interno/eventos`. **Único que habla SMTP.** |
 | `gateway` | — | 3001 | **ninguna** | Todo `/api/*`; atiende él mismo `/api/dashboard`. |

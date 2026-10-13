@@ -5,7 +5,7 @@ import { TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-cont
 
 import { useSesion } from '../auth/sesion';
 import {
-    actualizarContrato, descargarAnexo, eliminarAnexo, fechaDeContrato, finalizarContrato, listarAnexos,
+    actualizarContrato, descargarAnexo, descargarContratoGenerado, eliminarAnexo, fechaDeContrato, finalizarContrato, listarAnexos,
     obtenerContrato, reemitirContrasenaInquilino, subirAnexo
 } from '../features/contratos/api';
 import { resumenDeAjuste } from '../features/contratos/ajuste';
@@ -22,8 +22,8 @@ import { erroresDelServidor } from '../ui/validacion';
  * Detalle de un contrato: sus datos, sus anexos y, para el propietario, editar,
  * finalizar, reemitir la contraseña del inquilino y adjuntar o borrar anexos.
  *
- * Los anexos se descargan como blob por la API autenticada (`descargarAnexo`):
- * nunca `window.open` ni una URL con el token.
+ * Los anexos y el contrato generado se descargan como blob por la API
+ * autenticada: nunca `window.open` ni una URL con el token.
  *
  * Las acciones de propietario dependen de este contrato, no sólo del rol
  * (`actuaComoPropietario`). El backend lo vuelve a decidir.
@@ -268,11 +268,12 @@ export default function ContratoDetalle() {
         await cargarAnexos();
     });
 
-    const descargar = async (anexo) => {
-        setDescargando(anexo.id_anexo);
+    /** `clave` marca qué botón muestra la espera: el id del anexo o `'contrato'`. */
+    const descargar = async (clave, descarga) => {
+        setDescargando(clave);
         setErrorDescarga(null);
         try {
-            await descargarAnexo(id, anexo);
+            await descarga();
         } catch (error) {
             // Con `responseType: 'blob'` el `{ mensaje }` llega como Blob: se lee para mostrarlo.
             const cuerpo = error.response?.data;
@@ -390,13 +391,19 @@ export default function ContratoDetalle() {
                 </Card>
             </div>
 
-            <Card titulo="Anexos">
+            <Card titulo="Anexos"
+                acciones={
+                    <Button variante="secundario" tamano="pequeno" icono={Download} cargando={descargando === 'contrato'}
+                        onClick={() => descargar('contrato', () => descargarContratoGenerado(id))}>
+                        Generar contrato
+                    </Button>
+                }>
                 <div className="flex flex-col gap-3">
                     <FormError error={errorAnexos} />
                     <FormError error={errorDescarga} />
                     {!errorAnexos && anexos.length === 0 && (
                         <EmptyState icono={FileText} titulo="Sin anexos"
-                            descripcion={propio ? 'Adjunta el contrato firmado o un otrosí en PDF.' : 'El propietario aún no ha adjuntado documentos.'} />
+                            descripcion={propio ? 'Genera el contrato, fírmalo y adjúntalo aquí en PDF.' : 'El propietario aún no ha adjuntado documentos.'} />
                     )}
                     {anexos.length > 0 && (
                         <ul className="flex flex-col list-none m-0 p-0">
@@ -411,7 +418,8 @@ export default function ContratoDetalle() {
                                         <p className="m-0 mt-0.5 text-xs text-texto-suave">Adjuntado el {formatearFechaHora(anexo.fecha_creacion)}</p>
                                     </div>
                                     <Button variante="secundario" tamano="pequeno" icono={Download}
-                                        cargando={descargando === anexo.id_anexo} onClick={() => descargar(anexo)}>Descargar</Button>
+                                        cargando={descargando === anexo.id_anexo}
+                                        onClick={() => descargar(anexo.id_anexo, () => descargarAnexo(id, anexo))}>Descargar</Button>
                                     {propio && (
                                         <Button variante="fantasma" tamano="pequeno" icono={Trash2}
                                             onClick={() => abrir({ modo: 'eliminar-anexo', anexo })}
