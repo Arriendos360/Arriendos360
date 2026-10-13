@@ -176,10 +176,11 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
     const inmueble = await propioDe(contrato.id_inmueble, sub);
     const canonAnterior = Number(contrato.canon);
 
-    // Con la ventana abierta, cambiar el canon es el ajuste anual: se guarda su fecha y se avisa al inquilino.
+    // Con la ventana abierta, cambiar el canon es el ajuste anual: se guarda desde cuándo rige y se avisa al
+    // inquilino. El siguiente cuenta desde `rige_desde` porque la ley pide 12 meses bajo un mismo precio.
     await sequelize.transaction(async (transaccion) => {
       await contrato.update(
-        { ...cambios, fecha_ultimo_ajuste: ajuste.fecha_ajuste },
+        { ...cambios, fecha_ultimo_ajuste: ajuste.rige_desde },
         { transaction: transaccion, usuarioAuditor: sub },
       );
       await registrarCanonAjustado(

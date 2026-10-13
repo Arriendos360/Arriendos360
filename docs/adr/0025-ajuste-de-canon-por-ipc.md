@@ -33,8 +33,10 @@ de su corte y con el canon de ese momento.
    - `IPC_ANUAL` en `packages/contracts`, con el dato del DANE.
    - Cada enero se agrega el año anterior con un PR.
    - Sin el dato no hay sugerido, ni ventana, ni alerta.
-5. **`fecha_ultimo_ajuste`** (`DATE NULL`) en `Contratos`. Sin ella, después de aplicar un ajuste
-   el cálculo volvería a sugerir otro sobre el canon nuevo.
+5. **`fecha_ultimo_ajuste`** (`DATE NULL`) en `Contratos`:
+   - Guarda desde cuándo rige el último ajuste, no su fecha de ajuste: la ley pide 12 meses bajo un
+     mismo precio, y un ajuste tardío seguido de uno a tiempo los acortaría.
+   - Sin ella, después de aplicar un ajuste el cálculo volvería a sugerir otro sobre el canon nuevo.
 6. **El ajuste entra por `PUT /api/contratos/:id`:**
    - Un cambio de canon con la ventana abierta *es* el ajuste: se valida contra el tope (`400`
      en `canon`), se guarda la fecha y se anota `CanonAjustado` en la misma transacción.
@@ -54,7 +56,9 @@ de su corte y con el canon de ese momento.
 - **No ajustar:** un propietario que decide no subir el canon sigue viendo la ventana abierta. El
   correo sale una sola vez.
 - **Ajuste tardío:** aplicado con la cuenta de la fecha de ajuste ya generada, rige desde el corte
-  siguiente, y así lo dicen la respuesta y el aviso al inquilino.
+  siguiente, y así lo dicen la respuesta y el aviso al inquilino. El siguiente ajuste se corre a 12
+  meses de esa fecha. Un contrato con corte a principios de enero, antes de que el DANE publique el
+  IPC, se ajusta tarde el primer año y desde el segundo cae en febrero.
 - **Contratos existentes:** los que ya cumplieron un año abren la ventana con el primer barrido
   después del despliegue.
 - **Configuración:** ms-contratos exige `MS_NOTIFICACIONES_URL`.

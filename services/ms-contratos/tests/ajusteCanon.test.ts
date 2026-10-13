@@ -100,14 +100,18 @@ describe('ajuste_canon en la consulta', () => {
 });
 
 describe('aplicar el ajuste editando el canon', () => {
-  test('dentro del tope: guarda la fecha, avisa al inquilino y el siguiente ajuste es 12 meses después', async () => {
+  test('dentro del tope: guarda desde cuándo rige, avisa al inquilino y el siguiente ajuste es 12 meses después de eso', async () => {
     const id = await nuevo();
 
     const respuesta = await editar(id, { canon: 1578000 });
 
     expect(respuesta.status).toBe(200);
-    expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBe('2025-03-10');
-    expect((await consultar(duenio.token, id)).body.ajuste_canon.fecha_ajuste).toBe('2026-03-10');
+    // Aplicado tarde (el ajuste era el 2025-03-10): rige desde el próximo corte sin facturar.
+    const rige = String(respuesta.body.rige_desde);
+    expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBe(rige);
+    expect((await consultar(duenio.token, id)).body.ajuste_canon.fecha_ajuste).toBe(
+      `${Number(rige.slice(0, 4)) + 1}${rige.slice(4)}`,
+    );
 
     const avisos = await avisosDe(id);
     expect(avisos).toHaveLength(1);
@@ -137,8 +141,10 @@ describe('aplicar el ajuste editando el canon', () => {
   test('por debajo del sugerido también es el ajuste', async () => {
     const id = await nuevo();
 
-    expect((await editar(id, { canon: 1550000 })).status).toBe(200);
-    expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBe('2025-03-10');
+    const respuesta = await editar(id, { canon: 1550000 });
+
+    expect(respuesta.status).toBe(200);
+    expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBe(respuesta.body.rige_desde);
     expect(await avisosDe(id)).toHaveLength(1);
   });
 
