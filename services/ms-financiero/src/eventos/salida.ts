@@ -1,6 +1,6 @@
 /**
- * MS-Financiero como productor: `CuentaCobroGenerada`, `CuentaCobroPorVencer` y
- * `CuentaCobroEnMora`, anotados en su tabla de salida.
+ * MS-Financiero como productor: `CuentaCobroGenerada`, `CuentaCobroPorVencer`,
+ * `CuentaCobroEnMora` y `AjusteCanonProximo`, anotados en su tabla de salida.
  */
 
 import {
@@ -13,9 +13,11 @@ import {
   idDeEventoDeterminista,
   leerEntorno,
   textoDeEntorno,
+  TIPO_AJUSTE_CANON_PROXIMO,
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
+  type AjusteCanonProximo,
   type AlmacenSalida,
   type CuentaCobroEnMora,
   type CuentaCobroGenerada,
@@ -42,6 +44,9 @@ const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>>
     { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
   ],
   [TIPO_CUENTA_COBRO_EN_MORA]: [
+    { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
+  ],
+  [TIPO_AJUSTE_CANON_PROXIMO]: [
     { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
   ],
 };
@@ -112,3 +117,22 @@ export const registrarCuentaCobroEnMora = (
     transaccion: transaccion as never,
     ...claveDe(carga.id_cuenta_cobro),
   });
+
+/**
+ * Anota `AjusteCanonProximo` con un `id_evento` derivado del contrato y la fecha de ajuste:
+ * sale una vez por ajuste aunque el motor lo encuentre varios días.
+ */
+export const registrarAjusteCanonProximo = (
+  carga: AjusteCanonProximo,
+  transaccion: unknown,
+): Promise<void> =>
+  almacen.registrar(
+    crearSobre(TIPO_AJUSTE_CANON_PROXIMO, carga, {
+      id_evento: idDeEventoDeterminista(TIPO_AJUSTE_CANON_PROXIMO, carga.id_contrato, carga.fecha_ajuste),
+    }),
+    {
+      transaccion: transaccion as never,
+      ignorarSiExiste: true,
+      claveOrden: carga.id_contrato,
+    },
+  );

@@ -15,6 +15,8 @@
 import cron from 'node-cron';
 import { Op, UniqueConstraintError } from 'sequelize';
 import {
+  DIAS_ANTICIPACION_FACTURA,
+  ajusteDeCanon,
   diaDeCorte,
   diasEntre,
   hoyEnZonaNegocio,
@@ -29,6 +31,7 @@ import {
   ZONA_NEGOCIO,
 } from 'arriendos360-shared';
 import type { Entorno, Periodo } from 'arriendos360-shared';
+import { IPC_ANUAL } from 'arriendos360-contracts';
 
 import { sequelize } from '../config/database';
 import { contratosConEstado, porIds as contratosPorIds } from '../clientes/contratos';
@@ -40,6 +43,7 @@ import {
   ESTADO_CUENTA_PENDIENTE,
 } from '../models/constantes';
 import {
+  registrarAjusteCanonProximo,
   registrarCuentaCobroEnMora,
   registrarCuentaCobroPorVencer,
 } from '../eventos/salida';
@@ -95,7 +99,7 @@ export interface ResultadoGeneracion {
 }
 
 /**
- * Genera las cuentas de cobro de los contratos activos, desde 2 días antes del
+ * Genera las cuentas de cobro de los contratos activos, desde `DIAS_ANTICIPACION_FACTURA` días antes del
  * corte. Si ms-contratos no responde, no genera nada.
  */
 export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
@@ -125,8 +129,8 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
 
       const periodo = periodoAFacturar(diaCorte, hoy);
 
-      // Sólo dentro de los 2 días previos al corte, o con el corte ya llegado.
-      if (diasEntre(hoy, periodo.inicio) > 2) {
+      // Sólo dentro de los días previos al corte, o con el corte ya llegado.
+      if (diasEntre(hoy, periodo.inicio) > DIAS_ANTICIPACION_FACTURA) {
         continue;
       }
 
@@ -315,6 +319,62 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
   return resultado;
 };
 
+/** Lo que deja un barrido de ajustes de canon. */
+export interface ResultadoAjustes {
+  /** Fallos. Vacio = todo bien; si no, `scripts/motor.ts` sale con 1. */
+  fallos: string[];
+}
+
+/**
+ * Ajustes de canon: anota `AjusteCanonProximo` para cada contrato activo con la ventana de
+ * ajuste abierta. Su `id_evento` determinista evita repetirlo, así que sirve correr cualquier día.
+ */
+export const procesarAjustes = async (): Promise<ResultadoAjustes> => {
+  const resultado: ResultadoAjustes = { fallos: [] };
+  const hoy = hoyEnZonaNegocio();
+
+  let contratos: Awaited<ReturnType<typeof contratosConEstado>>;
+  try {
+    contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
+  } catch (error) {
+    console.error('❌ Error en procesarAjustes: no se pudieron pedir los contratos:', error);
+    resultado.fallos.push(`ajustes: ${(error as Error).message}`);
+    return resultado;
+  }
+
+  for (const contrato of contratos) {
+    try {
+      const ajuste = ajusteDeCanon(contrato, hoy, IPC_ANUAL);
+      const inmueble = contrato.Inmueble ?? null;
+
+      if (!ajuste?.en_ventana || !inmueble?.id_propietario) {
+        continue;
+      }
+
+      await sequelize.transaction((transaccion) =>
+        registrarAjusteCanonProximo(
+          {
+            id_contrato: contrato.id_contrato,
+            id_propietario: inmueble.id_propietario,
+            direccion_inmueble: inmueble.direccion ?? 'Inmueble sin dirección registrada',
+            canon_actual: Number(contrato.canon),
+            canon_sugerido: ajuste.canon_sugerido as number,
+            ipc: ajuste.ipc as number,
+            anio_ipc: ajuste.anio_ipc,
+            fecha_ajuste: ajuste.fecha_ajuste,
+          },
+          transaccion,
+        ),
+      );
+    } catch (error) {
+      console.error(`❌ Error al revisar el ajuste del contrato ${contrato.id_contrato}:`, error);
+      resultado.fallos.push(`ajuste ${contrato.id_contrato}: ${(error as Error).message}`);
+    }
+  }
+
+  return resultado;
+};
+
 /** Lo que deja una ejecucion completa del motor. */
 export interface ResultadoMotor {
   generadas: number;
@@ -323,15 +383,16 @@ export interface ResultadoMotor {
   fallos: string[];
 }
 
-/** Una ejecución completa: generación y vencimientos. */
+/** Una ejecución completa: generación, vencimientos y ajustes de canon. */
 export const ejecutarMotor = async (): Promise<ResultadoMotor> => {
   const generacion = await procesarContratos();
   const vencimientos = await procesarPagos();
+  const ajustes = await procesarAjustes();
 
   return {
     generadas: generacion.generadas,
     moras: vencimientos.moras,
-    fallos: [...generacion.fallos, ...vencimientos.fallos],
+    fallos: [...generacion.fallos, ...vencimientos.fallos, ...ajustes.fallos],
   };
 };
 

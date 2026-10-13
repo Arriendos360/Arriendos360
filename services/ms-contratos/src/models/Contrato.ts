@@ -21,6 +21,8 @@ export class Contrato extends Model {
   declare estado: string;
   declare nombre_deudor_solidario: string | null;
   declare documento_deudor_solidario: string | null;
+  /** `YYYY-MM-DD`. Desde aquí corren los 12 meses del siguiente ajuste por IPC. */
+  declare fecha_ultimo_ajuste: string | null;
   declare id_inmueble: string;
   declare id_inquilino: string;
   declare creado_por: string;
@@ -65,6 +67,8 @@ Contrato.init(
     /** Deudor solidario, opcional. */
     nombre_deudor_solidario: { type: DataTypes.STRING(150), allowNull: true },
     documento_deudor_solidario: { type: DataTypes.STRING(20), allowNull: true },
+
+    fecha_ultimo_ajuste: { type: DataTypes.DATEONLY, allowNull: true },
 
     id_inmueble: { type: DataTypes.UUID, allowNull: false },
     id_inquilino: { type: DataTypes.UUID, allowNull: false },

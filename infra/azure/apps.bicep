@@ -295,6 +295,10 @@ module contratos 'modulos/app.bicep' = {
         name: 'MS_FINANCIERO_URL'
         value: url.financiero
       }
+      {
+        name: 'MS_NOTIFICACIONES_URL'
+        value: url.notificaciones
+      }
       // Con cadena de conexión los anexos van a Blob en vez de al disco del contenedor,
       // que en Container Apps se pierde con cada réplica.
       {
