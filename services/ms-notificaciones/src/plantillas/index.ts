@@ -422,24 +422,38 @@ export const contrasenaTemporalEmitida = (
 
 // ── ms-financiero ────────────────────────────────────────────────────────────
 
-/** Cuenta de cobro generada, al inquilino. El evento no trae el inmueble. */
+/**
+ * Cuenta de cobro generada, al inquilino. El evento no trae el inmueble. Un cobro sin periodo
+ * (la indemnización de un contrato terminado) no lleva la fila «Periodo».
+ */
 export const cuentaCobroGenerada = (
   carga: CuentaCobroGenerada,
   destinatario: Destinatario,
-): Mensaje => ({
-  asunto: 'Nueva cuenta de cobro de tu arriendo',
-  cuerpoHtml: envolver({
-    preheader: `Periodo ${periodo(carga.inicio, carga.fin)} · ${pesos(carga.valor)}`,
-    titulo: 'Tu nueva cuenta de cobro',
-    destinatario,
-    parrafos: ['Se generó la cuenta de cobro de tu arriendo para el siguiente periodo.'],
-    bloque: bloqueDeValor('Valor a pagar', carga.valor, ESTADO.pendiente, [
-      { etiqueta: 'Periodo', valor: periodo(carga.inicio, carga.fin) },
-    ]),
-    boton: { texto: 'Ver cuenta de cobro', url: enlace(RUTA.pagos) },
-    textoFinal: 'Puedes consultarla y descargarla en cualquier momento desde Arriendos360.',
-  }),
-});
+): Mensaje => {
+  const rango = carga.inicio && carga.fin ? periodo(carga.inicio, carga.fin) : null;
+
+  return {
+    asunto: 'Nueva cuenta de cobro de tu arriendo',
+    cuerpoHtml: envolver({
+      preheader: rango ? `Periodo ${rango} · ${pesos(carga.valor)}` : pesos(carga.valor),
+      titulo: 'Tu nueva cuenta de cobro',
+      destinatario,
+      parrafos: [
+        rango
+          ? 'Se generó la cuenta de cobro de tu arriendo para el siguiente periodo.'
+          : 'Se generó una cuenta de cobro de tu arriendo que no corresponde a ningún periodo.',
+      ],
+      bloque: bloqueDeValor(
+        'Valor a pagar',
+        carga.valor,
+        ESTADO.pendiente,
+        rango ? [{ etiqueta: 'Periodo', valor: rango }] : [],
+      ),
+      boton: { texto: 'Ver cuenta de cobro', url: enlace(RUTA.pagos) },
+      textoFinal: 'Puedes consultarla y descargarla en cualquier momento desde Arriendos360.',
+    }),
+  };
+};
 
 /** Lo que comparten los dos avisos de vencimiento próximo. */
 const porVencer = (carga: CuentaCobroPorVencer, etiqueta: string) => {

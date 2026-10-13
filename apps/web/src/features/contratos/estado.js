@@ -43,17 +43,6 @@ export const resumenDeMora = (cuentas) => {
     };
 };
 
-/**
- * El primer día desde `hoy` en que el contrato no tiene una cuenta que empiece: el alta manual
- * exige un `inicio` único por contrato, y un día de corte ya lo ocupa la cuenta del periodo.
- */
-export const primerInicioLibre = (cuentas, hoy) => {
-    const usados = new Set(cuentas.map((cuenta) => cuenta.inicio));
-    let dia = hoy;
-    while (usados.has(dia)) dia = new Date(Date.parse(`${dia}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
-    return dia;
-};
-
 /** La advertencia del diálogo. Si la consulta falló, lo dice: nunca «sin mora» por omisión. */
 export const textoDeMora = ({ cargando, error, cuentas }) => {
     if (cargando) return 'Comprobando si hay cuentas en mora…';

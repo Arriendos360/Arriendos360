@@ -212,9 +212,11 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
   let cuentasPendientes: CuentaCobro[];
   let contratos: Awaited<ReturnType<typeof contratosPorIds>>;
   try {
+    // Una cuenta sin periodo no tiene corte desde el que contar la mora.
     cuentasPendientes = await CuentaCobro.findAll({
       where: {
         estado: { [Op.in]: [...ESTADOS_QUE_ENTRAN_EN_MORA, ESTADO_CUENTA_EN_MORA] },
+        inicio: { [Op.ne]: null },
       },
     });
 
@@ -238,8 +240,10 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
 
       const idInquilino = contrato.id_inquilino;
       const inmueble = contrato.Inmueble ?? null;
+      const inicio = cuenta.inicio as string;
+      const fin = cuenta.fin as string;
 
-      const diasDesdeCorte = diasEntre(cuenta.inicio, hoy);
+      const diasDesdeCorte = diasEntre(inicio, hoy);
 
       // Sin inquilino o sin propietario no se anota el aviso; la mora sí se evalúa.
       const puedeAvisar = Boolean(idInquilino && inmueble?.id_propietario);
@@ -258,8 +262,8 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
         // Foto del dueño en el momento del aviso.
         id_propietario: inmueble?.id_propietario as string,
         valor: Number(cuenta.valor),
-        inicio: cuenta.inicio,
-        fin: cuenta.fin,
+        inicio,
+        fin,
         direccion_inmueble: inmueble?.direccion ?? 'Inmueble sin dirección registrada',
       };
 
@@ -268,7 +272,7 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
         if (puedeAvisar) {
           await sequelize.transaction((transaccion) =>
             registrarCuentaCobroPorVencer(
-              { ...partes, entra_en_mora_el: diaDeMora(cuenta.inicio) },
+              { ...partes, entra_en_mora_el: diaDeMora(inicio) },
               transaccion,
             ),
           );

@@ -7,7 +7,7 @@
  */
 
 import type { Request, Response } from 'express';
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import PDFDocument from 'pdfkit';
 import { errorDeValidacion, validarCuentaCobro, validarPago } from 'arriendos360-contracts';
 import {
@@ -29,6 +29,7 @@ import {
 import { CuentaCobro } from '../models/CuentaCobro';
 import { Transaccion } from '../models/Transaccion';
 import {
+  ESTADO_CONTRATO_ACTIVO,
   ESTADO_CUENTA_EN_MORA,
   ESTADO_CUENTA_PAGADA,
   ESTADO_CUENTA_PARCIAL,
@@ -40,7 +41,12 @@ import {
 import { esUuid } from '../models/uuid';
 import { emitirCuentaCobro } from '../services/cuentas';
 import { adjuntarContratoACuentas, adjuntarContratoATransacciones, adjuntarInquilino } from '../services/composicion';
-import { DIAS_PARA_MORA, ESTADOS_QUE_ENTRAN_EN_MORA, periodoAFacturar } from '../services/motor';
+import {
+  DIAS_PARA_MORA,
+  ESTADOS_QUE_ENTRAN_EN_MORA,
+  detalleDelPeriodo,
+  periodoAFacturar,
+} from '../services/motor';
 import { generarPDFComprobante } from '../services/pdfService';
 import {
   conSaldo,
@@ -196,9 +202,10 @@ export const obtenerTransacciones = async (
 // ── Escrituras ──────────────────────────────────────────────────────────────
 
 /**
- * Alta manual de una cuenta de cobro — `POST /api/pagos/cuentas-cobro`. Sin
- * periodo, se deriva del contrato con la misma función que el motor. Anota
- * `CuentaCobroGenerada`, como los demás caminos.
+ * Alta manual de una cuenta de cobro — `POST /api/pagos/cuentas-cobro`. En un
+ * contrato activo cobra el periodo de corte del mes de `inicio` (sin él, el que le
+ * toca hoy, como el motor), y 409 si ya tiene cuenta. En uno terminado, la cuenta
+ * no tiene periodo, y pedirle uno con `inicio` es 409. Anota `CuentaCobroGenerada`.
  */
 export const crearCuentaCobro = async (req: Request, res: Response): Promise<Response | void> => {
   try {
@@ -207,7 +214,6 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
       id_contrato?: string;
       detalle?: string;
       inicio?: string;
-      fin?: string;
     };
 
     const { datos, errores } = validarCuentaCobro(req.body);
@@ -225,23 +231,29 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
 
     const diaCorte = diaDeCorte(contrato.fecha_inicio_corte);
     const inicioPedido = soloFecha(req.body.inicio);
+    const activo = contrato.estado === ESTADO_CONTRATO_ACTIVO;
 
-    // Con `inicio`, el `fin` se calcula con el día pactado del contrato.
-    const periodo =
-      inicioPedido && diaCorte !== null
-        ? { ...periodoQueEmpiezaEn(inicioPedido, diaCorte), inicio: inicioPedido }
+    if (!activo && inicioPedido) {
+      return res
+        .status(409)
+        .json(crearError('El contrato está terminado: sus cobros no tienen periodo'));
+    }
+
+    // El periodo es siempre uno de corte: con otro `inicio` o `fin` se solaparía con el de al lado.
+    const periodo = !activo
+      ? null
+      : inicioPedido && diaCorte !== null
+        ? periodoQueEmpiezaEn(inicioPedido, diaCorte)
         : periodoAFacturar(diaCorte ?? 1, hoyEnZonaNegocio());
-
-    const fin = soloFecha(req.body.fin) ?? periodo.fin;
 
     // El inquilino, para el evento, sale del contrato ya pedido.
     const { cuenta } = await emitirCuentaCobro({
       id_contrato: id_contrato as string,
       id_inquilino: contrato.id_inquilino,
       valor: datos.valor as number,
-      inicio: periodo.inicio,
-      fin,
-      detalle: detalle ?? `Canon de arrendamiento del ${periodo.inicio} al ${fin}`,
+      inicio: periodo?.inicio ?? null,
+      fin: periodo?.fin ?? null,
+      detalle: detalle ?? (periodo ? detalleDelPeriodo(periodo) : 'Cobro sin periodo'),
       auditor: sub,
     });
 
@@ -252,6 +264,11 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
   } catch (error) {
     if (esFalloDeContratos(error)) {
       return responderServicioCaido(res, error, 'verificar el contrato');
+    }
+
+    // El índice único `(id_contrato, inicio)`: ese periodo ya tiene su cuenta.
+    if (error instanceof UniqueConstraintError) {
+      return res.status(409).json(crearError('Ya existe una cuenta de cobro para ese periodo'));
     }
 
     return res.status(500).json({
@@ -466,9 +483,10 @@ export const verificarMora = async (req: Request, res: Response): Promise<Respon
       },
     });
 
-    // Los días de gracia se cuentan con `diasEntre`, en memoria.
+    // Los días de gracia se cuentan con `diasEntre`, en memoria. `inicio < hoy` ya dejó fuera
+    // las cuentas sin periodo.
     const vencidas = candidatas.filter(
-      (cuenta) => diasEntre(cuenta.inicio, hoy) >= DIAS_PARA_MORA,
+      (cuenta) => diasEntre(cuenta.inicio as string, hoy) >= DIAS_PARA_MORA,
     );
 
     for (const cuenta of vencidas) {
@@ -495,6 +513,22 @@ const fmtPeriodo = (fecha: string): string =>
   new Date(fecha)
     .toLocaleDateString('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' })
     .replace(/^\w/, (c) => c.toUpperCase());
+
+/** Período y concepto de un PDF. Un cobro sin periodo imprime su `detalle`. */
+const periodoYConcepto = (
+  cuenta: CuentaCobro,
+  esTotal: boolean,
+): { periodo: string; concepto: string } => {
+  if (!cuenta.inicio) {
+    return { periodo: 'No aplica', concepto: cuenta.detalle };
+  }
+
+  const periodo = fmtPeriodo(cuenta.inicio);
+  return {
+    periodo,
+    concepto: esTotal ? `Pago de arriendo periodo ${periodo}` : `Abono arriendo periodo ${periodo}`,
+  };
+};
 
 /** Datos comunes de la cabecera de los comprobantes. */
 const datosEmpresa = {
@@ -577,7 +611,6 @@ export const generarComprobante = async (req: Request, res: Response): Promise<R
     const { inmueble, arrendatario } = await partesParaPdf(cuenta.id_contrato);
 
     const esTotal = parseFloat(String(transaccion.saldo_restante_momento)) === 0;
-    const periodo = fmtPeriodo(cuenta.inicio);
 
     const estadoImpreso =
       transaccion.estado === ESTADO_TRANSACCION_ANULADA
@@ -597,10 +630,7 @@ export const generarComprobante = async (req: Request, res: Response): Promise<R
         year: 'numeric',
       }),
       estado_pago: estadoImpreso,
-      periodo,
-      concepto: esTotal
-        ? `Pago de arriendo periodo ${periodo}`
-        : `Abono arriendo periodo ${periodo}`,
+      ...periodoYConcepto(cuenta, esTotal),
       canon_mensual: fmt(cuenta.valor),
       valor_pagado: fmt(transaccion.monto),
       saldo_anterior: fmt(
@@ -664,7 +694,6 @@ export const generarRecibo = async (req: Request, res: Response): Promise<Respon
     const { inmueble, arrendatario } = await partesParaPdf(cuenta.id_contrato);
 
     const esTotal = saldo === 0;
-    const periodo = fmtPeriodo(cuenta.inicio);
 
     responderPdf(res, `Recibo_Mensual_${id}.pdf`, {
       ...datosEmpresa,
@@ -677,10 +706,7 @@ export const generarRecibo = async (req: Request, res: Response): Promise<Respon
         year: 'numeric',
       }),
       estado_pago: ETIQUETA_ESTADO[cuenta.estado],
-      periodo,
-      concepto: esTotal
-        ? `Pago de arriendo periodo ${periodo}`
-        : `Abono arriendo periodo ${periodo}`,
+      ...periodoYConcepto(cuenta, esTotal),
       canon_mensual: fmt(cuenta.valor),
       valor_pagado: fmt(parseFloat(String(cuenta.valor)) - saldo),
       saldo_anterior: fmt(cuenta.valor),

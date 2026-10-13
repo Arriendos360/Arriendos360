@@ -787,7 +787,7 @@
                 }
               }
             },
-            "description": "Alta manual. El camino normal es que las genere el motor financiero a partir del contrato; esto existe para la demostracion. Si se omiten `inicio` y `fin`, se derivan del ciclo de facturacion del contrato."
+            "description": "Alta manual. El camino normal es que las genere el motor financiero a partir del contrato; esto existe para la demostracion. El periodo es siempre el de corte del mes de `inicio` (sin `inicio`, el que toca hoy) y `fin` se deriva; si ese periodo ya tiene cuenta, 409. En un contrato terminado la cuenta no tiene periodo (la indemnizacion) y enviar `inicio` responde 409."
           },
           "event": [
             {

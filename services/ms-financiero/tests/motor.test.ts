@@ -130,7 +130,7 @@ describe('RF-11: generacion de las cuentas de los meses SIGUIENTES', () => {
     // El periodo es EXPLICITO: la cuenta empieza en el corte y termina la
     // vispera del siguiente, no en un mes suelto.
     expect(cuenta.inicio).toBe(pasadoManana);
-    expect(cuenta.fin > cuenta.inicio).toBe(true);
+    expect(cuenta.fin! > cuenta.inicio!).toBe(true);
 
     // El motor corre sin usuario autenticado: la auditoria queda a nombre del
     // usuario de sistema.

@@ -68,8 +68,9 @@ propietario; `0007` contraseña temporal; `0010` recuperación (endpoints, tabla
 el alta manual de un cobro notifica; `0023` Inmuebles conserva `departamento`, `barrio` y la
 ficha física; `0025` ajuste de canon por IPC (`fecha_ultimo_ajuste` y dos eventos); `0026`
 preaviso de terminación (cuatro columnas `preaviso_*` y dos eventos); `0027` estado del contrato
-(tabla `historial_contratos`, situación del contrato activo, cancelar y día de corte fijo). Los
-demás ADR no se apartan del documento.
+(tabla `historial_contratos`, situación del contrato activo, cancelar y día de corte fijo); `0028`
+cobro sin periodo (`inicio`/`fin` nulos en `Cuentas_cobro`). Los demás ADR no se apartan del
+documento.
 
 ---
 
@@ -97,6 +98,10 @@ seguridad (`TokensRevocados`, ver módulo de seguridad).
   renovar, `preaviso_enviado_en`, `preaviso_enviado_por`, `preaviso_vencimiento` y
   `preaviso_causal` (`docs/adr/0026`). Con ella el contrato deja de prorrogarse; la
   escribe sólo `POST /api/contratos/:id/preaviso`.
+- **Una cuenta de cobro por periodo** (`docs/adr/0028`): todo periodo sale de `periodoDeCorte()`,
+  también en el alta manual, y el índice único `(id_contrato, inicio)` rechaza el segundo con `409`.
+  En un contrato terminado la cuenta no tiene periodo (`inicio`/`fin` nulos; pedirle `inicio` es
+  `409`): es la indemnización, y no entra en mora sola.
 - **El saldo de una cuenta de cobro NO es una columna.** Es `valor` menos la suma de sus
   transacciones `CONFIRMADA` (`services/ms-financiero/src/services/saldos.ts`), expuesto
   como `saldo_pendiente`. Anular una transacción no «devuelve» nada.
@@ -288,7 +293,7 @@ Tipos en `packages/shared/src/eventos.ts`.
 | `ContratoFinalizado` | ídem | `id_contrato`, `id_inmueble` | `ms-inmuebles` → `disponible`. Ver `docs/adr/0013`. |
 | `RecuperacionSolicitada` | `ms-identidad` | `id_usuario`, `token`, `expira_en` | `ms-notificaciones` → correo con el enlace. |
 | `ContrasenaTemporalEmitida` | ídem | `id_usuario`, `motivo` (`ALTA`\|`REEMISION`) | `ms-notificaciones` → aviso de que la cuenta existe. **No lleva la contraseña.** |
-| `CuentaCobroGenerada` | `ms-financiero` | `id_cuenta_cobro`, `id_contrato`, `id_inquilino`, `valor`, `inicio`, `fin` | `ms-notificaciones` → recibo al inquilino. |
+| `CuentaCobroGenerada` | `ms-financiero` | `id_cuenta_cobro`, `id_contrato`, `id_inquilino`, `valor`, `inicio`, `fin` (nulos en un cobro sin periodo) | `ms-notificaciones` → recibo al inquilino. |
 | `CuentaCobroPorVencer` | ídem | ídem + `id_propietario`, `entra_en_mora_el`, `direccion_inmueble` | `ms-notificaciones` → aviso al inquilino **y** al propietario. |
 | `CuentaCobroEnMora` | ídem | ídem + `dias_de_mora` | `ms-notificaciones` → aviso a los dos. |
 | `AjusteCanonProximo` | ídem (motor) | `id_contrato`, `id_propietario`, `direccion_inmueble`, `canon_actual`, `canon_sugerido`, `ipc`, `anio_ipc`, `fecha_ajuste` | `ms-notificaciones` → alerta al propietario. Una vez por ajuste. |

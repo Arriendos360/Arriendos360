@@ -44,7 +44,7 @@ const CAMPOS_CON_ERROR = Object.keys(FORM_VACIO).filter((campo) => campo !== 'de
  * La cuenta que resume el cobro de cada contrato: la más antigua en mora si hay
  * alguna, y si no la más reciente. Mirar sólo la última escondería una mora de
  * agosto detrás del «Pendiente» de septiembre. `inicio` es YYYY-MM-DD y ordena
- * como texto.
+ * como texto; un cobro sin periodo nunca es el más reciente.
  */
 function cuentaQueResumePorContrato(cuentas) {
     const porContrato = new Map();
@@ -56,7 +56,7 @@ function cuentaQueResumePorContrato(cuentas) {
             !actual ||
             (enMora && !actualEnMora) ||
             (enMora && actualEnMora && String(cuenta.inicio) < String(actual.inicio)) ||
-            (!enMora && !actualEnMora && String(cuenta.inicio) > String(actual.inicio));
+            (!enMora && !actualEnMora && String(cuenta.inicio ?? '') > String(actual.inicio ?? ''));
         if (gana) porContrato.set(cuenta.id_contrato, cuenta);
     }
     return porContrato;

@@ -1,4 +1,4 @@
-import { filaDeHistorial, indemnizacionSugerida, motivosPara, primerInicioLibre, resumenDeMora, textoDeMora } from './estado';
+import { filaDeHistorial, indemnizacionSugerida, motivosPara, resumenDeMora, textoDeMora } from './estado';
 
 describe('indemnizacionSugerida', () => {
     test.each([
@@ -46,13 +46,6 @@ describe('mora', () => {
         expect(textoDeMora({ cuentas: [cuentas[2]] })).toBe('No hay cuentas en mora.');
         expect(textoDeMora({ error: new Error('502') })).toBe('No se pudo comprobar si hay cuentas en mora.');
         expect(textoDeMora({ cargando: true })).toMatch(/Comprobando/);
-    });
-});
-
-describe('primerInicioLibre', () => {
-    test('hoy si está libre; si no, el siguiente día sin cuenta, cruzando el mes', () => {
-        expect(primerInicioLibre([{ inicio: '2026-10-12' }], '2026-10-13')).toBe('2026-10-13');
-        expect(primerInicioLibre([{ inicio: '2026-10-31' }, { inicio: '2026-11-01' }], '2026-10-31')).toBe('2026-11-02');
     });
 });
 

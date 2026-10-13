@@ -18,7 +18,7 @@ const [TIPO_INGRESO] = TIPOS_TRANSACCION;
 
 /** Campos del cuerpo; `tipo` y `monto`/`valor` los pone esta capa. */
 export const CAMPOS_PAGO = ['id_cuenta_cobro', 'medio_pago', 'fecha_pago', 'observaciones'];
-export const CAMPOS_CUENTA_COBRO = ['id_contrato', 'detalle', 'inicio', 'fin'];
+export const CAMPOS_CUENTA_COBRO = ['id_contrato', 'detalle', 'inicio'];
 
 /**
  * `fecha_pago` es un instante: un día suelto se manda a mediodía de Bogotá para
@@ -53,8 +53,9 @@ export const registrarPago = (datos) => {
 };
 
 /**
- * `POST /api/pagos/cuentas-cobro`: cobro manual. Sin `inicio`, el servicio toma
- * el siguiente periodo. Notifica al inquilino.
+ * `POST /api/pagos/cuentas-cobro`: cobro manual. Cobra el periodo de corte del mes de
+ * `inicio` (sin él, el en curso) y responde 409 si ya tiene cuenta. En un contrato
+ * terminado, sin `inicio`: la cuenta no tiene periodo. Notifica al inquilino.
  */
 export const crearCuentaCobro = (datos) => {
     const cuerpoCuenta = soloCampos(datos, CAMPOS_CUENTA_COBRO);

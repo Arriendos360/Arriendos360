@@ -67,9 +67,9 @@ export interface CuentaCobroGenerada {
   id_inquilino: string;
   /** Pesos colombianos, como numero. */
   valor: number;
-  /** El periodo facturado, `YYYY-MM-DD`. Ver `periodoDeCorte()`. */
-  inicio: string;
-  fin: string;
+  /** El periodo facturado, `YYYY-MM-DD`. Ver `periodoDeCorte()`. `null` en un cobro sin periodo. */
+  inicio: string | null;
+  fin: string | null;
 }
 
 /** A una cuenta pendiente se le acaba el plazo. Avisa al inquilino y al propietario. */

@@ -18,8 +18,9 @@ export class CuentaCobro extends Model {
   declare id_cuenta_cobro: string;
   declare detalle: string;
   declare valor: number | string;
-  declare inicio: string;
-  declare fin: string;
+  /** `null` los dos en un cobro sin periodo (indemnización de un contrato terminado). */
+  declare inicio: string | null;
+  declare fin: string | null;
   declare fecha_pago: Date | null;
   declare estado: string;
   declare id_contrato: string;
@@ -38,8 +39,8 @@ CuentaCobro.init(
     valor: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
 
     /** Periodo que cubre la cuenta, calculado con `periodoDeCorte()`. `DATEONLY`. */
-    inicio: { type: DataTypes.DATEONLY, allowNull: false },
-    fin: { type: DataTypes.DATEONLY, allowNull: false },
+    inicio: { type: DataTypes.DATEONLY, allowNull: true },
+    fin: { type: DataTypes.DATEONLY, allowNull: true },
 
     /** Momento en que la cuenta quedo cubierta. Nulo mientras no lo este. */
     fecha_pago: { type: DataTypes.DATE },

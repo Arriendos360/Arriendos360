@@ -43,6 +43,10 @@ const tieneSaldo = (cuenta) => {
 
 const esPropia = (cuenta, sesion) => actuaComoPropietario(cuenta.Contrato, sesion);
 
+/** Un cobro sin periodo (la indemnización de un contrato terminado) no tiene mes ni rango. */
+const mesDe = (cuenta) => (cuenta.inicio ? formatearMes(cuenta.inicio) : 'Sin periodo');
+const rangoDe = (cuenta) => (cuenta.inicio ? `${formatearFecha(cuenta.inicio)} – ${formatearFecha(cuenta.fin)}` : null);
+
 const Fila = ({ children }) => <div className="flex flex-col sm:flex-row gap-4 [&>*]:flex-1">{children}</div>;
 
 /** Una cifra del resumen de la cuenta en el detalle. */
@@ -137,7 +141,7 @@ function FormularioPago({ cuenta, onEnviar, onErrores }) {
         <form id={ID_PAGO} onSubmit={enviar} noValidate className="flex flex-col gap-4">
             <FormError error={error} />
             <div className="flex flex-wrap gap-6 bg-lavanda rounded-control p-4">
-                <Dato titulo="Periodo">{formatearMes(cuenta.inicio)}</Dato>
+                <Dato titulo="Periodo">{mesDe(cuenta)}</Dato>
                 <Dato titulo="Valor">{formatearDinero(cuenta.valor)}</Dato>
                 <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>
             </div>
@@ -207,7 +211,7 @@ function FormularioCobro({ contratos, onEnviar, onErrores }) {
                 <MoneyField etiqueta="Valor" value={form.valor} error={validacion.errores.valor}
                     onChange={(valor) => poner('valor', valor)} onBlur={() => validacion.alSalir('valor', form)} />
                 <DateField etiqueta="Inicio del periodo (opcional)" name="inicio" value={form.inicio}
-                    ayuda="Vacío: el periodo en curso." onChange={(valor) => poner('inicio', valor)} />
+                    ayuda="Se ajusta al día de corte del contrato. Vacío: el periodo en curso." onChange={(valor) => poner('inicio', valor)} />
             </Fila>
             <Input etiqueta="Concepto (opcional)" name="detalle" value={form.detalle}
                 placeholder="Canon de arrendamiento del periodo"
@@ -251,7 +255,7 @@ export default function Pagos() {
         try {
             const lista = await listarCuentasCobro();
             // El servicio no ordena `GET /api/pagos`: el periodo más reciente primero.
-            setCuentas([...lista].sort((a, b) => String(b.inicio).localeCompare(String(a.inicio))));
+            setCuentas([...lista].sort((a, b) => String(b.inicio ?? b.fecha_creacion).localeCompare(String(a.inicio ?? a.fecha_creacion))));
         } catch (error) {
             setErrorCarga(error);
         } finally {
@@ -388,8 +392,8 @@ export default function Pagos() {
             clave: 'mes', titulo: 'Mes',
             render: (c) => (
                 <div className="whitespace-nowrap">
-                    <p className="m-0 text-sm text-texto first-letter:uppercase">{formatearMes(c.inicio)}</p>
-                    <p className="m-0 mt-0.5 text-xs text-texto-suave">{formatearFecha(c.inicio)} – {formatearFecha(c.fin)}</p>
+                    <p className="m-0 text-sm text-texto first-letter:uppercase">{mesDe(c)}</p>
+                    <p className="m-0 mt-0.5 max-w-[16rem] truncate text-xs text-texto-suave" title={c.detalle}>{rangoDe(c) ?? c.detalle}</p>
                 </div>
             )
         },
@@ -668,7 +672,7 @@ export default function Pagos() {
                         <FormError error={errorDialogo || errorDescarga} />
                         <div className="flex flex-wrap gap-6 bg-lavanda rounded-control p-4">
                             <Dato titulo="Inmueble">{nombreDeInmueble(cuenta.Contrato?.Inmueble) || '—'}</Dato>
-                            <Dato titulo="Periodo">{formatearFecha(cuenta.inicio)} – {formatearFecha(cuenta.fin)}</Dato>
+                            <Dato titulo="Periodo">{rangoDe(cuenta) ?? 'Sin periodo'}</Dato>
                             <Dato titulo="Valor">{formatearDinero(cuenta.valor)}</Dato>
                             <Dato titulo="Saldo pendiente"><Saldo cuenta={cuenta} /></Dato>
                             <Dato titulo="Estado"><Badge estado={cuenta.estado} /></Dato>
