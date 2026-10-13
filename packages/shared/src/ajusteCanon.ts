@@ -80,14 +80,15 @@ export const ajusteDeCanon = (
   const previo = mesAnterior(delAjuste.anio, delAjuste.mes);
   const ventanaDesde = periodoDeCorte(diaCorte, previo.anio, previo.mes).inicio;
 
-  const anioIpc = delAjuste.anio - 1;
-  const ipc = ipcAnual[anioIpc] ?? null;
-  const canonSugerido = ipc === null ? null : tope(contrato.canon, ipc);
-
   let rigeDesde = fechaAjuste;
   while (diasEntre(hoy, rigeDesde) <= DIAS_ANTICIPACION_FACTURA) {
     rigeDesde = corteSiguiente(rigeDesde, diaCorte);
   }
+
+  // La ley topa con el IPC del año anterior a aquel en que se hace el reajuste: si se aplica tarde, el de ese año.
+  const anioIpc = partesDeISO(rigeDesde).anio - 1;
+  const ipc = ipcAnual[anioIpc] ?? null;
+  const canonSugerido = ipc === null ? null : tope(contrato.canon, ipc);
 
   return {
     fecha_ajuste: fechaAjuste,

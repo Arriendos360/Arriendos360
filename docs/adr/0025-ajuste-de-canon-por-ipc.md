@@ -24,11 +24,15 @@ de su corte y con el canon de ese momento.
      facturando.
 2. **Ventana de ajuste:**
    - Se abre en el corte anterior a la fecha de ajuste y sigue abierta hasta que se aplique.
-   - Sólo existe si está registrado el IPC del año anterior a la fecha de ajuste.
+   - Sólo existe si está registrado el IPC del año anterior a aquel en que regiría el ajuste.
    - Así un cambio de canon dentro de la ventana no alcanza a cuentas de periodos anteriores a
      la fecha de ajuste.
 3. **Canon sugerido:** el canon actual por (1 + IPC), redondeado hacia abajo al peso. Es el tope.
    Se calcula en enteros (`packages/shared/src/ajusteCanon.ts`).
+   - El IPC es el del año anterior a aquel en que rige el ajuste, como dice el art. 20. Un ajuste
+     aplicado más de un año tarde usa el IPC vigente, no el de su fecha de ajuste: si el IPC baja,
+     el de entonces pasaría el tope.
+   - Uno que por aplicarse tarde ya sólo alcanza a regir en enero espera el IPC del año que termina.
 4. **IPC como catálogo en código:**
    - `IPC_ANUAL` en `packages/contracts`, con el dato del DANE.
    - Cada enero se agrega el año anterior con un PR.

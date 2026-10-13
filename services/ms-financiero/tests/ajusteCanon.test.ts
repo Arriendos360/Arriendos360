@@ -1,7 +1,7 @@
 /**
  * El motor avisa al propietario cuando se abre la ventana de ajuste del canon, una vez por
- * ajuste. Un contrato que empezó el 2024-03-10 tiene la ventana de su ajuste de 2025 abierta
- * desde el 2025-02-10, con el IPC de 2024, sea cual sea el día en que corran las pruebas.
+ * ajuste. Hoy es el 2025-04-02: un contrato que empezó el 2024-03-10 tiene abierta desde el
+ * 2025-02-10 la ventana de su ajuste del 2025-03-10, con el IPC de 2024.
  */
 
 import crypto from 'crypto';
@@ -16,6 +16,15 @@ import {
   prepararEntorno,
   propietario,
 } from './utiles/entorno';
+
+/** El ajuste depende del día: se fija la fecha. Sólo `Date`; los temporizadores siguen siendo reales. */
+const fijarHoy = (fecha: string): void => {
+  jest.useFakeTimers({
+    now: new Date(`${fecha}T17:00:00Z`),
+    advanceTimers: true,
+    doNotFake: ['hrtime', 'nextTick', 'performance', 'queueMicrotask', 'setImmediate', 'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'],
+  });
+};
 
 const avisosDe = async (idContrato: string) =>
   (await eventosDeSalida('AjusteCanonProximo')).filter((fila) => fila.payload['id_contrato'] === idContrato);
@@ -34,7 +43,10 @@ beforeAll(async () => {
   await prepararEntorno();
 });
 
+beforeEach(() => fijarHoy('2025-04-02'));
+
 afterAll(async () => {
+  jest.useRealTimers();
   await cerrarEntorno();
 });
 
@@ -79,8 +91,9 @@ describe('Aviso de ajuste de canon', () => {
   });
 
   test('no avisa sin el IPC del año', async () => {
-    // Su ajuste de 2020 necesitaría el IPC de 2019, que no está en el catálogo.
-    const id = contrato({ inicio: '2019-06-10T00:00:00.000Z', fecha_inicio_corte: '2019-06-10' });
+    // Su ajuste rige en 2019 y necesitaría el IPC de 2018, que no está en el catálogo.
+    fijarHoy('2019-12-01');
+    const id = contrato({ inicio: '2018-12-10T00:00:00.000Z', fecha_inicio_corte: '2018-12-10' });
 
     await procesarAjustes();
 
@@ -96,6 +109,7 @@ describe('Aviso de ajuste de canon', () => {
   });
 
   test('después de un ajuste avisa el siguiente, no el ya aplicado', async () => {
+    fijarHoy('2026-03-01');
     const id = contrato({ fecha_ultimo_ajuste: '2025-03-10' });
 
     await procesarAjustes();

@@ -49,8 +49,23 @@ describe('fecha de ajuste', () => {
 });
 
 describe('canon sugerido', () => {
-  test('con el IPC del año anterior a la fecha de ajuste', () => {
+  test('con el IPC del año anterior al que rige', () => {
     expect(ajuste({})).toMatchObject({ anio_ipc: 2024, ipc: 5.2, canon_sugerido: 1578000 });
+  });
+
+  test('aplicado más de un año tarde: el IPC del año anterior al que rige, no el de la fecha de ajuste', () => {
+    expect(ajusteDeCanon(contrato(), '2026-04-02', { 2024: 5.2, 2025: 5.1 })).toMatchObject({
+      fecha_ajuste: '2025-03-10',
+      rige_desde: '2026-04-10',
+      anio_ipc: 2025,
+      ipc: 5.1,
+      canon_sugerido: 1576500,
+    });
+  });
+
+  test('si ya sólo alcanza a regir en enero, hace falta el IPC del año que termina', () => {
+    expect(ajuste({}, '2025-12-05')).toMatchObject({ rige_desde: '2025-12-10', anio_ipc: 2024, en_ventana: true });
+    expect(ajuste({}, '2025-12-15')).toMatchObject({ rige_desde: '2026-01-10', anio_ipc: 2025, en_ventana: false });
   });
 
   test('redondeado hacia abajo al peso', () => {

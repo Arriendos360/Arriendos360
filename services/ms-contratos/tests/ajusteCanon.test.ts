@@ -1,7 +1,6 @@
 /**
- * Ajuste anual del canon por IPC. El contrato empezó el 2024-03-10: su ajuste de 2025 usa el
- * IPC de 2024 (5,20 %) y su ventana sigue abierta mientras no se aplique, sea cual sea el día en
- * que corran las pruebas.
+ * Ajuste anual del canon por IPC. El contrato empezó el 2024-03-10 y hoy es el 2025-04-02: su
+ * ajuste del 2025-03-10 se aplica tarde, rige desde el 2025-04-10 y usa el IPC de 2024 (5,20 %).
  */
 
 import request from 'supertest';
@@ -24,6 +23,15 @@ import { Contrato } from '../src/models/Contrato';
 
 let duenio: ReturnType<typeof propietario>;
 
+/** El ajuste depende del día: se fija la fecha. Sólo `Date`; los temporizadores siguen siendo reales. */
+const fijarHoy = (fecha: string): void => {
+  jest.useFakeTimers({
+    now: new Date(`${fecha}T17:00:00Z`),
+    advanceTimers: true,
+    doNotFake: ['hrtime', 'nextTick', 'performance', 'queueMicrotask', 'setImmediate', 'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'],
+  });
+};
+
 const CON_VENTANA_ABIERTA = { inicio: '2024-03-10', fin: '2025-03-09', canon: 1500000 };
 
 const consultar = (token: string, id: string) =>
@@ -45,10 +53,12 @@ const nuevo = async (extra: Record<string, unknown> = CON_VENTANA_ABIERTA): Prom
 
 beforeAll(async () => {
   await prepararEntorno();
+  fijarHoy('2025-04-02');
   duenio = propietario();
 });
 
 afterAll(async () => {
+  jest.useRealTimers();
   await cerrarEntorno();
 });
 
@@ -106,12 +116,9 @@ describe('aplicar el ajuste editando el canon', () => {
     const respuesta = await editar(id, { canon: 1578000 });
 
     expect(respuesta.status).toBe(200);
-    // Aplicado tarde (el ajuste era el 2025-03-10): rige desde el próximo corte sin facturar.
-    const rige = String(respuesta.body.rige_desde);
-    expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBe(rige);
-    expect((await consultar(duenio.token, id)).body.ajuste_canon.fecha_ajuste).toBe(
-      `${Number(rige.slice(0, 4)) + 1}${rige.slice(4)}`,
-    );
+    expect(respuesta.body.rige_desde).toBe('2025-04-10');
+    expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBe('2025-04-10');
+    expect((await consultar(duenio.token, id)).body.ajuste_canon.fecha_ajuste).toBe('2026-04-10');
 
     const avisos = await avisosDe(id);
     expect(avisos).toHaveLength(1);
@@ -122,9 +129,8 @@ describe('aplicar el ajuste editando el canon', () => {
       canon_nuevo: 1578000,
       ipc: 5.2,
       anio_ipc: 2024,
-      rige_desde: respuesta.body.rige_desde,
+      rige_desde: '2025-04-10',
     });
-    expect(String(respuesta.body.rige_desde) > hoyEnZonaNegocio()).toBe(true);
   });
 
   test('por encima del tope: 400 en canon, sin cambio y sin aviso', async () => {
