@@ -33,6 +33,9 @@ const fechaPagoParaEnviar = (valor) =>
 export const listarCuentasCobro = () => cuerpo(api.get('/pagos'));
 
 /** Transacciones de una cuenta, `CONFIRMADA` y `ANULADA`, la más reciente primero. */
+/** `GET /api/pagos/historial-transacciones`: las transacciones del usuario con su cuenta y contrato, la más reciente primero. */
+export const listarMovimientos = () => cuerpo(api.get('/pagos/historial-transacciones'));
+
 /** `GET /api/pagos/contrato/:id`: las cuentas de un contrato, con su `estado` y `saldo_pendiente`. */
 export const cuentasDeContrato = (idContrato) => cuerpo(api.get(`/pagos/contrato/${idContrato}`));
 

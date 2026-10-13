@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Download, FileText, Plus, Receipt } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { listarContratos } from '../features/contratos/api';
-import { AreaTexto, actuaComoPropietario, nombreDeInmueble, ubicacionDe } from '../features/contratos/piezas';
+import { AreaTexto, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe } from '../features/contratos/piezas';
 import {
     MEDIOS_PAGO_CONOCIDOS, abrirComprobante, abrirRecibo, anularTransaccion, crearCuentaCobro,
-    listarCuentasCobro, registrarPago, transaccionesDeCuenta
+    listarCuentasCobro, listarMovimientos, registrarPago, transaccionesDeCuenta
 } from '../features/pagos/api';
+import {
+    FILTROS, cumple, desglosar, filtrarCuentas, filtrarMovimientos, totalMovimientos, totales
+} from '../features/pagos/desglose';
 import { validarFormularioCobro, validarFormularioPago } from '../features/pagos/reglas';
 import {
     Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table,
@@ -31,15 +35,6 @@ import { useValidacion } from '../ui/validacion';
  * - Los PDF salen por blob con el token (services/descargas.js).
  */
 
-const FILTROS = [
-    { clave: 'todos', texto: 'Todos', estados: null, tono: 'text-texto-suave' },
-    { clave: 'pendientes', texto: 'Pendientes', estados: ['PENDIENTE', 'PARCIAL'], tono: 'text-ambar-texto' },
-    { clave: 'pagados', texto: 'Pagados', estados: ['PAGADA'], tono: 'text-verde-texto' },
-    { clave: 'mora', texto: 'En mora', estados: ['EN_MORA'], tono: 'text-rojo-texto' }
-];
-
-const cumple = (filtro, cuenta) => !filtro.estados || filtro.estados.includes(cuenta.estado);
-
 /** ¿Queda algo por pagar? Se lee del texto decimal, sin operar. */
 const tieneSaldo = (cuenta) => {
     const saldo = aDecimal(cuenta.saldo_pendiente);
@@ -55,6 +50,27 @@ const Dato = ({ titulo, children }) => (
     <div className="flex flex-col gap-1 min-w-[8rem]">
         <span className="text-xs font-medium uppercase tracking-label text-texto-label">{titulo}</span>
         <span className="text-sm text-texto">{children}</span>
+    </div>
+);
+
+/** Una pestaña de la fila de pestañas. */
+const Pestana = ({ activa, tono = 'text-texto-suave', onClick, children }) => (
+    <button type="button" role="tab" aria-selected={activa} onClick={onClick}
+        className={unir(
+            'h-8 px-3 m-0 text-xs font-medium font-sans rounded-control border border-solid cursor-pointer',
+            activa ? 'bg-indigo-medio border-indigo-medio text-white' : unir('bg-superficie border-borde', tono)
+        )}>
+        {children}
+    </button>
+);
+
+/** Los cuatro totales de lo que el filtro deja ver. */
+const Totales = ({ valores }) => (
+    <div className="flex flex-wrap gap-x-8 gap-y-4 bg-superficie border border-solid border-borde rounded-tarjeta p-5">
+        <Dato titulo="Facturado"><span className="tabular-nums">{formatearDinero(valores.facturado)}</span></Dato>
+        <Dato titulo="Recaudado"><span className="tabular-nums text-verde-texto">{formatearDinero(valores.recaudado)}</span></Dato>
+        <Dato titulo="Pendiente"><span className="tabular-nums">{formatearDinero(valores.pendiente)}</span></Dato>
+        <Dato titulo="En mora"><span className="tabular-nums text-rojo-texto">{formatearDinero(valores.en_mora)}</span></Dato>
     </div>
 );
 
@@ -210,7 +226,11 @@ export default function Pagos() {
     const [cuentas, setCuentas] = useState([]);
     const [cargando, setCargando] = useState(true);
     const [errorCarga, setErrorCarga] = useState(null);
-    const [filtro, setFiltro] = useState('todos');
+    // Todos los contratos, para los filtros y sus rótulos. Si no llegan, los filtros quedan sin opciones.
+    const [contratos, setContratos] = useState([]);
+    // `null` hasta que se abre «Movimientos» por primera vez, y otra vez tras registrar o anular.
+    const [movimientos, setMovimientos] = useState(null);
+    const [errorMovimientos, setErrorMovimientos] = useState(null);
     // { texto, idComprobante? }
     const [aviso, setAviso] = useState(null);
     const [errorDescarga, setErrorDescarga] = useState(null);
@@ -240,9 +260,50 @@ export default function Pagos() {
     }, []);
 
     useEffect(() => { cargar(); }, [cargar]);
+    useEffect(() => { listarContratos().then(setContratos, () => setContratos([])); }, []);
 
-    const filtroActivo = FILTROS.find((f) => f.clave === filtro);
-    const visibles = useMemo(() => cuentas.filter((c) => cumple(filtroActivo, c)), [cuentas, filtroActivo]);
+    // Los filtros viven en la URL: sobreviven a ir a otra pantalla y volver con «atrás».
+    const [params, setParams] = useSearchParams();
+    const vista = params.get('vista') === 'movimientos' ? 'movimientos' : 'cobros';
+    const quienDe = (contrato) => (actuaComoPropietario(contrato, sesion) ? nombreDe(contrato.Inquilino) || 'Inquilino sin datos' : 'Tú');
+    const contratoPorId = new Map(contratos.map((c) => [c.id_contrato, c]));
+    const opcionesInmueble = [...new Map(contratos.map((c) => [c.id_inmueble, nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos']))]
+        .map(([valor, texto]) => ({ valor, texto }));
+    // Un parámetro que no es ninguna opción (un id viejo) se ignora.
+    const elegido = (clave, opciones) => (opciones.some((o) => o.valor === params.get(clave)) ? params.get(clave) : '');
+    const inmueble = elegido('inmueble', opcionesInmueble);
+    const opcionesContrato = contratos
+        .filter((c) => !inmueble || c.id_inmueble === inmueble)
+        .map((c) => ({ valor: c.id_contrato, texto: `${nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos'} · ${quienDe(c)}` }));
+    const seleccion = { inmueble, contrato: elegido('contrato', opcionesContrato) };
+    const estado = FILTROS.find((f) => f.clave === params.get('estado')) ?? FILTROS[0];
+    const fechas = { desde: params.get('desde') ?? '', hasta: params.get('hasta') ?? '' };
+    const filtrar = (cambios) => setParams((actuales) => {
+        const nuevos = new URLSearchParams(actuales);
+        for (const [clave, valor] of Object.entries(cambios)) {
+            if (valor) nuevos.set(clave, valor); else nuevos.delete(clave);
+        }
+        return nuevos;
+    }, { replace: true });
+    const conFiltros = Boolean(seleccion.inmueble || seleccion.contrato || (vista === 'movimientos' && (fechas.desde || fechas.hasta)));
+
+    const seleccionadas = filtrarCuentas(cuentas, seleccion);
+    const visibles = filtrarCuentas(cuentas, { ...seleccion, estado: estado.clave });
+
+    const cargarMovimientos = useCallback(async () => {
+        setErrorMovimientos(null);
+        try {
+            setMovimientos(await listarMovimientos());
+        } catch (error) {
+            setErrorMovimientos(error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (vista === 'movimientos' && movimientos === null) cargarMovimientos();
+    }, [vista, movimientos, cargarMovimientos]);
+
+    const movimientosVisibles = movimientos ? filtrarMovimientos(movimientos, { ...seleccion, ...fechas }) : [];
 
     const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
     const cerrar = () => { if (!enviando) setDialogo(null); };
@@ -299,6 +360,7 @@ export default function Pagos() {
 
     const pagar = (datos) => escribir(async () => {
         const respuesta = await registrarPago(datos);
+        setMovimientos(null);
         setDialogo(null);
         setAviso({ texto: respuesta.mensaje || 'Pago registrado.', idComprobante: respuesta.transaccion?.id_transaccion });
     });
@@ -313,6 +375,7 @@ export default function Pagos() {
     const anular = () => escribir(async () => {
         const { cuenta, transaccion } = dialogo;
         const respuesta = await anularTransaccion(transaccion.id_transaccion);
+        setMovimientos(null);
         const actualizada = { ...cuenta, ...respuesta.cuenta_cobro };
         setAviso({ texto: 'Transacción anulada. El saldo de la cuenta se recalculó.' });
         setDialogo({ modo: 'detalle', cuenta: actualizada });
@@ -381,6 +444,50 @@ export default function Pagos() {
         }
     ];
 
+    const columnasDesglose = [
+        {
+            clave: 'nombre', titulo: 'Inmueble / contrato',
+            render: (fila) => (fila.nivel === 0
+                ? <span className="font-medium">{fila.nombre}</span>
+                : <span className="pl-5 text-texto-suave">{fila.nombre}</span>)
+        },
+        ...[['facturado', 'Facturado'], ['recaudado', 'Recaudado'], ['pendiente', 'Pendiente'], ['en_mora', 'En mora']]
+            .map(([clave, titulo]) => ({
+                clave, titulo, alinear: 'derecha',
+                render: (fila) => <span className="tabular-nums whitespace-nowrap">{formatearDinero(fila.totales[clave])}</span>
+            }))
+    ];
+
+    const filasDesglose = desglosar(visibles).flatMap((grupo, i) => [
+        {
+            clave: `inmueble-${i}`, nivel: 0, totales: grupo.totales,
+            nombre: grupo.sinContrato ? 'Sin datos del contrato' : nombreDeInmueble(grupo.inmueble) || 'Inmueble sin datos'
+        },
+        ...(grupo.sinContrato ? [] : grupo.contratos.map((c) => ({
+            clave: c.id_contrato, nivel: 1, totales: c.totales,
+            nombre: contratoPorId.has(c.id_contrato) ? quienDe(contratoPorId.get(c.id_contrato)) : 'Contrato sin datos'
+        })))
+    ]);
+
+    const columnasMovimientos = [
+        { clave: 'fecha', titulo: 'Fecha', render: (t) => <span className="whitespace-nowrap">{formatearFechaHora(t.fecha_pago)}</span> },
+        { clave: 'inmueble', titulo: 'Inmueble', render: (t) => <Inmueble cuenta={t.CuentaCobro ?? {}} /> },
+        {
+            clave: 'contrato', titulo: 'Contrato',
+            render: (t) => (contratoPorId.has(t.CuentaCobro?.id_contrato) ? quienDe(contratoPorId.get(t.CuentaCobro.id_contrato)) : '—')
+        },
+        { clave: 'medio', titulo: 'Medio', render: (t) => t.medio_pago || '—' },
+        { clave: 'monto', titulo: 'Monto', alinear: 'derecha', render: (t) => <span className="whitespace-nowrap tabular-nums">{formatearDinero(t.monto)}</span> },
+        { clave: 'estado', titulo: 'Estado', render: (t) => <Badge estado={t.estado} /> },
+        {
+            clave: 'comprobante', titulo: '', alinear: 'derecha',
+            render: (t) => (
+                <Button variante="fantasma" tamano="pequeno" icono={Download}
+                    onClick={() => descargar(() => abrirComprobante(t.id_transaccion))}>Comprobante</Button>
+            )
+        }
+    ];
+
     const titulo = esPropietario ? 'Gestión financiera' : 'Mis pagos';
     const subtitulo = esPropietario
         ? 'Control de cobros, pagos y comprobantes de transacciones.'
@@ -411,47 +518,102 @@ export default function Pagos() {
             )}
             <FormError error={errorDescarga} />
 
-            <div role="tablist" aria-label="Filtrar por estado" className="flex flex-wrap gap-2">
-                {FILTROS.map((f) => {
-                    const activo = f.clave === filtro;
-                    return (
-                        <button key={f.clave} type="button" role="tab" aria-selected={activo} onClick={() => setFiltro(f.clave)}
-                            className={unir(
-                                'h-8 px-3 m-0 text-xs font-medium font-sans rounded-control border border-solid cursor-pointer',
-                                activo ? 'bg-indigo-medio border-indigo-medio text-white' : unir('bg-superficie border-borde', f.tono)
-                            )}>
-                            {f.texto} ({cuentas.filter((c) => cumple(f, c)).length})
-                        </button>
-                    );
-                })}
+            <div role="tablist" aria-label="Vista" className="flex flex-wrap gap-2">
+                <Pestana activa={vista === 'cobros'} onClick={() => filtrar({ vista: '' })}>Cobros</Pestana>
+                <Pestana activa={vista === 'movimientos'} onClick={() => filtrar({ vista: 'movimientos' })}>Movimientos</Pestana>
             </div>
 
-            {errorCarga ? (
+            <div className="flex flex-wrap items-end gap-3">
+                <Select etiqueta="Inmueble" vacio="Todos" opciones={opcionesInmueble} value={seleccion.inmueble} className="w-full sm:w-56"
+                    onChange={(evento) => filtrar({ inmueble: evento.target.value, contrato: '' })} />
+                <Select etiqueta="Contrato" vacio="Todos" opciones={opcionesContrato} value={seleccion.contrato} className="w-full sm:w-72"
+                    onChange={(evento) => filtrar({ contrato: evento.target.value })} />
+                {vista === 'movimientos' && (
+                    <>
+                        <DateField etiqueta="Pagos desde" value={fechas.desde} max={fechas.hasta || undefined}
+                            onChange={(valor) => filtrar({ desde: valor })} />
+                        <DateField etiqueta="Hasta" value={fechas.hasta} min={fechas.desde || undefined}
+                            onChange={(valor) => filtrar({ hasta: valor })} />
+                    </>
+                )}
+                <Button variante="secundario" disabled={!conFiltros}
+                    onClick={() => filtrar({ inmueble: '', contrato: '', desde: '', hasta: '' })}>Limpiar</Button>
+            </div>
+
+            {vista === 'cobros' && (errorCarga ? (
                 <div className="flex flex-col items-start gap-3">
                     <FormError error={errorCarga} className="w-full box-border" />
                     <Button variante="secundario" onClick={() => { setCargando(true); cargar(); }}>Reintentar</Button>
                 </div>
             ) : (
-                <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
-                    <Table
-                        columnas={columnas}
-                        filas={visibles}
-                        claveFila="id_cuenta_cobro"
-                        cargando={cargando}
-                        vacio={
-                            <EmptyState
-                                icono={Receipt}
-                                titulo={filtro === 'todos' ? 'Aún no hay cobros' : `No hay cobros en «${filtroActivo.texto}»`}
-                                descripcion={filtro === 'todos'
-                                    ? (esPropietario
-                                        ? 'El primer cobro de un contrato se genera al firmarlo; los siguientes, cada mes.'
-                                        : 'Cuando tu arrendador genere un cobro, aparecerá aquí.')
-                                    : 'Prueba con otro filtro.'}
-                            />
-                        }
-                    />
+                <>
+                    <div role="tablist" aria-label="Filtrar por estado" className="flex flex-wrap gap-2">
+                        {FILTROS.map((f) => (
+                            <Pestana key={f.clave} activa={f.clave === estado.clave} tono={f.tono}
+                                onClick={() => filtrar({ estado: f.clave === 'todos' ? '' : f.clave })}>
+                                {f.texto} ({seleccionadas.filter((c) => cumple(f, c)).length})
+                            </Pestana>
+                        ))}
+                    </div>
+                    {!cargando && <Totales valores={totales(visibles)} />}
+                    <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                        <Table
+                            columnas={columnas}
+                            filas={visibles}
+                            claveFila="id_cuenta_cobro"
+                            cargando={cargando}
+                            vacio={
+                                <EmptyState
+                                    icono={Receipt}
+                                    titulo={cuentas.length === 0 ? 'Aún no hay cobros' : 'Ningún cobro cumple los filtros'}
+                                    descripcion={cuentas.length === 0
+                                        ? (esPropietario
+                                            ? 'El primer cobro de un contrato se genera al firmarlo; los siguientes, cada mes.'
+                                            : 'Cuando tu arrendador genere un cobro, aparecerá aquí.')
+                                        : 'Prueba con otro filtro.'}
+                                />
+                            }
+                        />
+                    </div>
+                    {filasDesglose.length > 0 && (
+                        <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                            <h2 className="m-0 px-4 pt-4 text-base font-medium text-texto">Desglose por inmueble</h2>
+                            <Table columnas={columnasDesglose} filas={filasDesglose} claveFila="clave" />
+                        </div>
+                    )}
+                </>
+            ))}
+
+            {vista === 'movimientos' && (errorMovimientos ? (
+                <div className="flex flex-col items-start gap-3">
+                    <FormError error={errorMovimientos} className="w-full box-border" />
+                    <Button variante="secundario" onClick={cargarMovimientos}>Reintentar</Button>
                 </div>
-            )}
+            ) : (
+                <>
+                    {movimientos && (
+                        <div className="bg-superficie border border-solid border-borde rounded-tarjeta p-5">
+                            <Dato titulo="Total confirmado">
+                                <span className="tabular-nums">{formatearDinero(totalMovimientos(movimientosVisibles))}</span>
+                            </Dato>
+                            <p className="m-0 mt-2 text-xs text-texto-suave">Las transacciones anuladas se listan, pero no suman.</p>
+                        </div>
+                    )}
+                    <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                        <Table
+                            columnas={columnasMovimientos}
+                            filas={movimientosVisibles}
+                            claveFila="id_transaccion"
+                            cargando={movimientos === null}
+                            vacio={
+                                <EmptyState icono={Receipt}
+                                    titulo={movimientos?.length ? 'Ningún movimiento cumple los filtros' : 'Aún no hay movimientos'}
+                                    descripcion={movimientos?.length ? 'Prueba con otro filtro.' : 'Los pagos registrados aparecerán aquí.'} />
+                            }
+                        />
+                    </div>
+                </>
+            ))}
 
             <Modal
                 abierto={dialogo?.modo === 'pagar'}

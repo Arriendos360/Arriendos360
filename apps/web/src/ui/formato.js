@@ -61,6 +61,24 @@ export function leerDinero(texto) {
     return aDecimal(limpio.replace(',', '.').replace(/\.$/, ''));
 }
 
+/**
+ * Suma montos al centavo. En centavos enteros la suma es exacta (0,1 + 0,2 = 0,3). `null` si
+ * alguno no es un monto: un total con un cero inventado miente.
+ */
+export function sumarDinero(...valores) {
+    const decimales = valores.map(aDecimal);
+    if (decimales.includes(null)) return null;
+    const centavos = decimales.reduce((suma, decimal) => suma + Math.round(Number(decimal) * 100), 0);
+    return aDecimal((centavos / 100).toFixed(2));
+}
+
+/** `a - b`, al centavo. */
+export function restarDinero(a, b) {
+    const decimal = aDecimal(b);
+    if (decimal === null) return null;
+    return sumarDinero(a, decimal.startsWith('-') ? decimal.slice(1) : `-${decimal}`);
+}
+
 /** Monto en el formato de edición: "1.500.000,5", sin símbolo. */
 export function dineroParaEditar(valor) {
     const decimal = aDecimal(valor);
@@ -106,6 +124,12 @@ export function formatearFechaHora(valor) {
     if (!fecha || (typeof valor === 'string' && FECHA_ISO.test(valor))) return formatearFecha(valor);
     const { hora, minuto } = partesEnZona(fecha);
     return `${formatearFecha(fecha)}, ${hora}:${minuto}`;
+}
+
+/** El día en Bogotá de un instante, `YYYY-MM-DD`; `null` si no es fecha. Un pago a las 22:00 es de ese día, no del siguiente. */
+export function diaEnZona(valor) {
+    const fecha = aFechaValida(valor);
+    return fecha ? hoyEnBogota(fecha) : null;
 }
 
 /** Hoy en Bogotá como `YYYY-MM-DD`, no en la zona del navegador. */
