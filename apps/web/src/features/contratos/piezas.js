@@ -2,12 +2,15 @@
  * Piezas que comparten la lista y el detalle de contratos.
  */
 
+import { useEffect, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 
 import { CONTROL, CONTROL_CON_ERROR, unir } from '../../ui/clases';
 import Campo from '../../ui/Campo';
 import { formatearFecha } from '../../ui/formato';
+import { cuentasDeContrato } from '../pagos/api';
 import { fechaDeContrato } from './api';
+import { resumenDeMora, textoDeMora } from './estado';
 
 /**
  * ¿Actúa como propietario sobre ESTE contrato? No basta el rol: un usuario con
@@ -58,5 +61,31 @@ export function ContrasenaTemporal({ contrasena, persona }) {
                 Cópiala y entrégala en persona: no se vuelve a mostrar. Al entrar, el sistema le pedirá elegir una propia.
             </p>
         </div>
+    );
+}
+
+/**
+ * La mora del contrato, en el diálogo de finalizar o cancelar: avisa sin impedir. Si no se pudo
+ * consultar lo dice, porque un «sin mora» por omisión mentiría.
+ */
+export function AlertaMora({ idContrato }) {
+    const [consulta, setConsulta] = useState({ cargando: true });
+
+    useEffect(() => {
+        let vigente = true;
+        cuentasDeContrato(idContrato)
+            .then((cuentas) => vigente && setConsulta({ cuentas }))
+            .catch((error) => vigente && setConsulta({ error }));
+        return () => { vigente = false; };
+    }, [idContrato]);
+
+    const conMora = consulta.cuentas && resumenDeMora(consulta.cuentas).cantidad > 0;
+    return (
+        <p role="status" className={unir(
+            'm-0 px-3 py-2.5 rounded-control text-sm',
+            conMora ? 'bg-rojo-tenue text-rojo-texto' : consulta.error ? 'bg-ambar-tenue text-ambar-texto' : 'bg-lavanda text-texto-suave'
+        )}>
+            {textoDeMora(consulta)}
+        </p>
     );
 }

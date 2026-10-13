@@ -7,6 +7,7 @@ import request from 'supertest';
 
 import {
   app,
+  cancelarContrato,
   cerrarEntorno,
   conToken,
   crearContrato,
@@ -101,9 +102,9 @@ describe('preaviso en la consulta', () => {
     expect(suyo.preaviso.fecha_limite).toBe('2026-09-30');
   });
 
-  test('un contrato finalizado no lo lleva', async () => {
+  test('un contrato terminado no lo lleva', async () => {
     const { id } = await nuevo();
-    await request(app).put(`/api/contratos/${id}/finalizar`).set(...conToken(duenio.token));
+    await cancelarContrato(duenio.token, id);
 
     expect((await consultar(duenio.token, id)).body).not.toHaveProperty('preaviso');
   });
@@ -215,9 +216,9 @@ describe('enviar el preaviso', () => {
     expect(await Contrato.findByPk(id)).toMatchObject({ preaviso_enviado_por: inquilino.sub, preaviso_causal: null });
   });
 
-  test('un contrato finalizado: 409', async () => {
+  test('un contrato terminado: 409', async () => {
     const { id, inquilino } = await nuevo();
-    await request(app).put(`/api/contratos/${id}/finalizar`).set(...conToken(duenio.token));
+    await cancelarContrato(duenio.token, id);
 
     expect((await enviar(inquilino.token, id)).status).toBe(409);
   });

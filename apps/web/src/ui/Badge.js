@@ -15,8 +15,11 @@ const TONOS = {
 };
 
 export const ESTADOS = {
-    // Contratos
+    // Contratos, y la situación de uno activo (`situacion`), que se pinta en su lugar.
     activo: { tono: 'verde', texto: 'Activo' },
+    vigente: { tono: 'verde', texto: 'Vigente' },
+    renovado: { tono: 'verde', texto: 'Renovado' },
+    vencido_con_preaviso: { tono: 'ambar', texto: 'Vencido con preaviso' },
     finalizado: { tono: 'neutro', texto: 'Finalizado' },
     cancelado: { tono: 'neutro', texto: 'Cancelado' },
     // Cuentas de cobro

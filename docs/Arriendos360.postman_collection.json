@@ -644,7 +644,63 @@
                 "{{id_contrato}}",
                 "finalizar"
               ]
-            }
+            },
+            "description": "El contrato no se renovó: sólo con situacion vencido_con_preaviso, es decir, con un preaviso registrado cuyo vencimiento ya llegó. Si no, 409: un contrato que termina antes de tiempo se cancela. Emite ContratoFinalizado y el inmueble vuelve a disponible."
+          }
+        },
+        {
+          "name": "Cancelar Contrato",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n    \"motivo\": \"unilateral_inquilino\",\n    \"indemnizacion\": 4500000,\n    \"indemnizacion_a_cargo_de\": \"INQUILINO\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/cancelar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "cancelar"
+              ]
+            },
+            "description": "Terminación antes de tiempo de un contrato activo, sólo el propietario. motivo: mutuo_acuerdo, incumplimiento_inquilino, incumplimiento_propietario, unilateral_inquilino o unilateral_propietario (este último sólo con situacion renovado). indemnizacion es pactable y mayor o igual a 0; si es mayor que 0, indemnizacion_a_cargo_de (INQUILINO o PROPIETARIO) es obligatorio. 400 con los errores por campo, 409 si no está activo. Emite ContratoFinalizado y deja la fila en el historial."
+          }
+        },
+        {
+          "name": "Historial de Contrato",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/historial",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "historial"
+              ]
+            },
+            "description": "Los cambios de los campos editables y del estado, el más reciente primero: campo, valor_anterior, valor_nuevo, cambiado_en, cambiado_por y, en una cancelación, motivo e indemnización. Para las dos partes; 404 a quien no es parte."
           }
         }
       ]

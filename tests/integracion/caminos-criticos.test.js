@@ -762,15 +762,17 @@ describe('Caminos críticos', () => {
         assert.match(texto, /Forma de pago M/, 'sin transacciones confirmadas: «Múltiple»');
     });
 
-    it('finalizar el contrato libera el inmueble por el mismo camino', async () => {
+    it('cancelar el contrato libera el inmueble por el mismo camino', async () => {
         // La otra mitad del ciclo. Va por evento y no por llamada síncrona por
         // coherencia: usar un mecanismo para ocupar y otro para liberar dejaría
         // media operación con garantía de entrega y la otra media sin ella. Ver
-        // docs/adr/0013.
-        const finalizado = await pedir('PUT', `/api/contratos/${idContrato}/finalizar`, {
-            token: tokenPropietario
+        // docs/adr/0013. Cancelar y finalizar emiten el mismo evento; finalizar exige
+        // un preaviso vencido, que esta prueba no tiene (docs/adr/0027).
+        const cancelado = await pedir('PUT', `/api/contratos/${idContrato}/cancelar`, {
+            token: tokenPropietario,
+            cuerpo: { motivo: 'mutuo_acuerdo', indemnizacion: 0 }
         });
-        assert.equal(finalizado.estado, 200, JSON.stringify(finalizado.datos));
+        assert.equal(cancelado.estado, 200, JSON.stringify(cancelado.datos));
 
         const intervalo = Number(process.env.EVENTOS_INTERVALO_MS || 5000);
 

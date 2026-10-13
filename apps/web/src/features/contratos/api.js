@@ -9,6 +9,8 @@
  * - `PUT /contratos/:id` no valida: el recorte de campos y la validación son de aquí.
  */
 
+import { CAMPOS_CONTRATO_EDITABLES } from 'arriendos360-contracts';
+
 import api from '../../services/api';
 import { descargarPdf } from '../../services/descargas';
 import { cuerpo, montoParaEnviar, soloCampos } from '../comun';
@@ -28,16 +30,6 @@ export const CAMPOS_CONTRATO = [
     'inicio',
     'fin',
     'fecha_inicio_corte',
-    'fecha_limite_pago',
-    'canon',
-    'info_contrato',
-    'nombre_deudor_solidario',
-    'documento_deudor_solidario'
-];
-
-/** Lo que se puede cambiar de un contrato firmado: nunca sus partes ni su estado. */
-export const CAMPOS_CONTRATO_EDITABLES = [
-    'fin',
     'fecha_limite_pago',
     'canon',
     'info_contrato',
@@ -86,6 +78,23 @@ export const actualizarContrato = (id, datos) => {
  * segundos después: no afirmarlo en pantalla justo al volver.
  */
 export const finalizarContrato = (id) => cuerpo(api.put(`/contratos/${id}/finalizar`));
+
+/**
+ * `PUT /api/contratos/:id/cancelar`: terminación antes de tiempo, con su motivo y la
+ * indemnización pactada. Sin indemnización no se manda quién la paga.
+ * @returns `{ mensaje, contrato }`
+ */
+export const cancelarContrato = (id, { motivo, indemnizacion, indemnizacion_a_cargo_de }) => {
+    const valor = montoParaEnviar(indemnizacion);
+    return cuerpo(api.put(`/contratos/${id}/cancelar`, {
+        motivo,
+        indemnizacion: valor,
+        ...(valor > 0 && { indemnizacion_a_cargo_de })
+    }));
+};
+
+/** `GET /api/contratos/:id/historial`: los cambios del contrato, el más reciente primero. */
+export const listarHistorial = (id) => cuerpo(api.get(`/contratos/${id}/historial`));
 
 /**
  * `POST /api/contratos/:id/contrasena-inquilino`.

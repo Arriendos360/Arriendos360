@@ -1,8 +1,13 @@
 import request from 'supertest';
 import crypto from 'crypto';
+import { hoyEnZonaNegocio, soloFecha, sumarDias } from 'arriendos360-shared';
+
+import { Contrato } from '../src/models/Contrato';
+import { HistorialContrato } from '../src/models/HistorialContrato';
 
 import {
   app,
+  cancelarContrato,
   cerrarEntorno,
   conToken,
   contratoValido,
@@ -202,15 +207,13 @@ describe('El listado compone lo que la pantalla pinta', () => {
 });
 
 describe('Finalizar y actualizar', () => {
-  test('finalizar deja el contrato en `finalizado`', async () => {
+  test('cancelar deja el contrato en `cancelado`', async () => {
     const { id } = await crearContrato(duenio.token, inmuebleDe(duenio.sub), idInquilino);
 
-    const respuesta = await request(app)
-      .put(`/api/contratos/${id}/finalizar`)
-      .set(...conToken(duenio.token));
+    const respuesta = await cancelarContrato(duenio.token, id);
 
     expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.body.contrato.estado).toBe('finalizado');
+    expect(respuesta.body.contrato.estado).toBe('cancelado');
   });
 
   test('un contrato ajeno no se finaliza, y responde 404', async () => {
@@ -237,7 +240,7 @@ describe('Finalizar y actualizar', () => {
     expect(parseFloat(respuesta.body.contrato.canon)).toBe(1600000);
   });
 
-  test('ni el alta ni la edición guardan el ajuste ni la constancia del preaviso del cuerpo', async () => {
+  test('el alta no guarda el ajuste ni la constancia del preaviso del cuerpo, y la edición los rechaza', async () => {
     const delSistema = {
       fecha_ultimo_ajuste: '2030-01-01',
       preaviso_enviado_en: '2026-09-01T00:00:00Z',
@@ -261,8 +264,9 @@ describe('Finalizar y actualizar', () => {
       .put(`/api/contratos/${id}`)
       .set(...conToken(duenio.token))
       .send({ ...delSistema, info_contrato: 'Sin cambios de canon' });
-    expect(edicion.statusCode).toBe(200);
-    expect(edicion.body.contrato).toMatchObject(vacias);
+    expect(edicion.statusCode).toBe(400);
+    expect(edicion.body.errores.map((error: { campo: string }) => error.campo)).toEqual(Object.keys(delSistema));
+    expect(await Contrato.findByPk(id)).toMatchObject({ ...vacias, info_contrato: null });
   });
 
   test('un `id` que no es UUID responde 404, no 500', async () => {
@@ -271,6 +275,94 @@ describe('Finalizar y actualizar', () => {
       .set(...conToken(duenio.token));
 
     expect(respuesta.statusCode).toBe(404);
+  });
+});
+
+describe('Editar con lista blanca', () => {
+  const hoy = hoyEnZonaNegocio();
+  const enTerminoInicial = { inicio: sumarDias(hoy, -30), fin: sumarDias(hoy, 300) };
+
+  const nuevo = async (fechas: Record<string, unknown> = enTerminoInicial) =>
+    (await crearContrato(duenio.token, inmuebleDe(duenio.sub), idInquilino, { fecha_limite_pago: 5, ...fechas })).id;
+
+  const editar = (id: string, cuerpo: Record<string, unknown>) =>
+    request(app).put(`/api/contratos/${id}`).set(...conToken(duenio.token)).send(cuerpo);
+
+  test('estado, corte, partes e inicio: 400 por cada uno y nada se aplica', async () => {
+    const id = await nuevo();
+
+    const respuesta = await editar(id, {
+      canon: 1700000,
+      estado: 'cancelado',
+      fecha_inicio_corte: '2026-02-01',
+      id_inmueble: crypto.randomUUID(),
+      inicio: '2026-02-01',
+    });
+
+    expect(respuesta.statusCode).toBe(400);
+    expect(respuesta.body.errores.map((error: { campo: string }) => error.campo)).toEqual([
+      'estado',
+      'fecha_inicio_corte',
+      'id_inmueble',
+      'inicio',
+    ]);
+    expect(await Contrato.findByPk(id)).toMatchObject({ estado: 'activo', canon: '1500000.00' });
+  });
+
+  test('el día límite de pago se cambia y deja su fila de historial', async () => {
+    const id = await nuevo();
+
+    const respuesta = await editar(id, { fecha_limite_pago: 10, canon: 1500000 });
+
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.body.contrato.fecha_limite_pago).toBe(10);
+    const filas = await HistorialContrato.findAll({ where: { id_contrato: id } });
+    expect(filas.map((f) => [f.campo, f.valor_anterior, f.valor_nuevo, f.cambiado_por])).toEqual([
+      ['fecha_limite_pago', '5', '10', duenio.sub],
+    ]);
+  });
+
+  test('un contrato terminado no se edita: 409', async () => {
+    const id = await nuevo();
+    await Contrato.update({ estado: 'finalizado' }, { where: { id_contrato: id } });
+
+    expect((await editar(id, { canon: 1600000 })).statusCode).toBe(409);
+  });
+
+  test('fin se extiende durante el término inicial', async () => {
+    const id = await nuevo();
+
+    expect((await editar(id, { fin: sumarDias(hoy, 400) })).statusCode).toBe(200);
+    expect(soloFecha((await Contrato.findByPk(id))?.fin)).toBe(sumarDias(hoy, 400));
+  });
+
+  test('fin de un contrato prorrogado: 409', async () => {
+    const id = await nuevo({ inicio: sumarDias(hoy, -400), fin: sumarDias(hoy, -35) });
+
+    expect((await editar(id, { fin: sumarDias(hoy, 400) })).statusCode).toBe(409);
+  });
+
+  test('fin con preaviso registrado: 409', async () => {
+    const id = await nuevo();
+    await Contrato.update({ preaviso_enviado_en: new Date(), preaviso_vencimiento: enTerminoInicial.fin }, { where: { id_contrato: id } });
+
+    expect((await editar(id, { fin: sumarDias(hoy, 400) })).statusCode).toBe(409);
+  });
+
+  test('fin hoy o en el pasado: 400 en fin', async () => {
+    const id = await nuevo();
+
+    for (const fin of [hoy, sumarDias(hoy, -1)]) {
+      const respuesta = await editar(id, { fin });
+      expect(respuesta.statusCode).toBe(400);
+      expect(respuesta.body.errores).toEqual([{ campo: 'fin', mensaje: expect.any(String) }]);
+    }
+  });
+
+  test('fin enviado igual al actual no cuenta como cambio', async () => {
+    const id = await nuevo({ inicio: sumarDias(hoy, -400), fin: sumarDias(hoy, -35) });
+
+    expect((await editar(id, { fin: sumarDias(hoy, -35), info_contrato: 'Otrosí' })).statusCode).toBe(200);
   });
 });
 

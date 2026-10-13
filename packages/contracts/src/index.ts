@@ -33,23 +33,30 @@ export type {
 
 export {
   ANIOS_PLENA_VOLUNTAD,
+  CAMPOS_CONTRATO_EDITABLES,
   CAUSALES_PREAVISO_ARRENDADOR,
   DIAS_RECORDATORIO_PREAVISO,
   ESTADOS_CONTRATO,
   FUNDAMENTO_PREAVISO,
   IPC_ANUAL,
   MESES_PREAVISO_TERMINACION,
+  MOTIVOS_CANCELACION,
   TAMANO_MAXIMO_ANEXO_MB,
   TIPOS_ANEXO_CONOCIDOS,
   esEstadoContrato,
 } from './contratos';
 
 export type {
+  CancelarContratoRequest,
   CausalPreaviso,
+  ClaveMotivoCancelacion,
   CrearAnexoFormData,
   CrearContratoRequest,
   EstadoContrato,
+  MotivoCancelacion,
+  ParteContrato,
   PartePreaviso,
+  SituacionContrato,
   TipoAnexo,
 } from './contratos';
 
@@ -77,6 +84,7 @@ export { LONGITUD_MINIMA_CONTRASENA } from './validacion/reglas';
 export {
   errorDeValidacion,
   validarAltaInquilino,
+  validarCancelacion,
   validarContrato,
   validarCuentaCobro,
   validarInmueble,

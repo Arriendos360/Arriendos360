@@ -21,7 +21,7 @@ import {
   IPC_ANUAL,
   MESES_PREAVISO_TERMINACION,
 } from 'arriendos360-contracts';
-import type { CausalPreaviso, PartePreaviso } from 'arriendos360-contracts';
+import type { CausalPreaviso, PartePreaviso, SituacionContrato } from 'arriendos360-contracts';
 
 import type { InmuebleAjeno } from '../clientes/inmuebles';
 import type { UsuarioAjeno } from '../clientes/identidad';
@@ -164,8 +164,22 @@ export const parteQueAvisa = (contrato: { preaviso_enviado_por?: unknown; id_inq
   contrato.preaviso_enviado_por === contrato.id_inquilino ? 'INQUILINO' : 'PROPIETARIO';
 
 /**
- * Añade `preaviso` a un contrato activo ya compuesto, para las dos partes: la ley obliga a las
- * dos. Sólo el dueño del inmueble recibe `causales_disponibles`.
+ * Cómo se presenta un contrato activo. «Renovado» es la prórroga legal sin preaviso; con preaviso
+ * no hay prórroga, y llegado su vencimiento queda «vencido con preaviso» hasta que se finalice.
+ */
+const situacionSegun = (preaviso: Preaviso | null, conPreavisoRegistrado: boolean): SituacionContrato =>
+  preaviso?.vencido
+    ? 'vencido_con_preaviso'
+    : preaviso?.prorrogado && !conPreavisoRegistrado
+      ? 'renovado'
+      : 'vigente';
+
+export const situacionDe = (contrato: Contrato): SituacionContrato =>
+  situacionSegun(preavisoHoy(contrato), Boolean(contrato.preaviso_vencimiento));
+
+/**
+ * Añade `preaviso` y `situacion` a un contrato activo ya compuesto, para las dos partes: la ley
+ * obliga a las dos. Sólo el dueño del inmueble recibe `causales_disponibles`.
  */
 export const conPreaviso = (contrato: Record<string, unknown>, sub: string): Record<string, unknown> => {
   const preaviso = contrato['estado'] === ESTADO_CONTRATO_ACTIVO ? preavisoHoy(contrato as unknown as ContratoPreavisable) : null;
@@ -181,6 +195,7 @@ export const conPreaviso = (contrato: Record<string, unknown>, sub: string): Rec
 
   return {
     ...contrato,
+    situacion: situacionSegun(preaviso, Boolean(contrato['preaviso_vencimiento'])),
     preaviso: {
       ...preaviso,
       enviado,

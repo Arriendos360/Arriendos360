@@ -4,8 +4,15 @@
  */
 
 import type { Request, Response } from 'express';
-import { ajusteDeCanon, crearError, hoyEnZonaNegocio } from 'arriendos360-shared';
-import { IPC_ANUAL, MESES_PREAVISO_TERMINACION, errorDeValidacion, validarContrato } from 'arriendos360-contracts';
+import { ajusteDeCanon, crearError, hoyEnZonaNegocio, soloFecha } from 'arriendos360-shared';
+import {
+  CAMPOS_CONTRATO_EDITABLES,
+  IPC_ANUAL,
+  MESES_PREAVISO_TERMINACION,
+  errorDeValidacion,
+  validarCancelacion,
+  validarContrato,
+} from 'arriendos360-contracts';
 
 import { reemitirContrasenaTemporal, usuarioPorId } from '../clientes/identidad';
 import { propioDe } from '../clientes/inmuebles';
@@ -18,7 +25,12 @@ import {
   registrarPreavisoEnviado,
 } from '../eventos';
 import { Contrato } from '../models/Contrato';
-import { ESTADO_CONTRATO_ACTIVO, ESTADO_CONTRATO_FINALIZADO } from '../models/constantes';
+import { HistorialContrato } from '../models/HistorialContrato';
+import {
+  ESTADO_CONTRATO_ACTIVO,
+  ESTADO_CONTRATO_CANCELADO,
+  ESTADO_CONTRATO_FINALIZADO,
+} from '../models/constantes';
 import { esUuid } from '../models/uuid';
 import {
   adjuntarPartes,
@@ -28,11 +40,14 @@ import {
   conPreaviso,
   parteQueAvisa,
   preavisoHoy,
+  situacionDe,
 } from '../services/composicion';
 import { documentoContrato } from '../services/documentoContrato';
 import type { DatosContrato, Persona } from '../services/documentoContrato';
 import { documentoPreaviso } from '../services/documentoPreaviso';
 import type { DatosPreaviso } from '../services/documentoPreaviso';
+import { registrarCambios } from '../services/historial';
+import type { ExtraCancelacion } from '../services/historial';
 import {
   contratoDondeEsParte,
   contratoPropio,
@@ -55,6 +70,8 @@ const COLUMNAS_DEL_SISTEMA = new Set([
 
 const sinColumnasDelSistema = (cuerpo: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(Object.entries(cuerpo).filter(([columna]) => !COLUMNAS_DEL_SISTEMA.has(columna)));
+
+const EDITABLES: readonly string[] = CAMPOS_CONTRATO_EDITABLES;
 
 /** 502 cuando ms-inmuebles no responde; nunca se degrada a 403 ni a una lista vacía. */
 const responderServicioCaido = (res: Response, error: unknown, accion: string): Response => {
@@ -87,6 +104,26 @@ export const obtenerPorId = async (req: Request, res: Response): Promise<Respons
     return res.json(conPreaviso(conAjusteCanon(await adjuntarPartesA(contrato), sub), sub));
   } catch (error) {
     return responderServicioCaido(res, error, 'obtener contrato');
+  }
+};
+
+/** GET /api/contratos/:id/historial — los cambios del contrato, el más reciente primero, para las dos partes. */
+export const historial = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const contrato = await contratoDondeEsParte(req.params['id'] as string, req.usuario?.sub as string);
+
+    if (!contrato) {
+      return res.status(404).json(crearError('Contrato no encontrado'));
+    }
+
+    return res.json(
+      await HistorialContrato.findAll({
+        where: { id_contrato: contrato.id_contrato },
+        order: [['cambiado_en', 'DESC']],
+      }),
+    );
+  } catch (error) {
+    return responderServicioCaido(res, error, 'obtener el historial del contrato');
   }
 };
 
@@ -256,6 +293,16 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
 export const actualizar = async (req: Request, res: Response): Promise<Response> => {
   try {
     const sub = req.usuario?.sub as string;
+    const cambios = (req.body ?? {}) as Record<string, unknown>;
+
+    // Sólo los editables: el estado tiene sus endpoints, y las partes, el inicio y el corte no cambian.
+    const ajenos = Object.keys(cambios).filter((campo) => !EDITABLES.includes(campo));
+    if (ajenos.length > 0) {
+      return res
+        .status(400)
+        .json(errorDeValidacion(ajenos.map((campo) => ({ campo, mensaje: `El campo ${campo} no se puede editar` }))));
+    }
+
     const contrato = await contratoPropio(req.params['id'] as string, sub);
 
     if (!contrato) {
@@ -263,20 +310,40 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
         .status(404)
         .json(crearError('Contrato no encontrado o no tienes permisos'));
     }
+    if (contrato.estado !== ESTADO_CONTRATO_ACTIVO) {
+      return res.status(409).json(crearError('Sólo se puede editar un contrato activo'));
+    }
 
-    const cambios = sinColumnasDelSistema(req.body as Record<string, unknown>);
+    const hoy = hoyEnZonaNegocio();
+    const finActual = soloFecha(contrato.fin) as string;
+    // `fin` mide el término que se prorroga: sólo se corrige mientras corre y sin preaviso.
+    if ('fin' in cambios && soloFecha(cambios['fin']) !== finActual) {
+      if (hoy > finActual || contrato.preaviso_enviado_en) {
+        return res
+          .status(409)
+          .json(crearError('La fecha de fin sólo se cambia durante el término inicial y sin preaviso'));
+      }
+      const finNuevo = soloFecha(cambios['fin']);
+      if (finNuevo === null || finNuevo <= hoy || finNuevo <= (soloFecha(contrato.inicio) as string)) {
+        return res
+          .status(400)
+          .json(errorDeValidacion([{ campo: 'fin', mensaje: 'La fecha de fin debe ser posterior a hoy y al inicio' }]));
+      }
+    }
 
-    const ajuste = ajusteDeCanon(contrato, hoyEnZonaNegocio(), IPC_ANUAL);
+    const ajuste = ajusteDeCanon(contrato, hoy, IPC_ANUAL);
     const canonNuevo = Number(cambios['canon']);
     // El modal de edición envía siempre el canon: sólo cuenta si cambia.
     const esAjuste =
-      contrato.estado === ESTADO_CONTRATO_ACTIVO &&
       ajuste?.en_ventana === true &&
       cambios['canon'] !== undefined &&
       canonNuevo !== Number(contrato.canon);
 
     if (!esAjuste) {
-      await contrato.update(cambios, { usuarioAuditor: sub });
+      await sequelize.transaction(async (transaccion) => {
+        await registrarCambios(contrato, cambios, sub, transaccion);
+        await contrato.update(cambios, { transaction: transaccion, usuarioAuditor: sub });
+      });
       return res.json({ mensaje: 'Contrato actualizado', contrato });
     }
 
@@ -298,6 +365,7 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
     // Con la ventana abierta, cambiar el canon es el ajuste anual: se guarda desde cuándo rige y se avisa al
     // inquilino. El siguiente cuenta desde `rige_desde` porque la ley pide 12 meses bajo un mismo precio.
     await sequelize.transaction(async (transaccion) => {
+      await registrarCambios(contrato, cambios, sub, transaccion);
       await contrato.update(
         { ...cambios, fecha_ultimo_ajuste: ajuste.rige_desde },
         { transaction: transaccion, usuarioAuditor: sub },
@@ -407,35 +475,81 @@ export const enviarPreaviso = async (req: Request, res: Response): Promise<Respo
   }
 };
 
-/** PUT /api/contratos/:id/finalizar */
-export const finalizar = async (req: Request, res: Response): Promise<Response> => {
+/** La condición propia de cada terminación: un rechazo, o lo que el historial guarda además. */
+type Admision = { rechazo: [estado: number, cuerpo: object] } | { extra?: ExtraCancelacion };
+
+/**
+ * Lleva un contrato propio y activo a un estado terminal. El estado, su fila de historial y
+ * `ContratoFinalizado`, que libera el inmueble y para la facturación, van en una transacción.
+ */
+const terminar = async (
+  req: Request,
+  res: Response,
+  estado: string,
+  admite: (contrato: Contrato) => Admision,
+): Promise<Response> => {
+  const sub = req.usuario?.sub as string;
+  let contrato: Contrato | null;
   try {
-    const sub = req.usuario?.sub as string;
-    const contrato = await contratoPropio(req.params['id'] as string, sub);
-
-    if (!contrato) {
-      return res
-        .status(404)
-        .json(crearError('Contrato no encontrado o no tienes permisos'));
-    }
-
-    // El cambio de estado y su `ContratoFinalizado`, en una transacción.
-    await sequelize.transaction(async (transaccion) => {
-      await contrato.update(
-        { estado: ESTADO_CONTRATO_FINALIZADO },
-        { transaction: transaccion, usuarioAuditor: sub },
-      );
-      await registrarContratoFinalizado(contrato, transaccion);
-    });
-
-    return res.json({ mensaje: 'Contrato finalizado', contrato });
+    contrato = await contratoPropio(req.params['id'] as string, sub);
   } catch (error) {
-    console.error('Error al finalizar contrato:', (error as Error).message);
-    return res
-      .status(500)
-      .json({ mensaje: 'Error al finalizar contrato', error: (error as Error).message });
+    return responderServicioCaido(res, error, 'verificar el contrato');
   }
+
+  if (!contrato) {
+    return res.status(404).json(crearError('Contrato no encontrado o no tienes permisos'));
+  }
+  if (contrato.estado !== ESTADO_CONTRATO_ACTIVO) {
+    return res.status(409).json(crearError('Sólo se puede terminar un contrato activo'));
+  }
+
+  const admision = admite(contrato);
+  if ('rechazo' in admision) {
+    return res.status(admision.rechazo[0]).json(admision.rechazo[1]);
+  }
+
+  try {
+    const terminado = contrato;
+    await sequelize.transaction(async (transaccion) => {
+      await registrarCambios(terminado, { estado }, sub, transaccion, admision.extra);
+      await terminado.update({ estado }, { transaction: transaccion, usuarioAuditor: sub });
+      // Cancelar también lo emite: lo que ms-inmuebles necesita saber es que el contrato terminó.
+      await registrarContratoFinalizado(terminado, transaccion);
+    });
+  } catch (error) {
+    console.error(`Error al dejar el contrato en ${estado}:`, (error as Error).message);
+    return res.status(500).json(crearError('Error al terminar el contrato'));
+  }
+
+  return res.json({ mensaje: `Contrato ${estado}`, contrato });
 };
+
+/** PUT /api/contratos/:id/finalizar — el contrato no se renovó: sólo con un preaviso vencido. */
+export const finalizar = (req: Request, res: Response): Promise<Response> =>
+  terminar(req, res, ESTADO_CONTRATO_FINALIZADO, (contrato): Admision =>
+    situacionDe(contrato) === 'vencido_con_preaviso'
+      ? {}
+      : { rechazo: [409, crearError('Un contrato sin preaviso vencido no se finaliza: cancélalo')] },
+  );
+
+/**
+ * PUT /api/contratos/:id/cancelar — terminación antes de tiempo, con su motivo y la indemnización
+ * pactada. El servidor valida la forma, no el valor sugerido.
+ */
+export const cancelar = (req: Request, res: Response): Promise<Response> =>
+  terminar(req, res, ESTADO_CONTRATO_CANCELADO, (contrato): Admision => {
+    const { datos, errores } = validarCancelacion(req.body, { situacion: situacionDe(contrato) });
+    if (errores.length > 0) {
+      return { rechazo: [400, errorDeValidacion(errores)] };
+    }
+    return {
+      extra: {
+        motivo: datos.motivo as string,
+        indemnizacion: datos.indemnizacion as number,
+        indemnizacion_a_cargo_de: datos.indemnizacion_a_cargo_de ?? null,
+      },
+    };
+  });
 
 /**
  * POST /api/contratos/:id/contrasena-inquilino — regenera la contraseña temporal

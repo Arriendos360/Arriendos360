@@ -4,6 +4,7 @@ import { sequelize } from '../src/config/database';
 import { TABLA_SALIDA, almacen, crearPublicadorDeSalida } from '../src/eventos';
 import {
   app,
+  cancelarContrato,
   cerrarEntorno,
   conToken,
   crearContrato,
@@ -86,13 +87,11 @@ describe('El evento se anota con el contrato, en la misma transaccion', () => {
     expect(sobre?.payload['id_inmueble']).toBe(idInmueble);
   });
 
-  test('finalizar deja `ContratoFinalizado`, con la misma clave de orden', async () => {
+  test('terminar deja `ContratoFinalizado`, con la misma clave de orden', async () => {
     const idInmueble = inmuebleDe(duenio.sub, 'Bandeja 2');
     const { id } = await crearContrato(duenio.token, idInmueble, idInquilino);
 
-    await request(app)
-      .put(`/api/contratos/${id}/finalizar`)
-      .set(...conToken(duenio.token));
+    await cancelarContrato(duenio.token, id);
 
     const bandeja = await enLaBandeja();
     expect(bandeja.at(-1)?.tipo).toBe('ContratoFinalizado');

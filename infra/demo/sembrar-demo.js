@@ -282,7 +282,7 @@ const pagosDe = async (token, cuenta, pagos) => {
 /**
  * Cinco inmuebles que entre todos cubren cada estado del sistema.
  *
- * `disponible` y `arrendado`; contrato `activo` y `finalizado`; cuentas de cobro
+ * `disponible` y `arrendado`; contrato `activo` y `cancelado`; cuentas de cobro
  * `PAGADA`, `PENDIENTE`, `PARCIAL` y `EN_MORA`; transacciones `CONFIRMADA` y `ANULADA`.
  * Lo que no se puede enseñar no se puede sustentar.
  */
@@ -384,10 +384,12 @@ const CARTERA = [
       estrato: 4,
     },
     inquilino: 'carmen',
-    // Contrato terminado: al finalizarlo, el inmueble vuelve a `disponible` por evento
-    // (`docs/adr/0013`). Su única cuenta queda pagada para que no aparezca en mora.
+    // Contrato terminado: al cancelarlo, el inmueble vuelve a `disponible` por evento
+    // (`docs/adr/0013`). Se cancela y no se finaliza porque finalizar exige un preaviso
+    // vencido, y por la API no se siembra uno en el pasado (`docs/adr/0027`). Su única
+    // cuenta queda pagada para que no aparezca en mora.
     contrato: { mesesDeAntiguedad: 14, meses: 12, canon: 3100000 },
-    finalizar: true,
+    cancelar: true,
     historial: [{ hace: 14, pagos: [{ monto: 3100000, medio_pago: 'Transferencia', enDias: 3 }] }],
   },
   {
@@ -475,19 +477,24 @@ const sembrar = async () => {
       );
     }
 
-    if (ficha.finalizar) {
+    if (ficha.cancelar) {
       const actual = await exigir('GET', `/api/contratos/${contrato.id_contrato}`, { token }, [200]);
       if (actual.estado === 'activo') {
-        await exigir('PUT', `/api/contratos/${contrato.id_contrato}/finalizar`, { token }, [200]);
+        await exigir(
+          'PUT',
+          `/api/contratos/${contrato.id_contrato}/cancelar`,
+          { token, cuerpo: { motivo: 'mutuo_acuerdo', indemnizacion: 0 } },
+          [200],
+        );
       }
     }
 
     resumen.push({
       inmueble: ficha.alias,
-      estado: ficha.finalizar ? 'contrato finalizado' : 'arrendado',
+      estado: ficha.cancelar ? 'contrato cancelado' : 'arrendado',
       cuentas: ficha.historial.length,
     });
-    console.log('·', ficha.finalizar ? 'finalizado' : 'arrendado');
+    console.log('·', ficha.cancelar ? 'cancelado' : 'arrendado');
   }
 
   // Al final, y no por contrato: marca de una vez lo vencido sin pagar. Es lo mismo que

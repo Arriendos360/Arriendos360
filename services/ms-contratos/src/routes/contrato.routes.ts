@@ -8,11 +8,13 @@ import {
 } from '../controllers/anexo.controller';
 import {
   actualizar,
+  cancelar,
   cartaPreaviso,
   crear,
   documento,
   enviarPreaviso,
   finalizar,
+  historial,
   obtenerPorId,
   obtenerTodos,
   reemitirContrasenaDelInquilino,
@@ -39,6 +41,9 @@ router.delete('/:id/anexos/:idAnexo', esPropietario, eliminarAnexo);
 // GET /api/contratos/:id/documento — el contrato en PDF, para las dos partes.
 router.get('/:id/documento', documento);
 
+// GET /api/contratos/:id/historial — los cambios del contrato, para las dos partes.
+router.get('/:id/historial', historial);
+
 // GET /api/contratos/:id
 router.get('/:id', obtenerPorId);
 
@@ -50,6 +55,7 @@ router.get('/:id/preaviso', cartaPreaviso);
 router.post('/', esPropietario, crear);
 router.put('/:id', esPropietario, actualizar);
 router.put('/:id/finalizar', esPropietario, finalizar);
+router.put('/:id/cancelar', esPropietario, cancelar);
 
 // POST /api/contratos/:id/contrasena-inquilino
 router.post('/:id/contrasena-inquilino', esPropietario, reemitirContrasenaDelInquilino);

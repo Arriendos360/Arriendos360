@@ -8,6 +8,7 @@ import { TIPO_CANON_AJUSTADO, hoyEnZonaNegocio, sumarDias } from 'arriendos360-s
 
 import {
   app,
+  cancelarContrato,
   cerrarEntorno,
   conToken,
   crearContrato,
@@ -20,6 +21,7 @@ import {
 } from './utiles/entorno';
 import { TABLA_SALIDA, suscriptoresDe } from '../src/eventos';
 import { Contrato } from '../src/models/Contrato';
+import { HistorialContrato } from '../src/models/HistorialContrato';
 
 let duenio: ReturnType<typeof propietario>;
 
@@ -98,13 +100,13 @@ describe('ajuste_canon en la consulta', () => {
     expect(respuesta.body).not.toHaveProperty('ajuste_canon');
   });
 
-  test('un contrato finalizado no lo trae', async () => {
+  test('un contrato terminado no lo trae', async () => {
     const { id } = await crearContrato(duenio.token, inmuebleDe(duenio.sub), inquilinoDe(), CON_VENTANA_ABIERTA);
-    await request(app).put(`/api/contratos/${id}/finalizar`).set(...conToken(duenio.token));
+    await cancelarContrato(duenio.token, id);
 
     const respuesta = await consultar(duenio.token, id);
 
-    expect(respuesta.body.estado).toBe('finalizado');
+    expect(respuesta.body.estado).toBe('cancelado');
     expect(respuesta.body).not.toHaveProperty('ajuste_canon');
   });
 });
@@ -131,6 +133,15 @@ describe('aplicar el ajuste editando el canon', () => {
       anio_ipc: 2024,
       rige_desde: '2025-04-10',
     });
+  });
+
+  test('el ajuste deja su fila de canon en el historial', async () => {
+    const id = await nuevo();
+
+    await editar(id, { canon: 1578000 });
+
+    const filas = await HistorialContrato.findAll({ where: { id_contrato: id } });
+    expect(filas.map((f) => [f.campo, f.valor_anterior, f.valor_nuevo])).toEqual([['canon', '1500000.00', '1578000.00']]);
   });
 
   test('por encima del tope: 400 en canon, sin cambio y sin aviso', async () => {
@@ -175,8 +186,9 @@ describe('aplicar el ajuste editando el canon', () => {
   test('la fecha del último ajuste no se acepta del cliente', async () => {
     const id = await nuevo();
 
-    await editar(id, { fecha_ultimo_ajuste: '2030-01-01', info_contrato: 'Sin cambios de canon' });
+    const respuesta = await editar(id, { fecha_ultimo_ajuste: '2030-01-01', info_contrato: 'Sin cambios de canon' });
 
+    expect(respuesta.status).toBe(400);
     expect((await Contrato.findByPk(id))?.fecha_ultimo_ajuste).toBeNull();
   });
 });

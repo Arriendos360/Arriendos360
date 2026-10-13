@@ -80,8 +80,8 @@ describe('Auditoria de Contrato', () => {
   });
 
   test('la modificacion dentro de una transaccion tambien', async () => {
-    // El camino que usa `finalizar`, ahora que el cambio de estado y el evento
-    // van juntos en la misma transaccion.
+    // El camino de finalizar y cancelar: el cambio de estado y el evento van
+    // juntos en la misma transaccion.
     const contrato = await contratoNuevo();
 
     await sequelize.transaction(async (transaccion) => {

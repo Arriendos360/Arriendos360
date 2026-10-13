@@ -665,7 +665,7 @@ export const preavisoProximo = (carga: PreavisoProximo, destinatario: Destinatar
 
 const NOTA_SERVICIO_POSTAL = 'Este correo no reemplaza la carta por correo certificado que exige la ley.';
 
-/** Aviso formal del preaviso del arrendador (art. 22): al inquilino, con la causal. */
+/** Aviso formal del preaviso del arrendador (art. 22 num. 8): al inquilino, con la causal. */
 export const preavisoEnviadoInquilino = (
   carga: PreavisoEnviado,
   destinatario: Destinatario,
@@ -696,7 +696,7 @@ export const preavisoEnviadoInquilino = (
   };
 };
 
-/** Aviso formal del preaviso del arrendatario (art. 24): al propietario. */
+/** Aviso formal del preaviso del arrendatario (art. 24 num. 5): al propietario. */
 export const preavisoEnviadoPropietario = (
   carga: PreavisoEnviado,
   destinatario: Destinatario,
