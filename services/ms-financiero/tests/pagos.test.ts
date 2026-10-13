@@ -27,7 +27,9 @@
 import request from 'supertest';
 import { hoyEnZonaNegocio, sumarDias } from 'arriendos360-shared';
 
+import { CuentaCobro } from '../src/models/CuentaCobro';
 import { Transaccion } from '../src/models/Transaccion';
+import { procesarPagos } from '../src/services/motor';
 import {
   ESTADO_CUENTA_PAGADA,
   ESTADO_CUENTA_PARCIAL,
@@ -41,6 +43,7 @@ import {
   contratosFalso,
   crearCuenta,
   escenario,
+  eventosDeSalida,
   prepararEntorno,
   propietario,
 } from './utiles/entorno';
@@ -76,6 +79,55 @@ describe('Emision de una cuenta de cobro', () => {
     // El fin es la vispera del siguiente corte.
     expect(cuenta.inicio).toBe('2026-01-01');
     expect(cuenta.fin).toBe('2026-01-31');
+  });
+
+  test('el periodo es siempre el de corte: otro día se ajusta y el `fin` del cuerpo no cuenta', async () => {
+    const { propietario: duenio, idContrato } = escenario({ fecha_inicio_corte: '2026-01-17' });
+
+    const { respuesta } = await crearCuenta(duenio.token, idContrato, {
+      inicio: '2026-03-05',
+      fin: '2026-12-31',
+    });
+
+    expect(respuesta.statusCode).toBe(201);
+    expect(respuesta.body.cuenta_cobro.inicio).toBe('2026-03-17');
+    expect(respuesta.body.cuenta_cobro.fin).toBe('2026-04-16');
+  });
+
+  test('un periodo que ya tiene cuenta no admite otra: 409', async () => {
+    const { propietario: duenio, idContrato } = escenario({ fecha_inicio_corte: '2026-01-17' });
+    await crearCuenta(duenio.token, idContrato, { inicio: '2026-05-17' });
+    const antes = await CuentaCobro.count();
+
+    const { respuesta } = await crearCuenta(duenio.token, idContrato, { inicio: '2026-05-02' });
+
+    expect(respuesta.statusCode).toBe(409);
+    expect(await CuentaCobro.count()).toBe(antes);
+  });
+
+  test('en un contrato terminado la cuenta no tiene periodo ni entra en mora', async () => {
+    const { propietario: duenio, idContrato } = escenario({ estado: 'cancelado' });
+
+    // Pedirle un periodo a un contrato terminado no se reinterpreta: se rechaza.
+    const conPeriodo = await crearCuenta(duenio.token, idContrato, { inicio: '2026-03-01' });
+    expect(conPeriodo.respuesta.statusCode).toBe(409);
+
+    const { respuesta, id } = await crearCuenta(duenio.token, idContrato, {
+      inicio: undefined,
+      detalle: 'Indemnización por terminación del contrato',
+    });
+
+    expect(respuesta.statusCode).toBe(201);
+    expect(respuesta.body.cuenta_cobro).toMatchObject({ inicio: null, fin: null });
+
+    const evento = (await eventosDeSalida('CuentaCobroGenerada')).find(
+      (fila) => fila.payload['id_cuenta_cobro'] === id,
+    );
+    expect(evento?.payload).toMatchObject({ inicio: null, fin: null });
+
+    await request(app).post('/api/pagos/verificar-mora').set(...conToken(duenio.token));
+    await procesarPagos();
+    expect((await CuentaCobro.findByPk(id))?.estado).toBe(ESTADO_CUENTA_PENDIENTE);
   });
 
   test('un inquilino no puede emitir un cobro, aunque sea parte del contrato', async () => {

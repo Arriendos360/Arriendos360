@@ -176,8 +176,11 @@ export const manejadores: Record<string, Manejador> = {
 
     exigirUuid(carga?.id_cuenta_cobro, 'id_cuenta_cobro', tipo);
     const idInquilino = exigirUuid(carga?.id_inquilino, 'id_inquilino', tipo);
-    exigirTexto(carga.inicio, 'inicio', tipo);
-    exigirTexto(carga.fin, 'fin', tipo);
+    // Un cobro sin periodo trae los dos en `null`; si no, los dos son fechas.
+    if (carga.inicio !== null || carga.fin !== null) {
+      exigirTexto(carga.inicio, 'inicio', tipo);
+      exigirTexto(carga.fin, 'fin', tipo);
+    }
 
     const destinatarios = await destinatariosDe([idInquilino]);
     const destinatario = destinatarios.get(idInquilino);

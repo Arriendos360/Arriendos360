@@ -10,9 +10,9 @@ import {
     reemitirContrasenaInquilino, subirAnexo
 } from '../features/contratos/api';
 import {
-    OPCIONES_A_CARGO_DE, filaDeHistorial, indemnizacionSugerida, motivosPara, primerInicioLibre
+    OPCIONES_A_CARGO_DE, filaDeHistorial, indemnizacionSugerida, motivosPara
 } from '../features/contratos/estado';
-import { crearCuentaCobro, cuentasDeContrato } from '../features/pagos/api';
+import { crearCuentaCobro } from '../features/pagos/api';
 import { resumenDeAjuste } from '../features/contratos/ajuste';
 import { AVISO_SERVICIO_POSTAL, resumenDePreaviso } from '../features/contratos/preaviso';
 import {
@@ -352,12 +352,11 @@ export default function ContratoDetalle() {
             : 'Contrato cancelado. El inmueble volverá a «Disponible» en unos segundos.');
     });
 
-    // Sin `fin`: el servicio lo deriva del día de corte, y la tabla exige que sea posterior a `inicio`.
+    // El contrato ya está terminado: el servicio la crea sin periodo.
     const cobrarIndemnizacion = () => ejecutar(async () => {
         await crearCuentaCobro({
             id_contrato: id,
             valor: dialogo.valor,
-            inicio: primerInicioLibre(await cuentasDeContrato(id), hoyEnBogota()),
             detalle: `Indemnización por terminación del contrato: ${MOTIVOS_CANCELACION[dialogo.motivo].etiqueta}`
         });
         setDialogo(null);

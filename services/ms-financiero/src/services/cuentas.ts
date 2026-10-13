@@ -21,8 +21,9 @@ export interface DatosEmision {
    */
   id_inquilino?: string | undefined;
   valor: number | string;
-  inicio: string;
-  fin: string;
+  /** `null` los dos en un cobro sin periodo. */
+  inicio: string | null;
+  fin: string | null;
   detalle: string;
   /** Quien queda en las columnas de auditoria. Ausente = USUARIO_SISTEMA. */
   auditor?: string | undefined;

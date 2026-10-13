@@ -67,6 +67,20 @@ describe('Resolución del destinatario', () => {
     expect(envio!.cuerpo).toContain('Reina');
   });
 
+  test('un cobro sin periodo, con inicio y fin en null, también se avisa', async () => {
+    const idUsuario = usuarioDe({ email: 'indemnizado@test.com' });
+
+    const { respuesta, sobre } = await entregarEvento('CuentaCobroGenerada', {
+      ...cuentaGenerada(idUsuario),
+      inicio: null,
+      fin: null,
+    });
+
+    expect(respuesta.status).toBe(200);
+    const [envio] = await enviosDe(sobre.id_evento);
+    expect(envio!.destinatario).toBe('indemnizado@test.com');
+  });
+
   test('un `email` metido en el sobre se IGNORA', async () => {
     // La prueba que defiende la regla de verdad. Si alguien añadiera `email` al
     // payload y el manejador lo usara, esta prueba lo atraparía: el correo tiene que

@@ -229,10 +229,13 @@ const contratoDe = async (token, idInmueble, alias, definicion) => {
   return contrato;
 };
 
-/** Emite la cuenta de cobro de un periodo si no existe ya. */
+/**
+ * Emite la cuenta de cobro de un periodo si no existe ya. Se busca por mes: repetido otro día,
+ * `inicio` cambia, pero el servicio lo lleva al corte del contrato y el periodo es el mismo.
+ */
 const cuentaDe = async (token, idContrato, inicio, valor) => {
   const cuentas = await exigir('GET', `/api/pagos/contrato/${idContrato}`, { token }, [200]);
-  const existente = cuentas.find((cuenta) => String(cuenta.inicio).slice(0, 10) === inicio);
+  const existente = cuentas.find((cuenta) => String(cuenta.inicio).slice(0, 7) === inicio.slice(0, 7));
   if (existente) return existente;
 
   const datos = await exigir(
@@ -464,7 +467,8 @@ const sembrar = async () => {
         : {}),
     });
 
-    for (const periodo of ficha.historial) {
+    // Un contrato que ya no está activo no factura periodos: su historial se sembró mientras lo estuvo.
+    for (const periodo of contrato.estado === 'activo' ? ficha.historial : []) {
       const desde = corteHaceMeses(periodo.hace);
       const cuenta = await cuentaDe(token, contrato.id_contrato, desde, ficha.contrato.canon);
       await pagosDe(

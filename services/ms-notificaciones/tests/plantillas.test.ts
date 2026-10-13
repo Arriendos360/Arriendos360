@@ -217,6 +217,13 @@ describe('Avisos del motor', () => {
     expect(cuerpoHtml).not.toMatch(/mayo/);
   });
 
+  test('un cobro sin periodo no lleva la fila Periodo', () => {
+    const { cuerpoHtml } = cuentaCobroGenerada({ ...generada, inicio: null, fin: null }, quien);
+
+    expect(cuerpoHtml).not.toMatch(/Periodo/);
+    expect(cuerpoHtml).toContain('1.500.000');
+  });
+
   test('el vencimiento próximo dice una FECHA, no «mañana»', () => {
     const carga = { ...base, entra_en_mora_el: '2026-06-07' };
 
