@@ -49,3 +49,16 @@ export interface CrearAnexoFormData {
   file: unknown;
   tipo: TipoAnexo;
 }
+
+/**
+ * IPC anual de Colombia en porcentaje (variación de diciembre a diciembre, DANE). Es el tope
+ * del reajuste del canon (Ley 820 de 2003, art. 20). Cada enero se agrega el año anterior.
+ */
+export const IPC_ANUAL: Readonly<Record<number, number>> = {
+  2020: 1.61,
+  2021: 5.62,
+  2022: 13.12,
+  2023: 9.28,
+  2024: 5.2,
+  2025: 5.1,
+};

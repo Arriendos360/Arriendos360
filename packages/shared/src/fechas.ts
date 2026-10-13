@@ -102,6 +102,9 @@ export const periodoDeCorte = (diaCorte: number, anio: number, mes: number): Per
   };
 };
 
+/** Días antes del corte en que el motor ya genera la cuenta del periodo. */
+export const DIAS_ANTICIPACION_FACTURA = 2;
+
 /** El periodo cuyo corte cae en el mes de `fechaISO`. */
 export const periodoQueEmpiezaEn = (fechaISO: FechaISO, diaCorte: number): Periodo => {
   const { anio, mes } = partesDeISO(fechaISO);

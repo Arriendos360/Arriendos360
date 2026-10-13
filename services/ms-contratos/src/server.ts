@@ -15,7 +15,8 @@ const PUERTO = enteroDeEntorno('PORT', 3013);
 
 /**
  * Variables obligatorias. Sin las `MS_*_URL` no se comprobaría la revocación ni la
- * pertenencia, y `ContratoFormalizado` se daría por entregado sin facturar.
+ * pertenencia, y `ContratoFormalizado` o `CanonAjustado` se darían por entregados sin que
+ * nadie los atendiera.
  */
 const OBLIGATORIAS = [
   'DB_PASSWORD',
@@ -24,6 +25,7 @@ const OBLIGATORIAS = [
   'MS_IDENTIDAD_URL',
   'MS_INMUEBLES_URL',
   'MS_FINANCIERO_URL',
+  'MS_NOTIFICACIONES_URL',
   'MIGRACIONES_AL_ARRANCAR',
 ];
 

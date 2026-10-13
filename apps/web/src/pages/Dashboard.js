@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, Building2, FileText, Home, TrendingUp } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
+import { listarContratos } from '../features/contratos/api';
 import { obtenerResumen } from '../features/dashboard/api';
 import { actuaComoPropietario, nombreDeInmueble } from '../features/contratos/piezas';
 import { listarCuentasCobro } from '../features/pagos/api';
-import { Button, Card, EmptyState, FormError, formatearDinero, formatearMes } from '../ui';
+import { Button, Card, EmptyState, FormError, formatearDinero, formatearFecha, formatearMes } from '../ui';
 import { unir } from '../ui/clases';
 
 /**
@@ -61,17 +62,20 @@ export default function Dashboard() {
     // Cuentas de cobro donde actúa como propietario; `null` mientras cargan o si fallaron.
     const [cuentas, setCuentas] = useState(null);
     const [errorCuentas, setErrorCuentas] = useState(null);
+    // Contratos con la ventana de ajuste abierta; `null` si no se pudieron pedir: la lista no se muestra.
+    const [ajustes, setAjustes] = useState(null);
     const [cargando, setCargando] = useState(true);
 
     const cargar = useCallback(async () => {
         setCargando(true);
         setErrorResumen(null);
         setErrorCuentas(null);
-        const [res, cue] = await Promise.allSettled([obtenerResumen(), listarCuentasCobro()]);
+        const [res, cue, con] = await Promise.allSettled([obtenerResumen(), listarCuentasCobro(), listarContratos()]);
         if (res.status === 'fulfilled') setResumen(res.value);
         else { setResumen(null); setErrorResumen(res.reason); }
         if (cue.status === 'fulfilled') setCuentas(cue.value.filter((c) => actuaComoPropietario(c.Contrato, sesion)));
         else { setCuentas(null); setErrorCuentas(cue.reason); }
+        setAjustes(con.status === 'fulfilled' ? con.value.filter((c) => c.ajuste_canon?.en_ventana) : null);
         setCargando(false);
         // `sesion` cambia de identidad en cada render; basta con el usuario.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,6 +157,28 @@ export default function Dashboard() {
                         </ul>
                     )}
                 </Card>
+
+                {ajustes?.length > 0 && (
+                    <Card titulo="Ajustes de canon (IPC)" className="flex-1 min-w-[14rem]">
+                        <ul className="m-0 p-0 list-none flex flex-col">
+                            {ajustes.map((c) => (
+                                <li key={c.id_contrato}
+                                    className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
+                                    <div className="min-w-0">
+                                        <Link to={`/contratos/${c.id_contrato}`}
+                                            className="block text-sm font-medium text-texto no-underline hover:underline truncate">
+                                            {nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos'}
+                                        </Link>
+                                        <p className="m-0 mt-0.5 text-xs text-texto-suave">Ajuste del {formatearFecha(c.ajuste_canon.fecha_ajuste)}</p>
+                                    </div>
+                                    <span className="text-sm font-medium text-indigo-medio whitespace-nowrap tabular-nums">
+                                        {formatearDinero(c.ajuste_canon.canon_sugerido)}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </Card>
+                )}
 
                 <Card titulo="Estado de pagos" className="flex-1 min-w-[14rem]">
                     {errorCuentas ? (

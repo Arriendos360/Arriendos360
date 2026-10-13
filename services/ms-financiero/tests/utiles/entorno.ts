@@ -171,7 +171,9 @@ export const contratoEnElDoble = (
     id_inmueble: string;
     id_inquilino: string;
     canon?: number;
+    inicio?: string;
     fecha_inicio_corte?: string;
+    fecha_ultimo_ajuste?: string | null;
     estado?: string;
   },
 ): string => {

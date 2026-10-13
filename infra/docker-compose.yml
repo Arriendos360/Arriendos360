@@ -170,6 +170,8 @@ services:
       # tiene que hacerlo tambien.
       - MS_INMUEBLES_URL=${MS_INMUEBLES_URL:-http://ms-inmuebles:3012}
       - MS_FINANCIERO_URL=${MS_FINANCIERO_URL:-http://ms-financiero:3014}
+      # Recibe CanonAjustado: el aviso formal al inquilino de un ajuste de canon.
+      - MS_NOTIFICACIONES_URL=${MS_NOTIFICACIONES_URL:-http://ms-notificaciones:3015}
       # Cada cuanto barre el publicador su tabla de salida. Ese numero es la
       # ventana de consistencia del estado del inmueble.
       - EVENTOS_INTERVALO_MS=${EVENTOS_INTERVALO_MS:-5000}

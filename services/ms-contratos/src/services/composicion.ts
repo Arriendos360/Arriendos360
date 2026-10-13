@@ -4,13 +4,22 @@
  * no responde, la propiedad queda en `null`: esto decora, no autoriza.
  */
 
-import { cabeceraDeServicio, enteroDeEntorno, textoDeEntorno } from 'arriendos360-shared';
+import {
+  ajusteDeCanon,
+  cabeceraDeServicio,
+  enteroDeEntorno,
+  hoyEnZonaNegocio,
+  textoDeEntorno,
+} from 'arriendos360-shared';
+import type { ContratoAjustable } from 'arriendos360-shared';
+import { IPC_ANUAL } from 'arriendos360-contracts';
 
 import type { InmuebleAjeno } from '../clientes/inmuebles';
 import type { UsuarioAjeno } from '../clientes/identidad';
 import { urlBase as urlIdentidad } from '../clientes/identidad';
 import { urlBase as urlInmuebles } from '../clientes/inmuebles';
 import type { Contrato } from '../models/Contrato';
+import { ESTADO_CONTRATO_ACTIVO } from '../models/constantes';
 
 const TIEMPO_LIMITE_MS = enteroDeEntorno('COMPOSICION_TIMEOUT_MS', 3000);
 
@@ -103,6 +112,26 @@ export const adjuntarPartes = async (
     Inmueble: inmuebles.get(contrato['id_inmueble'] as string) ?? null,
     Inquilino: comoUsuario(usuarios.get(contrato['id_inquilino'] as string)),
   }));
+};
+
+/**
+ * Añade `ajuste_canon` a un contrato ya compuesto, sólo si está activo y `sub` es el dueño
+ * de su inmueble: el inquilino no ve un aumento antes de que el propietario lo decida.
+ */
+export const conAjusteCanon = (
+  contrato: Record<string, unknown>,
+  sub: string,
+): Record<string, unknown> => {
+  const inmueble = contrato['Inmueble'] as InmuebleAjeno | null;
+
+  if (contrato['estado'] !== ESTADO_CONTRATO_ACTIVO || inmueble?.id_propietario !== sub) {
+    return contrato;
+  }
+
+  return {
+    ...contrato,
+    ajuste_canon: ajusteDeCanon(contrato as unknown as ContratoAjustable, hoyEnZonaNegocio(), IPC_ANUAL),
+  };
 };
 
 /** Adjunta `Inmueble` e `Inquilino` a un solo contrato. */

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, KeyRound, Pencil, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, Download, FileText, KeyRound, Pencil, Trash2, TrendingUp, Upload } from 'lucide-react';
 import { TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-contracts';
 
 import { useSesion } from '../auth/sesion';
@@ -8,6 +8,7 @@ import {
     actualizarContrato, descargarAnexo, eliminarAnexo, fechaDeContrato, finalizarContrato, listarAnexos,
     obtenerContrato, reemitirContrasenaInquilino, subirAnexo
 } from '../features/contratos/api';
+import { resumenDeAjuste } from '../features/contratos/ajuste';
 import {
     AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
@@ -15,6 +16,7 @@ import {
     Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, formatearDinero, formatearFecha,
     formatearFechaHora
 } from '../ui';
+import { erroresDelServidor } from '../ui/validacion';
 
 /**
  * Detalle de un contrato: sus datos, sus anexos y, para el propietario, editar,
@@ -56,13 +58,19 @@ const formDeContrato = (contrato) => ({
 
 /**
  * El servicio no valida nada al editar, y un día límite fuera de rango le sale
- * como 502: todo se revisa aquí.
+ * como 502: todo se revisa aquí. Con la ventana de ajuste abierta, un canon nuevo es
+ * el ajuste por IPC y no puede pasar del sugerido.
  */
-function validarEdicion(form, inicio) {
+function validarEdicion(form, contrato) {
     const errores = {};
+    const inicio = fechaDeContrato(contrato.inicio);
+    const ajuste = contrato.ajuste_canon;
     if (!form.fin) errores.fin = 'Indica la fecha de fin.';
     else if (inicio && form.fin <= inicio) errores.fin = 'Debe ser posterior al inicio.';
     if (form.canon === null || !(Number(form.canon) > 0)) errores.canon = 'Escribe un canon mayor que cero.';
+    else if (ajuste?.en_ventana && Number(form.canon) !== Number(contrato.canon) && Number(form.canon) > ajuste.canon_sugerido) {
+        errores.canon = `No puede superar ${formatearDinero(ajuste.canon_sugerido)}, el tope del IPC de ${ajuste.anio_ipc}.`;
+    }
     const dia = form.fecha_limite_pago.trim();
     if (!(/^\d{1,2}$/.test(dia) && Number(dia) >= 1 && Number(dia) <= 31)) {
         errores.fecha_limite_pago = 'Un día del mes, de 1 a 31.';
@@ -70,33 +78,46 @@ function validarEdicion(form, inicio) {
     return errores;
 }
 
-function FormularioEdicion({ contrato, error, onEnviar, idFormulario }) {
-    const [form, setForm] = useState(() => formDeContrato(contrato));
+/** `canonInicial` lo pone «Aplicar ajuste» con el canon sugerido. */
+function FormularioEdicion({ contrato, canonInicial, error, onEnviar, idFormulario }) {
+    const [form, setForm] = useState(() => ({
+        ...formDeContrato(contrato),
+        ...(canonInicial !== undefined && { canon: String(canonInicial) })
+    }));
     const [errores, setErrores] = useState({});
     const inicio = fechaDeContrato(contrato.inicio);
+    const servidor = erroresDelServidor(error, Object.keys(form));
+    const enVentana = contrato.ajuste_canon?.en_ventana;
 
     const poner = (nombre, valor) => {
         setForm((actual) => ({ ...actual, [nombre]: valor }));
         setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
     };
+    const errorDe = (nombre) => errores[nombre] ?? servidor?.errores[nombre];
     const campo = (nombre) => ({
-        name: nombre, value: form[nombre], error: errores[nombre], onChange: (evento) => poner(nombre, evento.target.value)
+        name: nombre, value: form[nombre], error: errorDe(nombre), onChange: (evento) => poner(nombre, evento.target.value)
     });
 
     const enviar = (evento) => {
         evento.preventDefault();
-        const encontrados = validarEdicion(form, inicio);
+        const encontrados = validarEdicion(form, contrato);
         setErrores(encontrados);
         if (Object.keys(encontrados).length === 0) onEnviar(form);
     };
 
     return (
         <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-4">
-            <FormError error={error} />
+            <FormError error={servidor ? servidor.general : error} />
+            {enVentana && (
+                <p className="m-0 text-sm text-texto-suave">
+                    Cambiar el canon es el ajuste anual por IPC: hasta {formatearDinero(contrato.ajuste_canon.canon_sugerido)}.
+                    Al guardar, el inquilino recibirá el aviso formal.
+                </p>
+            )}
             <Fila>
-                <DateField etiqueta="Fin" name="fin" value={form.fin} error={errores.fin} min={inicio || undefined}
+                <DateField etiqueta="Fin" name="fin" value={form.fin} error={errorDe('fin')} min={inicio || undefined}
                     onChange={(valor) => poner('fin', valor)} />
-                <MoneyField etiqueta="Canon mensual" value={form.canon} error={errores.canon} onChange={(valor) => poner('canon', valor)} />
+                <MoneyField etiqueta="Canon mensual" value={form.canon} error={errorDe('canon')} onChange={(valor) => poner('canon', valor)} />
             </Fila>
             <Input etiqueta="Día límite de pago" inputMode="numeric" ayuda="Día del mes, de 1 a 31." {...campo('fecha_limite_pago')} />
             <AreaTexto etiqueta="Condiciones particulares" {...campo('info_contrato')} />
@@ -220,9 +241,11 @@ export default function ContratoDetalle() {
     };
 
     const guardar = (datos) => ejecutar(async () => {
-        await actualizarContrato(id, datos);
+        const respuesta = await actualizarContrato(id, datos);
         setDialogo(null);
-        setAviso('Contrato actualizado.');
+        setAviso(respuesta?.rige_desde
+            ? `Ajuste aplicado: rige desde el ${formatearFecha(respuesta.rige_desde)} y se avisó al inquilino.`
+            : 'Contrato actualizado.');
         await cargar();
     });
 
@@ -284,6 +307,7 @@ export default function ContratoDetalle() {
     const activo = contrato.estado === 'activo';
     const inquilino = contrato.Inquilino;
     const inmueble = contrato.Inmueble;
+    const ajuste = resumenDeAjuste(contrato.ajuste_canon);
 
     return (
         <div className="flex flex-col gap-6">
@@ -323,6 +347,25 @@ export default function ContratoDetalle() {
                     </Dato></dl>
                 )}
             </Card>
+
+            {propio && ajuste && (
+                <Card titulo="Ajuste de canon (IPC)"
+                    acciones={ajuste.puedeAplicar && activo && (
+                        <Button tamano="pequeno" icono={TrendingUp} onClick={() => abrir({ modo: 'editar', canon: ajuste.sugerido })}>
+                            Aplicar ajuste
+                        </Button>
+                    )}>
+                    <dl className="flex flex-wrap gap-x-6 gap-y-5 m-0">
+                        <Dato etiqueta="Fecha de ajuste">{ajuste.fecha}</Dato>
+                        <Dato etiqueta="IPC aplicable">{ajuste.ipc}</Dato>
+                        <Dato etiqueta="Canon actual"><span className="tabular-nums">{formatearDinero(contrato.canon)}</span></Dato>
+                        <Dato etiqueta="Canon sugerido">
+                            {ajuste.sugerido !== null && <span className="tabular-nums">{formatearDinero(ajuste.sugerido)}</span>}
+                        </Dato>
+                    </dl>
+                    <p className="m-0 mt-4 text-sm text-texto-suave">{ajuste.estado}</p>
+                </Card>
+            )}
 
             <div className="flex flex-col lg:flex-row gap-6 [&>*]:flex-1">
                 {propio && (
@@ -395,7 +438,8 @@ export default function ContratoDetalle() {
                 }
             >
                 {dialogo?.modo === 'editar' && (
-                    <FormularioEdicion idFormulario="formulario-edicion" contrato={contrato} error={errorDialogo} onEnviar={guardar} />
+                    <FormularioEdicion idFormulario="formulario-edicion" contrato={contrato} canonInicial={dialogo.canon}
+                        error={errorDialogo} onEnviar={guardar} />
                 )}
             </Modal>
 

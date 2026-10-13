@@ -66,7 +66,8 @@ propietario; `0007` contraseña temporal; `0010` recuperación (endpoints, tabla
 `contrasena_cambiada_en`); `0012` garantía de entrega al-menos-una-vez; `0013`
 `ContratoFinalizado`; `0015` `observaciones`; `0016` anulación de transacciones; `0019`
 el alta manual de un cobro notifica; `0023` Inmuebles conserva `departamento`, `barrio` y la
-ficha física. Los demás ADR no se apartan del documento.
+ficha física; `0025` ajuste de canon por IPC (`fecha_ultimo_ajuste` y dos eventos). Los
+demás ADR no se apartan del documento.
 
 ---
 
@@ -86,9 +87,11 @@ seguridad (`TokensRevocados`, ver módulo de seguridad).
 | `Cuentas_cobro` | detalle, valor, inicio, fin, fecha_pago, estado | `id_contrato` |
 | `Transacciones` | monto, tipo, fecha_pago, medio_pago, estado | `id_cuenta_cobro` |
 
-- **Dos columnas fuera de esta tabla:** `observaciones` en `Transacciones`
-  (`docs/adr/0015`) y `saldo_restante_momento`, la foto del saldo impresa en un
-  comprobante ya emitido: **no se deriva ni se toca**, ni al anular.
+- **Tres columnas fuera de esta tabla:** `observaciones` en `Transacciones`
+  (`docs/adr/0015`); `saldo_restante_momento`, la foto del saldo impresa en un
+  comprobante ya emitido: **no se deriva ni se toca**, ni al anular; y
+  `fecha_ultimo_ajuste` en `Contratos`, desde la que corren los 12 meses del siguiente
+  ajuste por IPC (`docs/adr/0025`).
 - **El saldo de una cuenta de cobro NO es una columna.** Es `valor` menos la suma de sus
   transacciones `CONFIRMADA` (`services/ms-financiero/src/services/saldos.ts`), expuesto
   como `saldo_pendiente`. Anular una transacción no «devuelve» nada.
@@ -277,6 +280,8 @@ Tipos en `packages/shared/src/eventos.ts`.
 | `CuentaCobroGenerada` | `ms-financiero` | `id_cuenta_cobro`, `id_contrato`, `id_inquilino`, `valor`, `inicio`, `fin` | `ms-notificaciones` → recibo al inquilino. |
 | `CuentaCobroPorVencer` | ídem | ídem + `id_propietario`, `entra_en_mora_el`, `direccion_inmueble` | `ms-notificaciones` → aviso al inquilino **y** al propietario. |
 | `CuentaCobroEnMora` | ídem | ídem + `dias_de_mora` | `ms-notificaciones` → aviso a los dos. |
+| `AjusteCanonProximo` | ídem (motor) | `id_contrato`, `id_propietario`, `direccion_inmueble`, `canon_actual`, `canon_sugerido`, `ipc`, `anio_ipc`, `fecha_ajuste` | `ms-notificaciones` → alerta al propietario. Una vez por ajuste. |
+| `CanonAjustado` | `ms-contratos` | `id_contrato`, `id_inquilino`, `id_propietario`, `direccion_inmueble`, `canon_anterior`, `canon_nuevo`, `ipc`, `anio_ipc`, `rige_desde` | `ms-notificaciones` → aviso formal al inquilino. |
 
 - **NINGÚN EVENTO LLEVA UNA DIRECCIÓN DE CORREO.** Llevan `id_usuario` y Notificaciones
   resuelve el correo contra ms-identidad al manejar el evento. Sí viaja el asunto

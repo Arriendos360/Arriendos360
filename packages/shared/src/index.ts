@@ -79,6 +79,8 @@ export type {
 // ── Bus de eventos ───────────────────────────────────────────────────────────
 
 export {
+  TIPO_AJUSTE_CANON_PROXIMO,
+  TIPO_CANON_AJUSTADO,
   TIPO_CONTRASENA_TEMPORAL_EMITIDA,
   TIPO_CONTRATO_FINALIZADO,
   TIPO_CONTRATO_FORMALIZADO,
@@ -91,6 +93,8 @@ export {
   esSobreEvento,
 } from './eventos';
 export type {
+  AjusteCanonProximo,
+  CanonAjustado,
   CargaPorTipo,
   ContrasenaTemporalEmitida,
   ContratoFinalizado,
@@ -148,6 +152,7 @@ export type { OpcionesEntregaHttp, Suscriptor } from './entrega';
 
 // ── Calendario del arrendamiento ─────────────────────────────────────────────
 export {
+  DIAS_ANTICIPACION_FACTURA,
   ZONA_NEGOCIO,
   comoISO,
   diaDeCorte,
@@ -167,6 +172,9 @@ export {
   ultimoDiaDelMes,
 } from './fechas';
 export type { FechaISO as FechaCalendario, Periodo } from './fechas';
+
+export { ajusteDeCanon } from './ajusteCanon';
+export type { AjusteCanon, ContratoAjustable } from './ajusteCanon';
 
 // ── Variables de entorno ─────────────────────────────────────────────────────
 export {

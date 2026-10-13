@@ -4,17 +4,21 @@
  */
 
 import type { Request, Response } from 'express';
-import { crearError } from 'arriendos360-shared';
-import { errorDeValidacion, validarContrato } from 'arriendos360-contracts';
+import { ajusteDeCanon, crearError, hoyEnZonaNegocio } from 'arriendos360-shared';
+import { IPC_ANUAL, errorDeValidacion, validarContrato } from 'arriendos360-contracts';
 
 import { reemitirContrasenaTemporal, usuarioPorId } from '../clientes/identidad';
 import { propioDe } from '../clientes/inmuebles';
 import { sequelize } from '../config/database';
-import { registrarContratoFinalizado, registrarContratoFormalizado } from '../eventos';
+import {
+  registrarCanonAjustado,
+  registrarContratoFinalizado,
+  registrarContratoFormalizado,
+} from '../eventos';
 import { Contrato } from '../models/Contrato';
-import { ESTADO_CONTRATO_FINALIZADO } from '../models/constantes';
+import { ESTADO_CONTRATO_ACTIVO, ESTADO_CONTRATO_FINALIZADO } from '../models/constantes';
 import { esUuid } from '../models/uuid';
-import { adjuntarPartes, adjuntarPartesA } from '../services/composicion';
+import { adjuntarPartes, adjuntarPartesA, conAjusteCanon } from '../services/composicion';
 import {
   contratoDondeEsParte,
   contratoPropio,
@@ -34,7 +38,8 @@ const responderServicioCaido = (res: Response, error: unknown, accion: string): 
 export const obtenerTodos = async (req: Request, res: Response): Promise<Response> => {
   try {
     const sub = req.usuario?.sub as string;
-    return res.json(await adjuntarPartes(await contratosDondeEsParte(sub)));
+    const contratos = await adjuntarPartes(await contratosDondeEsParte(sub));
+    return res.json(contratos.map((contrato) => conAjusteCanon(contrato, sub)));
   } catch (error) {
     return responderServicioCaido(res, error, 'obtener contratos');
   }
@@ -51,7 +56,7 @@ export const obtenerPorId = async (req: Request, res: Response): Promise<Respons
       return res.status(404).json(crearError('Contrato no encontrado'));
     }
 
-    return res.json(await adjuntarPartesA(contrato));
+    return res.json(conAjusteCanon(await adjuntarPartesA(contrato), sub));
   } catch (error) {
     return responderServicioCaido(res, error, 'obtener contrato');
   }
@@ -136,12 +141,66 @@ export const actualizar = async (req: Request, res: Response): Promise<Response>
         .json(crearError('Contrato no encontrado o no tienes permisos'));
     }
 
-    const { creado_por, actualizado_por, ...cambios } = req.body as Record<string, unknown>;
+    // La fecha del último ajuste la pone el ajuste, nunca el cliente.
+    const { creado_por, actualizado_por, fecha_ultimo_ajuste, ...cambios } = req.body as Record<string, unknown>;
     void creado_por;
     void actualizado_por;
+    void fecha_ultimo_ajuste;
 
-    await contrato.update(cambios, { usuarioAuditor: sub });
-    return res.json({ mensaje: 'Contrato actualizado', contrato });
+    const ajuste = ajusteDeCanon(contrato, hoyEnZonaNegocio(), IPC_ANUAL);
+    const canonNuevo = Number(cambios['canon']);
+    // El modal de edición envía siempre el canon: sólo cuenta si cambia.
+    const esAjuste =
+      contrato.estado === ESTADO_CONTRATO_ACTIVO &&
+      ajuste?.en_ventana === true &&
+      cambios['canon'] !== undefined &&
+      canonNuevo !== Number(contrato.canon);
+
+    if (!esAjuste) {
+      await contrato.update(cambios, { usuarioAuditor: sub });
+      return res.json({ mensaje: 'Contrato actualizado', contrato });
+    }
+
+    const tope = ajuste.canon_sugerido as number;
+    if (!(canonNuevo > 0 && canonNuevo <= tope)) {
+      return res.status(400).json(
+        errorDeValidacion([
+          {
+            campo: 'canon',
+            mensaje: `El canon debe ser positivo y no superar $${tope.toLocaleString('es-CO')}, el tope del IPC de ${ajuste.anio_ipc}`,
+          },
+        ]),
+      );
+    }
+
+    const inmueble = await propioDe(contrato.id_inmueble, sub);
+    const canonAnterior = Number(contrato.canon);
+
+    // Con la ventana abierta, cambiar el canon es el ajuste anual: se guarda desde cuándo rige y se avisa al
+    // inquilino. El siguiente cuenta desde `rige_desde` porque la ley pide 12 meses bajo un mismo precio.
+    await sequelize.transaction(async (transaccion) => {
+      await contrato.update(
+        { ...cambios, fecha_ultimo_ajuste: ajuste.rige_desde },
+        { transaction: transaccion, usuarioAuditor: sub },
+      );
+      await registrarCanonAjustado(
+        {
+          id_contrato: contrato.id_contrato,
+          id_inquilino: contrato.id_inquilino,
+          id_propietario: sub,
+          direccion_inmueble: typeof inmueble?.['direccion'] === 'string' ? inmueble['direccion'] : 'Inmueble sin dirección registrada',
+          canon_anterior: canonAnterior,
+          canon_nuevo: canonNuevo,
+          ipc: ajuste.ipc as number,
+          anio_ipc: ajuste.anio_ipc,
+          rige_desde: ajuste.rige_desde,
+        },
+        contrato.id_inmueble,
+        transaccion,
+      );
+    });
+
+    return res.json({ mensaje: 'Ajuste de canon aplicado', contrato, rige_desde: ajuste.rige_desde });
   } catch (error) {
     return responderServicioCaido(res, error, 'actualizar contrato');
   }

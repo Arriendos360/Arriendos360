@@ -33,6 +33,7 @@ export type {
 
 export {
   ESTADOS_CONTRATO,
+  IPC_ANUAL,
   TAMANO_MAXIMO_ANEXO_MB,
   TIPOS_ANEXO_CONOCIDOS,
   esEstadoContrato,

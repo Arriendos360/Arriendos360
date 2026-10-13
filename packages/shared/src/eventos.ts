@@ -12,6 +12,8 @@ export const TIPO_CONTRASENA_TEMPORAL_EMITIDA = 'ContrasenaTemporalEmitida';
 export const TIPO_CUENTA_COBRO_GENERADA = 'CuentaCobroGenerada';
 export const TIPO_CUENTA_COBRO_POR_VENCER = 'CuentaCobroPorVencer';
 export const TIPO_CUENTA_COBRO_EN_MORA = 'CuentaCobroEnMora';
+export const TIPO_AJUSTE_CANON_PROXIMO = 'AjusteCanonProximo';
+export const TIPO_CANON_AJUSTADO = 'CanonAjustado';
 
 /*
  * Ningún evento lleva una dirección de correo: llevan `id_usuario` y
@@ -97,6 +99,36 @@ export interface CuentaCobroEnMora {
   direccion_inmueble: string;
 }
 
+/** Se abrió la ventana de ajuste anual del canon. Avisa al propietario. */
+export interface AjusteCanonProximo {
+  id_contrato: string;
+  id_propietario: string;
+  direccion_inmueble: string;
+  canon_actual: number;
+  /** El tope legal: canon por (1 + IPC del año anterior), hacia abajo al peso. */
+  canon_sugerido: number;
+  /** Porcentaje, `5.1` es 5,10 %. */
+  ipc: number;
+  anio_ipc: number;
+  /** `YYYY-MM-DD`. */
+  fecha_ajuste: string;
+}
+
+/** Se aplicó el ajuste anual del canon. Lleva el aviso formal al inquilino. */
+export interface CanonAjustado {
+  id_contrato: string;
+  id_inquilino: string;
+  /** De parte de quién va el aviso. */
+  id_propietario: string;
+  direccion_inmueble: string;
+  canon_anterior: number;
+  canon_nuevo: number;
+  ipc: number;
+  anio_ipc: number;
+  /** `YYYY-MM-DD`. Primer periodo que se cobra con el canon nuevo. */
+  rige_desde: string;
+}
+
 /** Carga que corresponde a cada tipo. Es lo que ata el nombre con su forma. */
 export interface CargaPorTipo {
   [TIPO_CONTRATO_FORMALIZADO]: ContratoFormalizado;
@@ -106,6 +138,8 @@ export interface CargaPorTipo {
   [TIPO_CUENTA_COBRO_GENERADA]: CuentaCobroGenerada;
   [TIPO_CUENTA_COBRO_POR_VENCER]: CuentaCobroPorVencer;
   [TIPO_CUENTA_COBRO_EN_MORA]: CuentaCobroEnMora;
+  [TIPO_AJUSTE_CANON_PROXIMO]: AjusteCanonProximo;
+  [TIPO_CANON_AJUSTADO]: CanonAjustado;
 }
 
 export type TipoEvento = keyof CargaPorTipo;
@@ -144,6 +178,8 @@ export const VERSION_EVENTO: Record<TipoEvento, number> = {
   [TIPO_CUENTA_COBRO_GENERADA]: 1,
   [TIPO_CUENTA_COBRO_POR_VENCER]: 1,
   [TIPO_CUENTA_COBRO_EN_MORA]: 1,
+  [TIPO_AJUSTE_CANON_PROXIMO]: 1,
+  [TIPO_CANON_AJUSTADO]: 1,
 };
 
 /** Mete una carga en su sobre, con un `id_evento` nuevo si no se da uno. */

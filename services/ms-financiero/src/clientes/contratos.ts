@@ -32,7 +32,10 @@ export interface ContratoAjeno {
   id_inmueble: string;
   id_inquilino: string;
   canon: number | string;
+  inicio: string;
   fecha_inicio_corte: string;
+  /** Para el ajuste por IPC: desde aquí corren sus 12 meses. */
+  fecha_ultimo_ajuste?: string | null;
   estado: string;
   /** Presente solo si se pidio con `incluir=inmueble`. */
   Inmueble?: InmuebleAjeno | null;

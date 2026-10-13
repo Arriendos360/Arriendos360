@@ -13,6 +13,8 @@
  */
 
 import type {
+  AjusteCanonProximo,
+  CanonAjustado,
   ContrasenaTemporalEmitida,
   CuentaCobroEnMora,
   CuentaCobroGenerada,
@@ -49,6 +51,7 @@ const urlApp = (): string =>
  * cuenta de cobro: `/pagos` es la lista, para los dos roles.
  */
 const RUTA = {
+  contratos: '/contratos',
   login: '/login',
   pagos: '/pagos',
   restablecer: '/restablecer',
@@ -81,6 +84,10 @@ export const instante = (iso: string): string =>
     minute: '2-digit',
     timeZone: ZONA_NEGOCIO,
   });
+
+/** Un porcentaje del IPC: `5.1` es «5,10 %». */
+const porcentaje = (valor: number): string =>
+  `${valor.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
 
 /** Un periodo, como se nombra en una cuenta de cobro. */
 const periodo = (inicio: string, fin: string): string => `${fecha(inicio)} al ${fecha(fin)}`;
@@ -543,6 +550,77 @@ export const enMoraPropietario = (
       ],
       bloque,
       boton: { texto: 'Ver pagos', url: enlace(RUTA.pagos) },
+    }),
+  };
+};
+
+// ── Ajuste del canon ─────────────────────────────────────────────────────────
+
+/** Se abrió la ventana de ajuste: al propietario, con el canon sugerido y su tope. */
+export const ajusteProximoPropietario = (
+  carga: AjusteCanonProximo,
+  destinatario: Destinatario,
+): Mensaje => {
+  const direccion = escapar(carga.direccion_inmueble);
+  const cuando = fecha(carga.fecha_ajuste);
+
+  return {
+    asunto: asuntoCon('Ajuste anual del canon: ', carga.direccion_inmueble),
+    cuerpoHtml: envolver({
+      preheader: `Canon sugerido ${pesos(carga.canon_sugerido)} desde el ${cuando}.`,
+      chip: 'Ajuste anual',
+      titulo: 'Puedes ajustar el canon',
+      destinatario,
+      parrafos: [
+        `El contrato del inmueble <strong>${direccion}` +
+          `</strong> cumple un año bajo el mismo canon el <strong>${cuando}</strong>. Puedes reajustarlo hasta el IPC de ${carga.anio_ipc}, el tope de la Ley 820 de 2003.`,
+      ],
+      bloque: bloqueDeDatos([
+        { etiqueta: 'Inmueble', valor: direccion },
+        { etiqueta: 'Canon actual', valor: pesos(carga.canon_actual) },
+        {
+          etiqueta: 'Canon sugerido',
+          valor: pesos(carga.canon_sugerido),
+          nota: `IPC de ${carga.anio_ipc}: ${porcentaje(carga.ipc)}. Es el máximo permitido.`,
+        },
+        { etiqueta: 'Fecha de ajuste', valor: cuando },
+      ]),
+      boton: { texto: 'Revisar el ajuste', url: enlace(`${RUTA.contratos}/${carga.id_contrato}`) },
+      textoFinal: 'Si lo aplicas desde el contrato, tu inquilino recibirá el aviso formal del reajuste.',
+    }),
+  };
+};
+
+/** Aviso formal del reajuste (Ley 820 de 2003, art. 20): al inquilino, de parte del propietario. */
+export const canonAjustadoInquilino = (
+  carga: CanonAjustado,
+  destinatario: Destinatario,
+  propietario: Destinatario | undefined,
+): Mensaje => {
+  const direccion = escapar(carga.direccion_inmueble);
+  const rige = fecha(carga.rige_desde);
+  const quien = propietario?.nombres ? `Tu arrendador, ${escapar(propietario.nombres)},` : 'Tu arrendador';
+
+  return {
+    asunto: asuntoCon('Aviso de reajuste del canon: ', carga.direccion_inmueble),
+    cuerpoHtml: envolver({
+      preheader: `Nuevo canon ${pesos(carga.canon_nuevo)} desde el ${rige}.`,
+      chip: 'Aviso formal',
+      titulo: 'Reajuste del canon de arrendamiento',
+      destinatario,
+      parrafos: [
+        `${quien} te informa, conforme al artículo 20 de la Ley 820 de 2003, que el canon del inmueble <strong>${direccion}</strong> se reajusta con el IPC de ${carga.anio_ipc}.`,
+        `El nuevo canon rige desde el periodo que empieza el <strong>${rige}</strong>.`,
+      ],
+      bloque: bloqueDeDatos([
+        { etiqueta: 'Inmueble', valor: direccion },
+        { etiqueta: 'Canon anterior', valor: pesos(carga.canon_anterior) },
+        { etiqueta: 'Canon nuevo', valor: pesos(carga.canon_nuevo) },
+        { etiqueta: 'IPC aplicado', valor: `${porcentaje(carga.ipc)} (${carga.anio_ipc})` },
+        { etiqueta: 'Rige desde', valor: rige },
+      ]),
+      boton: { texto: 'Ver mi contrato', url: enlace(`${RUTA.contratos}/${carga.id_contrato}`) },
+      nota: 'Si tienes dudas sobre este reajuste, comunícate con tu arrendador.',
     }),
   };
 };

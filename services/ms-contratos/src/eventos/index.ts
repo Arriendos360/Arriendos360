@@ -1,6 +1,6 @@
 /**
- * MS-Contratos como productor: `ContratoFormalizado` y `ContratoFinalizado`,
- * anotados en la misma transacción que el cambio del contrato.
+ * MS-Contratos como productor: `ContratoFormalizado`, `ContratoFinalizado` y
+ * `CanonAjustado`, anotados en la misma transacción que el cambio del contrato.
  */
 
 import {
@@ -12,9 +12,11 @@ import {
   enteroOpcionalDeEntorno,
   leerEntorno,
   textoDeEntorno,
+  TIPO_CANON_AJUSTADO,
   TIPO_CONTRATO_FINALIZADO,
   TIPO_CONTRATO_FORMALIZADO,
   type AlmacenSalida,
+  type CanonAjustado,
   type Publicador,
 } from 'arriendos360-shared';
 
@@ -39,6 +41,7 @@ const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>>
     { nombre: 'ms-financiero', variable: 'MS_FINANCIERO_URL' },
   ],
   [TIPO_CONTRATO_FINALIZADO]: [{ nombre: 'ms-inmuebles', variable: 'MS_INMUEBLES_URL' }],
+  [TIPO_CANON_AJUSTADO]: [{ nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' }],
 };
 
 export const suscriptoresDe = (tipo: string): Array<{ nombre: string; url: string }> =>
@@ -96,3 +99,14 @@ export const registrarContratoFinalizado = (
     }),
     { transaccion: transaccion as never, claveOrden: contrato.id_inmueble },
   );
+
+/** Anota `CanonAjustado`. Debe ir en la transacción que guarda el canon nuevo. */
+export const registrarCanonAjustado = (
+  carga: CanonAjustado,
+  idInmueble: string,
+  transaccion: unknown,
+): Promise<void> =>
+  almacen.registrar(crearSobre(TIPO_CANON_AJUSTADO, carga), {
+    transaccion: transaccion as never,
+    claveOrden: idInmueble,
+  });

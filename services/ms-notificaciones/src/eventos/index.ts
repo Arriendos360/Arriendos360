@@ -9,11 +9,15 @@
 
 import crypto from 'crypto';
 import {
+  TIPO_AJUSTE_CANON_PROXIMO,
+  TIPO_CANON_AJUSTADO,
   TIPO_CONTRASENA_TEMPORAL_EMITIDA,
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
   TIPO_RECUPERACION_SOLICITADA,
+  type AjusteCanonProximo,
+  type CanonAjustado,
   type Consumidor,
   type ContextoManejo,
   type ContrasenaTemporalEmitida,
@@ -252,6 +256,60 @@ export const manejadores: Record<string, Manejador> = {
     }
 
     await redactar(contexto, lista);
+  },
+
+  /** Ajuste de canon próximo: la alerta al propietario. */
+  [TIPO_AJUSTE_CANON_PROXIMO]: async (payload, contexto) => {
+    const carga = payload as Partial<AjusteCanonProximo>;
+    const tipo = TIPO_AJUSTE_CANON_PROXIMO;
+
+    exigirUuid(carga?.id_contrato, 'id_contrato', tipo);
+    const idPropietario = exigirUuid(carga?.id_propietario, 'id_propietario', tipo);
+    exigirTexto(carga.fecha_ajuste, 'fecha_ajuste', tipo);
+
+    const propietario = (await destinatariosDe([idPropietario])).get(idPropietario);
+
+    await redactar(
+      contexto,
+      propietario
+        ? [
+            {
+              destinatario: propietario,
+              mensaje: plantillas.ajusteProximoPropietario(carga as AjusteCanonProximo, propietario),
+            },
+          ]
+        : [],
+    );
+  },
+
+  /** Canon ajustado: el aviso formal al inquilino, firmado con el nombre del propietario. */
+  [TIPO_CANON_AJUSTADO]: async (payload, contexto) => {
+    const carga = payload as Partial<CanonAjustado>;
+    const tipo = TIPO_CANON_AJUSTADO;
+
+    exigirUuid(carga?.id_contrato, 'id_contrato', tipo);
+    const idInquilino = exigirUuid(carga?.id_inquilino, 'id_inquilino', tipo);
+    const idPropietario = exigirUuid(carga?.id_propietario, 'id_propietario', tipo);
+    exigirTexto(carga.rige_desde, 'rige_desde', tipo);
+
+    const destinatarios = await destinatariosDe([idInquilino, idPropietario]);
+    const inquilino = destinatarios.get(idInquilino);
+
+    await redactar(
+      contexto,
+      inquilino
+        ? [
+            {
+              destinatario: inquilino,
+              mensaje: plantillas.canonAjustadoInquilino(
+                carga as CanonAjustado,
+                inquilino,
+                destinatarios.get(idPropietario),
+              ),
+            },
+          ]
+        : [],
+    );
   },
 };
 
