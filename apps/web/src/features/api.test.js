@@ -5,7 +5,9 @@
  */
 
 import { actualizarInmueble, crearInmueble, eliminarInmueble } from './inmuebles/api';
-import { actualizarContrato, crearContrato, descargarContratoGenerado, fechaDeContrato, subirAnexo } from './contratos/api';
+import {
+    actualizarContrato, crearContrato, descargarCartaPreaviso, descargarContratoGenerado, enviarPreaviso, fechaDeContrato, subirAnexo
+} from './contratos/api';
 import { anularTransaccion, crearCuentaCobro, registrarPago } from './pagos/api';
 import { buscarPorDocumento, crearInquilino } from './usuarios/api';
 import { montoParaEnviar, soloCampos } from './comun';
@@ -113,6 +115,18 @@ test('el anexo va en multipart con `file` y `tipo`', async () => {
 test('el contrato generado se descarga por la API autenticada', async () => {
     await descargarContratoGenerado('c1');
     expect(descargarPdf).toHaveBeenCalledWith('/contratos/c1/documento', 'Contrato_c1.pdf');
+});
+
+test('el preaviso lleva la causal sólo si la hay', async () => {
+    await enviarPreaviso('c1', 'compraventa');
+    await enviarPreaviso('c2');
+    expect(api.post).toHaveBeenNthCalledWith(1, '/contratos/c1/preaviso', { causal: 'compraventa' });
+    expect(api.post).toHaveBeenNthCalledWith(2, '/contratos/c2/preaviso', {});
+});
+
+test('la carta del preaviso se descarga por la API autenticada', async () => {
+    await descargarCartaPreaviso('c1');
+    expect(descargarPdf).toHaveBeenCalledWith('/contratos/c1/preaviso', 'Preaviso_c1.pdf');
 });
 
 test('un pago lleva tipo INGRESO aparte del medio de pago', async () => {

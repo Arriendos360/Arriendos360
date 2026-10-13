@@ -4,8 +4,8 @@
 #   docker build -f services/ms-notificaciones/Dockerfile --target produccion .   # Azure
 #
 # Mismo patron que los otros cuatro servicios; las etapas y por que son estas estan en
-# `docs/adr/0022`. El servicio no usa `packages/contracts` —no tiene endpoints
-# publicos—, pero el workspace entra igual para que el lockfile resuelva el mismo grafo.
+# `docs/adr/0022`. De `packages/contracts` usa los plazos y las etiquetas legales del
+# preaviso.
 
 # ═══════════════════════════════════════════════════════════════ dependencias
 FROM node:22-alpine AS dependencias

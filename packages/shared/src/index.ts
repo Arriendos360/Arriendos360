@@ -87,6 +87,8 @@ export {
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
+  TIPO_PREAVISO_ENVIADO,
+  TIPO_PREAVISO_PROXIMO,
   TIPO_RECUPERACION_SOLICITADA,
   VERSION_EVENTO,
   crearSobre,
@@ -102,6 +104,8 @@ export type {
   CuentaCobroEnMora,
   CuentaCobroGenerada,
   CuentaCobroPorVencer,
+  PreavisoEnviado,
+  PreavisoProximo,
   RecuperacionSolicitada,
   SobreDesconocido,
   SobreEvento,
@@ -175,6 +179,9 @@ export type { FechaISO as FechaCalendario, Periodo } from './fechas';
 
 export { ajusteDeCanon } from './ajusteCanon';
 export type { AjusteCanon, ContratoAjustable } from './ajusteCanon';
+
+export { causalesDisponibles, preavisoDe } from './preaviso';
+export type { ContratoPreavisable, PlazosPreaviso, Preaviso } from './preaviso';
 
 // ── Variables de entorno ─────────────────────────────────────────────────────
 export {

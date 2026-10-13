@@ -32,17 +32,24 @@ export type {
 } from './inmuebles';
 
 export {
+  ANIOS_PLENA_VOLUNTAD,
+  CAUSALES_PREAVISO_ARRENDADOR,
+  DIAS_RECORDATORIO_PREAVISO,
   ESTADOS_CONTRATO,
+  FUNDAMENTO_PREAVISO,
   IPC_ANUAL,
+  MESES_PREAVISO_TERMINACION,
   TAMANO_MAXIMO_ANEXO_MB,
   TIPOS_ANEXO_CONOCIDOS,
   esEstadoContrato,
 } from './contratos';
 
 export type {
+  CausalPreaviso,
   CrearAnexoFormData,
   CrearContratoRequest,
   EstadoContrato,
+  PartePreaviso,
   TipoAnexo,
 } from './contratos';
 

@@ -15,6 +15,8 @@ import {
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
+  TIPO_PREAVISO_ENVIADO,
+  TIPO_PREAVISO_PROXIMO,
   TIPO_RECUPERACION_SOLICITADA,
   type AjusteCanonProximo,
   type CanonAjustado,
@@ -25,10 +27,13 @@ import {
   type CuentaCobroGenerada,
   type CuentaCobroPorVencer,
   type Manejador,
+  type PreavisoEnviado,
+  type PreavisoProximo,
   type RecuperacionSolicitada,
   comoConexion,
   crearConsumidor,
 } from 'arriendos360-shared';
+import { CAUSALES_PREAVISO_ARRENDADOR } from 'arriendos360-contracts';
 
 import { ESQUEMA, sequelize } from '../config/database';
 import { destinatariosDe, type Destinatario } from '../clientes/identidad';
@@ -306,6 +311,68 @@ export const manejadores: Record<string, Manejador> = {
                 inquilino,
                 destinatarios.get(idPropietario),
               ),
+            },
+          ]
+        : [],
+    );
+  },
+
+  /** Recordatorio del preaviso: a las dos partes, con la misma plantilla. */
+  [TIPO_PREAVISO_PROXIMO]: async (payload, contexto) => {
+    const carga = payload as Partial<PreavisoProximo>;
+    const tipo = TIPO_PREAVISO_PROXIMO;
+
+    exigirUuid(carga?.id_contrato, 'id_contrato', tipo);
+    const idInquilino = exigirUuid(carga?.id_inquilino, 'id_inquilino', tipo);
+    const idPropietario = exigirUuid(carga?.id_propietario, 'id_propietario', tipo);
+    exigirTexto(carga.vencimiento, 'vencimiento', tipo);
+    exigirTexto(carga.fecha_limite, 'fecha_limite', tipo);
+
+    const destinatarios = await destinatariosDe([idInquilino, idPropietario]);
+    const lista: PorRedactar[] = [];
+
+    for (const id of [idInquilino, idPropietario]) {
+      const destinatario = destinatarios.get(id);
+      if (destinatario) {
+        lista.push({ destinatario, mensaje: plantillas.preavisoProximo(carga as PreavisoProximo, destinatario) });
+      }
+    }
+
+    await redactar(contexto, lista);
+  },
+
+  /** Preaviso enviado: el aviso formal sólo a la otra parte, con el nombre de quien avisa. */
+  [TIPO_PREAVISO_ENVIADO]: async (payload, contexto) => {
+    const carga = payload as Partial<PreavisoEnviado>;
+    const tipo = TIPO_PREAVISO_ENVIADO;
+
+    exigirUuid(carga?.id_contrato, 'id_contrato', tipo);
+    const idInquilino = exigirUuid(carga?.id_inquilino, 'id_inquilino', tipo);
+    const idPropietario = exigirUuid(carga?.id_propietario, 'id_propietario', tipo);
+    exigirTexto(carga.vencimiento, 'vencimiento', tipo);
+    if (carga.parte !== 'PROPIETARIO' && carga.parte !== 'INQUILINO') {
+      throw new Error(`${tipo} con parte inválida: ${JSON.stringify(carga.parte)}`);
+    }
+    // La plantilla del arrendador imprime la etiqueta legal de la causal.
+    if (carga.parte === 'PROPIETARIO' && !Object.hasOwn(CAUSALES_PREAVISO_ARRENDADOR, String(carga.causal))) {
+      throw new Error(`${tipo} con causal inválida: ${JSON.stringify(carga.causal)}`);
+    }
+
+    const destinatarios = await destinatariosDe([idInquilino, idPropietario]);
+    const completa = carga as PreavisoEnviado;
+    const avisaElInquilino = completa.parte === 'INQUILINO';
+    const destinatario = destinatarios.get(avisaElInquilino ? idPropietario : idInquilino);
+    const remitente = destinatarios.get(avisaElInquilino ? idInquilino : idPropietario);
+
+    await redactar(
+      contexto,
+      destinatario
+        ? [
+            {
+              destinatario,
+              mensaje: avisaElInquilino
+                ? plantillas.preavisoEnviadoPropietario(completa, destinatario, remitente)
+                : plantillas.preavisoEnviadoInquilino(completa, destinatario, remitente),
             },
           ]
         : [],

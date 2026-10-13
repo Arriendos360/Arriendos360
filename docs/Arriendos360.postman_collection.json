@@ -554,6 +554,61 @@
           }
         },
         {
+          "name": "Enviar Preaviso",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n    \"causal\": \"ocupacion_propia\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/preaviso",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "preaviso"
+              ]
+            },
+            "description": "Preaviso de no renovar el contrato a su vencimiento vigente (Ley 820 de 2003). Lo envía cualquiera de las dos partes de un contrato activo, hasta la fecha límite (3 meses antes) y una sola vez: 201 con el contrato y su preaviso. El propietario manda una causal de causales_disponibles (400 si falta o no está disponible); la del inquilino se ignora. 409 fuera de plazo, repetido o con el contrato no activo; 404 a quien no es parte. Avisa por correo a la otra parte."
+          }
+        },
+        {
+          "name": "Descargar Carta de Preaviso",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contratos/{{id_contrato}}/preaviso",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contratos",
+                "{{id_contrato}}",
+                "preaviso"
+              ]
+            },
+            "description": "La carta del preaviso registrado en PDF, para firmarla y enviarla por correo certificado: el correo electrónico no reemplaza el servicio postal autorizado. La descargan las dos partes. 404 sin preaviso registrado; 502 si ms-identidad o ms-inmuebles no responden."
+          }
+        },
+        {
           "name": "Eliminar Anexo",
           "request": {
             "method": "DELETE",

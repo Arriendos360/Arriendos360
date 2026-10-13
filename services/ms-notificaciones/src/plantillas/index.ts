@@ -19,9 +19,17 @@ import type {
   CuentaCobroEnMora,
   CuentaCobroGenerada,
   CuentaCobroPorVencer,
+  PreavisoEnviado,
+  PreavisoProximo,
   RecuperacionSolicitada,
 } from 'arriendos360-shared';
 import { ZONA_NEGOCIO, textoDeEntorno } from 'arriendos360-shared';
+import {
+  CAUSALES_PREAVISO_ARRENDADOR,
+  FUNDAMENTO_PREAVISO,
+  MESES_PREAVISO_TERMINACION,
+} from 'arriendos360-contracts';
+import type { CausalPreaviso } from 'arriendos360-contracts';
 
 import type { Destinatario } from '../clientes/identidad';
 
@@ -621,6 +629,99 @@ export const canonAjustadoInquilino = (
       ]),
       boton: { texto: 'Ver mi contrato', url: enlace(`${RUTA.contratos}/${carga.id_contrato}`) },
       nota: 'Si tienes dudas sobre este reajuste, comunícate con tu arrendador.',
+    }),
+  };
+};
+
+// ── Preaviso de terminación ──────────────────────────────────────────────────
+
+/** Se acerca la fecha límite del preaviso: a cada parte, con el mismo texto. */
+export const preavisoProximo = (carga: PreavisoProximo, destinatario: Destinatario): Mensaje => {
+  const direccion = escapar(carga.direccion_inmueble);
+  const vence = fecha(carga.vencimiento);
+  const limite = fecha(carga.fecha_limite);
+
+  return {
+    asunto: asuntoCon('Plazo del preaviso de terminación: ', carga.direccion_inmueble),
+    cuerpoHtml: envolver({
+      preheader: `Si no quieres renovar el contrato, avisa a más tardar el ${limite}.`,
+      chip: 'Preaviso',
+      titulo: 'Se acerca el plazo del preaviso',
+      destinatario,
+      parrafos: [
+        `El contrato del inmueble <strong>${direccion}</strong> vence el <strong>${vence}</strong>. Si no quieres renovarlo, la Ley 820 de 2003 pide avisar por escrito a la otra parte con ${MESES_PREAVISO_TERMINACION} meses de anticipación: a más tardar el <strong>${limite}</strong>.`,
+        'Si nadie avisa a tiempo, el contrato se prorroga por el mismo término inicial.',
+      ],
+      bloque: bloqueDeDatos([
+        { etiqueta: 'Inmueble', valor: direccion },
+        { etiqueta: 'Vencimiento', valor: vence },
+        { etiqueta: 'Fecha límite del preaviso', valor: limite },
+      ]),
+      boton: { texto: 'Ver el contrato', url: enlace(`${RUTA.contratos}/${carga.id_contrato}`) },
+      nota: 'La ley exige enviar el preaviso por correo certificado. Desde el contrato puedes registrarlo y descargar la carta.',
+    }),
+  };
+};
+
+const NOTA_SERVICIO_POSTAL = 'Este correo no reemplaza la carta por correo certificado que exige la ley.';
+
+/** Aviso formal del preaviso del arrendador (art. 22): al inquilino, con la causal. */
+export const preavisoEnviadoInquilino = (
+  carga: PreavisoEnviado,
+  destinatario: Destinatario,
+  propietario: Destinatario | undefined,
+): Mensaje => {
+  const direccion = escapar(carga.direccion_inmueble);
+  const vence = fecha(carga.vencimiento);
+  const quien = propietario?.nombres ? `Tu arrendador, ${escapar(propietario.nombres)},` : 'Tu arrendador';
+
+  return {
+    asunto: asuntoCon('Aviso de no renovación del contrato: ', carga.direccion_inmueble),
+    cuerpoHtml: envolver({
+      preheader: `El contrato termina a su vencimiento, el ${vence}.`,
+      chip: 'Aviso formal',
+      titulo: 'Tu contrato no se renovará',
+      destinatario,
+      parrafos: [
+        `${quien} te informa, con la anticipación de ${MESES_PREAVISO_TERMINACION} meses que exige el ${FUNDAMENTO_PREAVISO.PROPIETARIO}, que dará por terminado el contrato del inmueble <strong>${direccion}</strong> a su vencimiento, el <strong>${vence}</strong>.`,
+      ],
+      bloque: bloqueDeDatos([
+        { etiqueta: 'Inmueble', valor: direccion },
+        { etiqueta: 'Vencimiento', valor: vence },
+        { etiqueta: 'Causal', valor: CAUSALES_PREAVISO_ARRENDADOR[carga.causal as CausalPreaviso] },
+      ]),
+      boton: { texto: 'Ver mi contrato', url: enlace(`${RUTA.contratos}/${carga.id_contrato}`) },
+      nota: NOTA_SERVICIO_POSTAL,
+    }),
+  };
+};
+
+/** Aviso formal del preaviso del arrendatario (art. 24): al propietario. */
+export const preavisoEnviadoPropietario = (
+  carga: PreavisoEnviado,
+  destinatario: Destinatario,
+  inquilino: Destinatario | undefined,
+): Mensaje => {
+  const direccion = escapar(carga.direccion_inmueble);
+  const vence = fecha(carga.vencimiento);
+  const quien = inquilino?.nombres ? `Tu arrendatario, ${escapar(inquilino.nombres)},` : 'Tu arrendatario';
+
+  return {
+    asunto: asuntoCon('Aviso de no renovación del contrato: ', carga.direccion_inmueble),
+    cuerpoHtml: envolver({
+      preheader: `El contrato termina a su vencimiento, el ${vence}.`,
+      chip: 'Aviso formal',
+      titulo: 'Tu arrendatario no renovará el contrato',
+      destinatario,
+      parrafos: [
+        `${quien} te informa, con la anticipación de ${MESES_PREAVISO_TERMINACION} meses que exige el ${FUNDAMENTO_PREAVISO.INQUILINO}, que dará por terminado el contrato del inmueble <strong>${direccion}</strong> a su vencimiento, el <strong>${vence}</strong>, y restituirá el inmueble en esa fecha.`,
+      ],
+      bloque: bloqueDeDatos([
+        { etiqueta: 'Inmueble', valor: direccion },
+        { etiqueta: 'Vencimiento', valor: vence },
+      ]),
+      boton: { texto: 'Ver el contrato', url: enlace(`${RUTA.contratos}/${carga.id_contrato}`) },
+      nota: NOTA_SERVICIO_POSTAL,
     }),
   };
 };

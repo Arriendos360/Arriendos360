@@ -33,9 +33,15 @@ export interface ContratoAjeno {
   id_inquilino: string;
   canon: number | string;
   inicio: string;
+  fin: string;
   fecha_inicio_corte: string;
   /** Para el ajuste por IPC: desde aquí corren sus 12 meses. */
   fecha_ultimo_ajuste?: string | null;
+  /** Constancia del preaviso de no renovar: con ella no hay recordatorio ni prórroga. */
+  preaviso_enviado_en?: string | null;
+  preaviso_enviado_por?: string | null;
+  preaviso_vencimiento?: string | null;
+  preaviso_causal?: string | null;
   estado: string;
   /** Presente solo si se pidio con `incluir=inmueble`. */
   Inmueble?: InmuebleAjeno | null;

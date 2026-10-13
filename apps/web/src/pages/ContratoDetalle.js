@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, KeyRound, Pencil, Trash2, TrendingUp, Upload } from 'lucide-react';
+import { ArrowLeft, Download, FileText, KeyRound, Pencil, Send, Trash2, TrendingUp, Upload } from 'lucide-react';
 import { TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-contracts';
 
 import { useSesion } from '../auth/sesion';
 import {
-    actualizarContrato, descargarAnexo, descargarContratoGenerado, eliminarAnexo, fechaDeContrato, finalizarContrato, listarAnexos,
-    obtenerContrato, reemitirContrasenaInquilino, subirAnexo
+    actualizarContrato, descargarAnexo, descargarCartaPreaviso, descargarContratoGenerado, eliminarAnexo, enviarPreaviso,
+    fechaDeContrato, finalizarContrato, listarAnexos, obtenerContrato, reemitirContrasenaInquilino, subirAnexo
 } from '../features/contratos/api';
 import { resumenDeAjuste } from '../features/contratos/ajuste';
+import { AVISO_SERVICIO_POSTAL, resumenDePreaviso } from '../features/contratos/preaviso';
 import {
     AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
 import {
-    Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, formatearDinero, formatearFecha,
+    Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, formatearDinero, formatearFecha,
     formatearFechaHora
 } from '../ui';
 import { erroresDelServidor } from '../ui/validacion';
@@ -198,11 +199,12 @@ export default function ContratoDetalle() {
     const [errorCarga, setErrorCarga] = useState(null);
     const [aviso, setAviso] = useState('');
 
-    // { modo: 'editar' | 'finalizar' | 'reemitir' | 'contrasena' | 'eliminar-anexo', ... } | null
+    // { modo: 'editar' | 'finalizar' | 'reemitir' | 'contrasena' | 'eliminar-anexo' | 'preaviso', ... } | null
     const [dialogo, setDialogo] = useState(null);
     const [enviando, setEnviando] = useState(false);
     const [errorDialogo, setErrorDialogo] = useState(null);
     const [descargando, setDescargando] = useState(null);
+    // `{ clave, error }`: la tarjeta del preaviso y la de anexos muestran cada una el suyo.
     const [errorDescarga, setErrorDescarga] = useState(null);
 
     const cargarAnexos = useCallback(async () => {
@@ -261,6 +263,21 @@ export default function ContratoDetalle() {
         setDialogo({ modo: 'contrasena', contrasena: respuesta.contrasena_temporal, persona: nombreDe(respuesta.inquilino) });
     });
 
+    /** El propietario elige la causal; el inquilino no invoca ninguna. */
+    const preavisar = () => {
+        const comoPropietario = actuaComoPropietario(contrato, sesion);
+        if (comoPropietario && !dialogo.causal) {
+            setDialogo((actual) => ({ ...actual, faltaCausal: true }));
+            return;
+        }
+        ejecutar(async () => {
+            await enviarPreaviso(id, comoPropietario ? dialogo.causal : undefined);
+            setDialogo(null);
+            setAviso('Preaviso registrado y avisado a la otra parte. Descarga la carta y envíala por correo certificado.');
+            await cargar();
+        });
+    };
+
     const borrarAnexo = () => ejecutar(async () => {
         await eliminarAnexo(id, dialogo.anexo.id_anexo);
         setDialogo(null);
@@ -278,9 +295,9 @@ export default function ContratoDetalle() {
             // Con `responseType: 'blob'` el `{ mensaje }` llega como Blob: se lee para mostrarlo.
             const cuerpo = error.response?.data;
             if (cuerpo instanceof Blob) {
-                try { setErrorDescarga(JSON.parse(await cuerpo.text())); return; } catch { /* sin cuerpo legible */ }
+                try { setErrorDescarga({ clave, error: JSON.parse(await cuerpo.text()) }); return; } catch { /* sin cuerpo legible */ }
             }
-            setErrorDescarga(error);
+            setErrorDescarga({ clave, error });
         } finally {
             setDescargando(null);
         }
@@ -309,6 +326,8 @@ export default function ContratoDetalle() {
     const inquilino = contrato.Inquilino;
     const inmueble = contrato.Inmueble;
     const ajuste = resumenDeAjuste(contrato.ajuste_canon);
+    const preaviso = resumenDePreaviso(contrato.preaviso);
+    const servidorPreaviso = dialogo?.modo === 'preaviso' ? erroresDelServidor(errorDialogo, ['causal']) : null;
 
     return (
         <div className="flex flex-col gap-6">
@@ -368,6 +387,32 @@ export default function ContratoDetalle() {
                 </Card>
             )}
 
+            {preaviso && (
+                <Card titulo="Preaviso de terminación"
+                    acciones={preaviso.puedeEnviar ? (
+                        <Button tamano="pequeno" icono={Send} onClick={() => abrir({ modo: 'preaviso', causal: '' })}>
+                            Enviar preaviso
+                        </Button>
+                    ) : preaviso.enviado && (
+                        <Button variante="secundario" tamano="pequeno" icono={Download} cargando={descargando === 'preaviso'}
+                            onClick={() => descargar('preaviso', () => descargarCartaPreaviso(id))}>
+                            Descargar carta
+                        </Button>
+                    )}>
+                    <dl className="flex flex-wrap gap-x-6 gap-y-5 m-0">
+                        <Dato etiqueta="Vencimiento">{preaviso.vencimiento}</Dato>
+                        <Dato etiqueta="Fecha límite del preaviso">
+                            <span className={preaviso.destacarLimite ? 'font-medium text-ambar-texto' : undefined}>{preaviso.limite}</span>
+                        </Dato>
+                    </dl>
+                    <p className="m-0 mt-4 text-sm text-texto">{preaviso.estado}</p>
+                    {(preaviso.puedeEnviar || preaviso.enviado) && (
+                        <p className="m-0 mt-2 text-xs text-texto-suave">{AVISO_SERVICIO_POSTAL}</p>
+                    )}
+                    <FormError error={errorDescarga?.clave === 'preaviso' ? errorDescarga.error : null} className="mt-3" />
+                </Card>
+            )}
+
             <div className="flex flex-col lg:flex-row gap-6 [&>*]:flex-1">
                 {propio && (
                     <Card titulo="Inquilino">
@@ -400,7 +445,7 @@ export default function ContratoDetalle() {
                 }>
                 <div className="flex flex-col gap-3">
                     <FormError error={errorAnexos} />
-                    <FormError error={errorDescarga} />
+                    <FormError error={errorDescarga?.clave === 'preaviso' ? null : errorDescarga?.error} />
                     {!errorAnexos && anexos.length === 0 && (
                         <EmptyState icono={FileText} titulo="Sin anexos"
                             descripcion={propio ? 'Genera el contrato, fírmalo y adjúntalo aquí en PDF.' : 'El propietario aún no ha adjuntado documentos.'} />
@@ -497,6 +542,34 @@ export default function ContratoDetalle() {
                 acciones={<Button onClick={() => setDialogo(null)}>Ya la anoté</Button>}
             >
                 {dialogo?.modo === 'contrasena' && <ContrasenaTemporal contrasena={dialogo.contrasena} persona={dialogo.persona} />}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'preaviso'}
+                onCerrar={cerrar}
+                titulo="Enviar preaviso"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Cancelar</Button>
+                        <Button icono={Send} onClick={preavisar} cargando={enviando}>Enviar preaviso</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'preaviso' && (
+                    <div className="flex flex-col gap-3">
+                        <FormError error={servidorPreaviso ? servidorPreaviso.general : errorDialogo} />
+                        <p className="m-0 text-sm text-texto">
+                            Avisarás a {propio ? 'tu arrendatario' : 'tu arrendador'} que el contrato no se renovará y termina al
+                            vencer, el <span className="font-medium">{preaviso.vencimiento}</span>. No se puede deshacer.
+                        </p>
+                        {propio && (
+                            <Select etiqueta="Causal" vacio="Selecciona…" opciones={preaviso.causales} value={dialogo.causal}
+                                error={dialogo.faltaCausal ? 'Elige la causal.' : servidorPreaviso?.errores.causal}
+                                onChange={(evento) => setDialogo((actual) => ({ ...actual, causal: evento.target.value, faltaCausal: false }))} />
+                        )}
+                        <p className="m-0 text-xs text-texto-suave">{AVISO_SERVICIO_POSTAL}</p>
+                    </div>
+                )}
             </Modal>
 
             <Modal
