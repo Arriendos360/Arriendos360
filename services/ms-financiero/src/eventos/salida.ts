@@ -1,6 +1,6 @@
 /**
  * MS-Financiero como productor: `CuentaCobroGenerada`, `CuentaCobroPorVencer`,
- * `CuentaCobroEnMora` y `AjusteCanonProximo`, anotados en su tabla de salida.
+ * `CuentaCobroEnMora`, `AjusteCanonProximo` y `PreavisoProximo`, anotados en su tabla de salida.
  */
 
 import {
@@ -17,11 +17,13 @@ import {
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
+  TIPO_PREAVISO_PROXIMO,
   type AjusteCanonProximo,
   type AlmacenSalida,
   type CuentaCobroEnMora,
   type CuentaCobroGenerada,
   type CuentaCobroPorVencer,
+  type PreavisoProximo,
   type Publicador,
 } from 'arriendos360-shared';
 
@@ -47,6 +49,9 @@ const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>>
     { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
   ],
   [TIPO_AJUSTE_CANON_PROXIMO]: [
+    { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
+  ],
+  [TIPO_PREAVISO_PROXIMO]: [
     { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
   ],
 };
@@ -129,6 +134,25 @@ export const registrarAjusteCanonProximo = (
   almacen.registrar(
     crearSobre(TIPO_AJUSTE_CANON_PROXIMO, carga, {
       id_evento: idDeEventoDeterminista(TIPO_AJUSTE_CANON_PROXIMO, carga.id_contrato, carga.fecha_ajuste),
+    }),
+    {
+      transaccion: transaccion as never,
+      ignorarSiExiste: true,
+      claveOrden: carga.id_contrato,
+    },
+  );
+
+/**
+ * Anota `PreavisoProximo` con un `id_evento` derivado del contrato y el vencimiento: sale una
+ * vez por vencimiento aunque el motor lo encuentre varios días.
+ */
+export const registrarPreavisoProximo = (
+  carga: PreavisoProximo,
+  transaccion: unknown,
+): Promise<void> =>
+  almacen.registrar(
+    crearSobre(TIPO_PREAVISO_PROXIMO, carga, {
+      id_evento: idDeEventoDeterminista(TIPO_PREAVISO_PROXIMO, carga.id_contrato, carga.vencimiento),
     }),
     {
       transaccion: transaccion as never,

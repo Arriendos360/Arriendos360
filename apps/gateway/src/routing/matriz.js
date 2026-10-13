@@ -56,6 +56,8 @@ const MATRIZ = [
     // El inquilino lee su contrato; sólo el propietario lo escribe.
     { metodo: 'GET', patron: '/api/contratos/**', acceso: AMBOS },
     { metodo: 'POST', patron: '/api/contratos/:id/contrasena-inquilino', acceso: SOLO_PROPIETARIO },
+    // El preaviso de no renovar lo envía cualquiera de las dos partes.
+    { metodo: 'POST', patron: '/api/contratos/:id/preaviso', acceso: AMBOS },
     { metodo: 'POST', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },
     { metodo: 'PUT', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },
     { metodo: 'DELETE', patron: '/api/contratos/**', acceso: SOLO_PROPIETARIO },

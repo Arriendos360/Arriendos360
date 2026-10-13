@@ -7,12 +7,21 @@
 import {
   ajusteDeCanon,
   cabeceraDeServicio,
+  causalesDisponibles,
   enteroDeEntorno,
   hoyEnZonaNegocio,
+  preavisoDe,
   textoDeEntorno,
 } from 'arriendos360-shared';
-import type { ContratoAjustable } from 'arriendos360-shared';
-import { IPC_ANUAL } from 'arriendos360-contracts';
+import type { ContratoAjustable, ContratoPreavisable, Preaviso } from 'arriendos360-shared';
+import {
+  ANIOS_PLENA_VOLUNTAD,
+  CAUSALES_PREAVISO_ARRENDADOR,
+  DIAS_RECORDATORIO_PREAVISO,
+  IPC_ANUAL,
+  MESES_PREAVISO_TERMINACION,
+} from 'arriendos360-contracts';
+import type { CausalPreaviso, PartePreaviso } from 'arriendos360-contracts';
 
 import type { InmuebleAjeno } from '../clientes/inmuebles';
 import type { UsuarioAjeno } from '../clientes/identidad';
@@ -131,6 +140,54 @@ export const conAjusteCanon = (
   return {
     ...contrato,
     ajuste_canon: ajusteDeCanon(contrato as unknown as ContratoAjustable, hoyEnZonaNegocio(), IPC_ANUAL),
+  };
+};
+
+/** El preaviso de un contrato visto desde hoy, con los plazos del catálogo. */
+export const preavisoHoy = (contrato: ContratoPreavisable): Preaviso | null =>
+  preavisoDe(contrato, hoyEnZonaNegocio(), {
+    meses: MESES_PREAVISO_TERMINACION,
+    diasRecordatorio: DIAS_RECORDATORIO_PREAVISO,
+  });
+
+/** Las causales que el arrendador puede invocar para ese vencimiento. */
+export const causalesDelArrendador = (inicio: unknown, vencimiento: string): CausalPreaviso[] =>
+  causalesDisponibles(
+    Object.keys(CAUSALES_PREAVISO_ARRENDADOR) as CausalPreaviso[],
+    inicio,
+    vencimiento,
+    ANIOS_PLENA_VOLUNTAD,
+  );
+
+/** Quién envió el preaviso, derivado de su `sub`. */
+export const parteQueAvisa = (contrato: { preaviso_enviado_por?: unknown; id_inquilino?: unknown }): PartePreaviso =>
+  contrato.preaviso_enviado_por === contrato.id_inquilino ? 'INQUILINO' : 'PROPIETARIO';
+
+/**
+ * Añade `preaviso` a un contrato activo ya compuesto, para las dos partes: la ley obliga a las
+ * dos. Sólo el dueño del inmueble recibe `causales_disponibles`.
+ */
+export const conPreaviso = (contrato: Record<string, unknown>, sub: string): Record<string, unknown> => {
+  const preaviso = contrato['estado'] === ESTADO_CONTRATO_ACTIVO ? preavisoHoy(contrato as unknown as ContratoPreavisable) : null;
+
+  if (preaviso === null) {
+    return contrato;
+  }
+
+  const enviado = contrato['preaviso_enviado_en']
+    ? { enviado_en: contrato['preaviso_enviado_en'], parte: parteQueAvisa(contrato), causal: contrato['preaviso_causal'] }
+    : null;
+  const inmueble = contrato['Inmueble'] as InmuebleAjeno | null;
+
+  return {
+    ...contrato,
+    preaviso: {
+      ...preaviso,
+      enviado,
+      ...(inmueble?.id_propietario === sub && {
+        causales_disponibles: causalesDelArrendador(contrato['inicio'], preaviso.vencimiento),
+      }),
+    },
   };
 };
 

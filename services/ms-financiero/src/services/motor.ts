@@ -24,6 +24,7 @@ import {
   partesDeISO,
   periodoDeCorte,
   periodoQueEmpiezaEn,
+  preavisoDe,
   soloFecha,
   sumarDias,
   ErrorDeEntorno,
@@ -31,7 +32,7 @@ import {
   ZONA_NEGOCIO,
 } from 'arriendos360-shared';
 import type { Entorno, Periodo } from 'arriendos360-shared';
-import { IPC_ANUAL } from 'arriendos360-contracts';
+import { DIAS_RECORDATORIO_PREAVISO, IPC_ANUAL, MESES_PREAVISO_TERMINACION } from 'arriendos360-contracts';
 
 import { sequelize } from '../config/database';
 import { contratosConEstado, porIds as contratosPorIds } from '../clientes/contratos';
@@ -46,6 +47,7 @@ import {
   registrarAjusteCanonProximo,
   registrarCuentaCobroEnMora,
   registrarCuentaCobroPorVencer,
+  registrarPreavisoProximo,
 } from '../eventos/salida';
 import { emitirCuentaCobro } from './cuentas';
 
@@ -375,6 +377,56 @@ export const procesarAjustes = async (): Promise<ResultadoAjustes> => {
   return resultado;
 };
 
+/**
+ * Recordatorio del preaviso de no renovar: anota `PreavisoProximo` para cada contrato activo con
+ * la ventana abierta y sin preaviso enviado. Su `id_evento` determinista lo deja en uno por
+ * vencimiento, así que sirve correr cualquier día. Un contrato vencido con preaviso no tiene ventana.
+ */
+export const procesarPreavisos = async (): Promise<ResultadoAjustes> => {
+  const resultado: ResultadoAjustes = { fallos: [] };
+  const hoy = hoyEnZonaNegocio();
+  const plazos = { meses: MESES_PREAVISO_TERMINACION, diasRecordatorio: DIAS_RECORDATORIO_PREAVISO };
+
+  let contratos: Awaited<ReturnType<typeof contratosConEstado>>;
+  try {
+    contratos = await contratosConEstado(ESTADO_CONTRATO_ACTIVO, { conInmueble: true });
+  } catch (error) {
+    console.error('❌ Error en procesarPreavisos: no se pudieron pedir los contratos:', error);
+    resultado.fallos.push(`preavisos: ${(error as Error).message}`);
+    return resultado;
+  }
+
+  for (const contrato of contratos) {
+    try {
+      const preaviso = preavisoDe(contrato, hoy, plazos);
+      const inmueble = contrato.Inmueble ?? null;
+
+      if (!preaviso?.en_ventana || contrato.preaviso_enviado_en || !inmueble?.id_propietario) {
+        continue;
+      }
+
+      await sequelize.transaction((transaccion) =>
+        registrarPreavisoProximo(
+          {
+            id_contrato: contrato.id_contrato,
+            id_inquilino: contrato.id_inquilino,
+            id_propietario: inmueble.id_propietario,
+            direccion_inmueble: inmueble.direccion ?? 'Inmueble sin dirección registrada',
+            vencimiento: preaviso.vencimiento,
+            fecha_limite: preaviso.fecha_limite,
+          },
+          transaccion,
+        ),
+      );
+    } catch (error) {
+      console.error(`❌ Error al revisar el preaviso del contrato ${contrato.id_contrato}:`, error);
+      resultado.fallos.push(`preaviso ${contrato.id_contrato}: ${(error as Error).message}`);
+    }
+  }
+
+  return resultado;
+};
+
 /** Lo que deja una ejecucion completa del motor. */
 export interface ResultadoMotor {
   generadas: number;
@@ -383,16 +435,17 @@ export interface ResultadoMotor {
   fallos: string[];
 }
 
-/** Una ejecución completa: generación, vencimientos y ajustes de canon. */
+/** Una ejecución completa: generación, vencimientos, ajustes de canon y preavisos. */
 export const ejecutarMotor = async (): Promise<ResultadoMotor> => {
   const generacion = await procesarContratos();
   const vencimientos = await procesarPagos();
   const ajustes = await procesarAjustes();
+  const preavisos = await procesarPreavisos();
 
   return {
     generadas: generacion.generadas,
     moras: vencimientos.moras,
-    fallos: [...generacion.fallos, ...vencimientos.fallos, ...ajustes.fallos],
+    fallos: [...generacion.fallos, ...vencimientos.fallos, ...ajustes.fallos, ...preavisos.fallos],
   };
 };
 

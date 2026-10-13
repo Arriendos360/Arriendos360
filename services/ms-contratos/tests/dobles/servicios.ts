@@ -284,3 +284,47 @@ export const levantarDobleIdentidad = async (): Promise<DobleIdentidad> => {
       }),
   };
 };
+
+export interface DobleNotificaciones {
+  url: string;
+  /** Sobres procesados, sin los repetidos. */
+  eventos: Array<{ id_evento: string; tipo: string; payload: Record<string, unknown> }>;
+  cerrar: () => Promise<void>;
+}
+
+/** Doble de MS-Notificaciones: exige la credencial y descarta repetidos por `id_evento`, como el real. */
+export const levantarDobleNotificaciones = async (): Promise<DobleNotificaciones> => {
+  const app = express();
+  app.use(express.json());
+  const eventos: DobleNotificaciones['eventos'] = [];
+
+  app.use(
+    '/interno',
+    exigirServicio({
+      destinatario: 'ms-notificaciones',
+      secreto: process.env['SERVICIO_JWT_SECRET'],
+    }),
+  );
+
+  app.post('/interno/eventos', (req, res) => {
+    const sobre = req.body as DobleNotificaciones['eventos'][number];
+    const repetido = eventos.some((evento) => evento.id_evento === sobre.id_evento);
+    if (!repetido) {
+      eventos.push(sobre);
+    }
+    return res.json({ mensaje: repetido ? 'Evento ya procesado' : 'Evento procesado', repetido });
+  });
+
+  const servidor: Server = await new Promise((resolver) => {
+    const s = app.listen(0, () => resolver(s));
+  });
+
+  return {
+    url: `http://127.0.0.1:${(servidor.address() as { port: number }).port}`,
+    eventos,
+    cerrar: () =>
+      new Promise((resolver, rechazar) => {
+        servidor.close((error) => (error ? rechazar(error) : resolver()));
+      }),
+  };
+};

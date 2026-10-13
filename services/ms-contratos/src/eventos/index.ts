@@ -1,6 +1,6 @@
 /**
- * MS-Contratos como productor: `ContratoFormalizado`, `ContratoFinalizado` y
- * `CanonAjustado`, anotados en la misma transacción que el cambio del contrato.
+ * MS-Contratos como productor: `ContratoFormalizado`, `ContratoFinalizado`,
+ * `CanonAjustado` y `PreavisoEnviado`, anotados en la misma transacción que el cambio del contrato.
  */
 
 import {
@@ -15,8 +15,10 @@ import {
   TIPO_CANON_AJUSTADO,
   TIPO_CONTRATO_FINALIZADO,
   TIPO_CONTRATO_FORMALIZADO,
+  TIPO_PREAVISO_ENVIADO,
   type AlmacenSalida,
   type CanonAjustado,
+  type PreavisoEnviado,
   type Publicador,
 } from 'arriendos360-shared';
 
@@ -42,6 +44,7 @@ const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>>
   ],
   [TIPO_CONTRATO_FINALIZADO]: [{ nombre: 'ms-inmuebles', variable: 'MS_INMUEBLES_URL' }],
   [TIPO_CANON_AJUSTADO]: [{ nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' }],
+  [TIPO_PREAVISO_ENVIADO]: [{ nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' }],
 };
 
 export const suscriptoresDe = (tipo: string): Array<{ nombre: string; url: string }> =>
@@ -107,6 +110,17 @@ export const registrarCanonAjustado = (
   transaccion: unknown,
 ): Promise<void> =>
   almacen.registrar(crearSobre(TIPO_CANON_AJUSTADO, carga), {
+    transaccion: transaccion as never,
+    claveOrden: idInmueble,
+  });
+
+/** Anota `PreavisoEnviado`. Debe ir en la transacción que guarda la constancia. */
+export const registrarPreavisoEnviado = (
+  carga: PreavisoEnviado,
+  idInmueble: string,
+  transaccion: unknown,
+): Promise<void> =>
+  almacen.registrar(crearSobre(TIPO_PREAVISO_ENVIADO, carga), {
     transaccion: transaccion as never,
     claveOrden: idInmueble,
   });

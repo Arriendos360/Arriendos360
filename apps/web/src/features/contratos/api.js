@@ -119,4 +119,16 @@ export const descargarAnexo = (idContrato, anexo) =>
 export const descargarContratoGenerado = (idContrato) =>
     descargarPdf(`/contratos/${idContrato}/documento`, `Contrato_${idContrato}.pdf`);
 
+/**
+ * `POST /api/contratos/:id/preaviso`: el preaviso de no renovar. El propietario manda la
+ * causal; la del inquilino el servicio la ignora, así que no se manda.
+ * @returns `{ mensaje, contrato }`
+ */
+export const enviarPreaviso = (idContrato, causal) =>
+    cuerpo(api.post(`/contratos/${idContrato}/preaviso`, causal ? { causal } : {}));
+
+/** `GET /api/contratos/:id/preaviso`: la carta del preaviso registrado, para enviarla por correo certificado. */
+export const descargarCartaPreaviso = (idContrato) =>
+    descargarPdf(`/contratos/${idContrato}/preaviso`, `Preaviso_${idContrato}.pdf`);
+
 export const eliminarAnexo =(idContrato, idAnexo) => cuerpo(api.delete(`/contratos/${idContrato}/anexos/${idAnexo}`));

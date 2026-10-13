@@ -62,3 +62,36 @@ export const IPC_ANUAL: Readonly<Record<number, number>> = {
   2024: 5.2,
   2025: 5.1,
 };
+
+/** Meses de anticipación del preaviso de no renovar (Ley 820 de 2003, arts. 22 num. 8 y 24 num. 5). */
+export const MESES_PREAVISO_TERMINACION = 3;
+
+/** Días antes de la fecha límite del preaviso en que se recuerda a las dos partes. */
+export const DIAS_RECORDATORIO_PREAVISO = 30;
+
+/** Años de ejecución que exige la causal de plena voluntad del arrendador. */
+export const ANIOS_PLENA_VOLUNTAD = 4;
+
+/** Quién envía el preaviso: el rol con que actúa en el contrato. */
+export type PartePreaviso = 'PROPIETARIO' | 'INQUILINO';
+
+/** El fundamento legal del preaviso según quién lo envía. */
+export const FUNDAMENTO_PREAVISO: Readonly<Record<PartePreaviso, string>> = {
+  PROPIETARIO: 'artículo 22, numeral 8, de la Ley 820 de 2003',
+  INQUILINO: 'artículo 24, numeral 5, de la Ley 820 de 2003',
+};
+
+/**
+ * Causales del arrendador para no renovar (Ley 820 de 2003, art. 22 num. 8), con su etiqueta
+ * legal. Catálogo cerrado, espejo del `CHECK` de la migración.
+ */
+export const CAUSALES_PREAVISO_ARRENDADOR = {
+  ocupacion_propia: 'Ocupar el inmueble para su propia habitación por no menos de un año (literal a)',
+  demolicion: 'Demoler el inmueble para efectuar una nueva construcción (literal b)',
+  reparaciones: 'Desocuparlo para ejecutar obras independientes para su reparación (literal b)',
+  compraventa: 'Entregarlo en cumplimiento de un contrato de compraventa (literal c)',
+  plena_voluntad:
+    'Plena voluntad, con cuatro años de ejecución del contrato y una indemnización de 1,5 cánones (literal d)',
+} as const;
+
+export type CausalPreaviso = keyof typeof CAUSALES_PREAVISO_ARRENDADOR;

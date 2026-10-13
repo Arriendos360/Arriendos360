@@ -64,6 +64,8 @@ export default function Dashboard() {
     const [errorCuentas, setErrorCuentas] = useState(null);
     // Contratos con la ventana de ajuste abierta; `null` si no se pudieron pedir: la lista no se muestra.
     const [ajustes, setAjustes] = useState(null);
+    // Contratos con la ventana del preaviso abierta y sin enviarlo, como los ajustes.
+    const [preavisos, setPreavisos] = useState(null);
     const [cargando, setCargando] = useState(true);
 
     const cargar = useCallback(async () => {
@@ -76,6 +78,7 @@ export default function Dashboard() {
         if (cue.status === 'fulfilled') setCuentas(cue.value.filter((c) => actuaComoPropietario(c.Contrato, sesion)));
         else { setCuentas(null); setErrorCuentas(cue.reason); }
         setAjustes(con.status === 'fulfilled' ? con.value.filter((c) => c.ajuste_canon?.en_ventana) : null);
+        setPreavisos(con.status === 'fulfilled' ? con.value.filter((c) => c.preaviso?.en_ventana && !c.preaviso.enviado) : null);
         setCargando(false);
         // `sesion` cambia de identidad en cada render; basta con el usuario.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,6 +176,28 @@ export default function Dashboard() {
                                     </div>
                                     <span className="text-sm font-medium text-indigo-medio whitespace-nowrap tabular-nums">
                                         {formatearDinero(c.ajuste_canon.canon_sugerido)}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </Card>
+                )}
+
+                {preavisos?.length > 0 && (
+                    <Card titulo="Preavisos de terminación" className="flex-1 min-w-[14rem]">
+                        <ul className="m-0 p-0 list-none flex flex-col">
+                            {preavisos.map((c) => (
+                                <li key={c.id_contrato}
+                                    className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
+                                    <div className="min-w-0">
+                                        <Link to={`/contratos/${c.id_contrato}`}
+                                            className="block text-sm font-medium text-texto no-underline hover:underline truncate">
+                                            {nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos'}
+                                        </Link>
+                                        <p className="m-0 mt-0.5 text-xs text-texto-suave">Vence el {formatearFecha(c.preaviso.vencimiento)}</p>
+                                    </div>
+                                    <span className="text-sm font-medium text-ambar-texto whitespace-nowrap" title="Fecha límite del preaviso">
+                                        {formatearFecha(c.preaviso.fecha_limite)}
                                     </span>
                                 </li>
                             ))}

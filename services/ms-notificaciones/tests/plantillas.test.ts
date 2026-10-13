@@ -21,6 +21,9 @@ import {
   enMoraPropietario,
   porVencerInquilino,
   porVencerPropietario,
+  preavisoEnviadoInquilino,
+  preavisoEnviadoPropietario,
+  preavisoProximo,
   recuperacionSolicitada,
   type Mensaje,
 } from '../src/plantillas';
@@ -64,6 +67,18 @@ const generada = {
   fin: base.fin,
 };
 
+/** Las cargas del preaviso de un contrato que vence el 2026-12-31. */
+const preaviso = {
+  id_contrato: base.id_contrato,
+  id_inquilino: base.id_inquilino,
+  id_propietario: base.id_propietario,
+  direccion_inmueble: base.direccion_inmueble,
+  vencimiento: '2026-12-31',
+};
+const proximo = { ...preaviso, fecha_limite: '2026-09-30' };
+const delInquilino = { ...preaviso, parte: 'INQUILINO' as const, causal: null, enviado_en: '2026-09-05T15:00:00.000Z' };
+const delPropietario = { ...delInquilino, parte: 'PROPIETARIO' as const, causal: 'ocupacion_propia' };
+
 /** El texto que se lee, sin etiquetas ni estilos. */
 const texto = (html: string): string => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
 
@@ -75,8 +90,12 @@ const cadaPlantilla = (
   const cuenta = { ...base, direccion_inmueble: direccion };
   const porVencer = { ...cuenta, entra_en_mora_el: '2026-06-07' };
   const enMora = { ...cuenta, dias_de_mora: 7 };
+  const contrato = `/contratos/${base.id_contrato}`;
 
   return [
+    [preavisoProximo({ ...proximo, direccion_inmueble: direccion }, destinatario), contrato],
+    [preavisoEnviadoInquilino({ ...delPropietario, direccion_inmueble: direccion }, destinatario, destinatario), contrato],
+    [preavisoEnviadoPropietario({ ...delInquilino, direccion_inmueble: direccion }, destinatario, destinatario), contrato],
     [recuperacionSolicitada(recuperacion, destinatario), `/restablecer?token=${recuperacion.token}`],
     [contrasenaTemporalEmitida({ id_usuario: destinatario.id_usuario, motivo: 'ALTA' }, destinatario), '/login'],
     [contrasenaTemporalEmitida({ id_usuario: destinatario.id_usuario, motivo: 'REEMISION' }, destinatario), '/login'],
@@ -228,6 +247,42 @@ describe('Avisos del motor', () => {
       expect(cuerpoHtml).toContain('Calle 123 #45-67');
       expect(cuerpoHtml).toMatch(/7/);
     }
+  });
+});
+
+describe('Preaviso de terminación', () => {
+  test('el recordatorio dice el vencimiento, la fecha límite y el plazo del catálogo', () => {
+    const lectura = texto(preavisoProximo(proximo, quien).cuerpoHtml);
+
+    expect(lectura).toContain('31 de diciembre de 2026');
+    expect(lectura).toContain('30 de septiembre de 2026');
+    expect(lectura).toContain('3 meses');
+  });
+
+  test('el aviso del arrendador cita el art. 22 y la causal con su etiqueta', () => {
+    const lectura = texto(preavisoEnviadoInquilino(delPropietario, quien, undefined).cuerpoHtml);
+
+    expect(lectura).toContain('artículo 22, numeral 8');
+    expect(lectura).toContain('propia habitación');
+    expect(lectura).toContain('3 meses');
+    expect(lectura).not.toContain('indemnización');
+  });
+
+  test('con plena voluntad, también la indemnización', () => {
+    const conPlenaVoluntad = { ...delPropietario, causal: 'plena_voluntad' };
+
+    expect(texto(preavisoEnviadoInquilino(conPlenaVoluntad, quien, undefined).cuerpoHtml)).toContain(
+      'indemnización de 1,5 cánones',
+    );
+  });
+
+  test('el aviso del arrendatario cita el art. 24 y el nombre de quien avisa', () => {
+    const inquilino: Destinatario = { ...quien, nombres: 'Bruno' };
+    const lectura = texto(preavisoEnviadoPropietario(delInquilino, quien, inquilino).cuerpoHtml);
+
+    expect(lectura).toContain('Tu arrendatario, Bruno,');
+    expect(lectura).toContain('artículo 24, numeral 5');
+    expect(lectura).toContain('3 meses');
   });
 });
 

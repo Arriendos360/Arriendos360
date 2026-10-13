@@ -171,6 +171,9 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
         ['POST', '/api/contratos', PROPIETARIO, INQUILINO],
         ['PUT', '/api/contratos/abc/finalizar', PROPIETARIO, INQUILINO],
         ['POST', '/api/contratos/abc/contrasena-inquilino', PROPIETARIO, INQUILINO],
+        // El preaviso es de las dos partes; el comodín sigue cerrando lo demás.
+        ['POST', '/api/contratos/abc/preaviso', INQUILINO, SIN_ROLES],
+        ['POST', '/api/contratos/abc/finalizar', PROPIETARIO, INQUILINO],
         // Anexos: las dos partes leen, solo el propietario escribe. Que el
         // inquilino pueda LLEGAR no significa que pueda ver cualquier contrato;
         // de eso responde el ABAC del controlador (regla dura 8).

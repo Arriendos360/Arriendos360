@@ -34,7 +34,7 @@ Azure**, con su despliegue automatizado. Ver «Despliegue en Azure» y `docs/des
 |---|---|---|---|---|
 | `ms-identidad` | Soporte | 3011 | `identidad`: Usuarios, Roles, RolesUsuario, TokensRevocados | `/api/auth`, `/api/usuarios`. Productor. |
 | `ms-inmuebles` | Soporte | 3012 | `inmuebles`: Inmuebles | `/api/inmuebles`. Consume los eventos de contrato → estado. |
-| `ms-contratos` | Core | 3013 | `contratos`: Contratos, Anexos | `/api/contratos` (anexos, contrato generado en PDF, reemisión de contraseña temporal). Productor. |
+| `ms-contratos` | Core | 3013 | `contratos`: Contratos, Anexos | `/api/contratos` (anexos, contrato generado en PDF, preaviso de terminación y su carta, reemisión de contraseña temporal). Productor. |
 | `ms-financiero` | Core | 3014 | `financiero`: Cuentas_cobro, Transacciones | `/api/pagos` (comprobantes, anulación) y el motor. Consume y produce. |
 | `ms-notificaciones` | Genérico | 3015 | `notificaciones`: ninguna (sólo `envios`, outbox de correos) | Sin API pública: sólo `POST /interno/eventos`. **Único que habla SMTP.** |
 | `gateway` | — | 3001 | **ninguna** | Todo `/api/*`; atiende él mismo `/api/dashboard`. |
@@ -66,8 +66,9 @@ propietario; `0007` contraseña temporal; `0010` recuperación (endpoints, tabla
 `contrasena_cambiada_en`); `0012` garantía de entrega al-menos-una-vez; `0013`
 `ContratoFinalizado`; `0015` `observaciones`; `0016` anulación de transacciones; `0019`
 el alta manual de un cobro notifica; `0023` Inmuebles conserva `departamento`, `barrio` y la
-ficha física; `0025` ajuste de canon por IPC (`fecha_ultimo_ajuste` y dos eventos). Los
-demás ADR no se apartan del documento.
+ficha física; `0025` ajuste de canon por IPC (`fecha_ultimo_ajuste` y dos eventos); `0026`
+preaviso de terminación (cuatro columnas `preaviso_*` y dos eventos). Los demás ADR no se
+apartan del documento.
 
 ---
 
@@ -87,11 +88,14 @@ seguridad (`TokensRevocados`, ver módulo de seguridad).
 | `Cuentas_cobro` | detalle, valor, inicio, fin, fecha_pago, estado | `id_contrato` |
 | `Transacciones` | monto, tipo, fecha_pago, medio_pago, estado | `id_cuenta_cobro` |
 
-- **Tres columnas fuera de esta tabla:** `observaciones` en `Transacciones`
+- **Columnas fuera de esta tabla:** `observaciones` en `Transacciones`
   (`docs/adr/0015`); `saldo_restante_momento`, la foto del saldo impresa en un
-  comprobante ya emitido: **no se deriva ni se toca**, ni al anular; y
+  comprobante ya emitido: **no se deriva ni se toca**, ni al anular;
   `fecha_ultimo_ajuste` en `Contratos`, desde la que corren los 12 meses del siguiente
-  ajuste por IPC (`docs/adr/0025`).
+  ajuste por IPC (`docs/adr/0025`); y en `Contratos` la constancia del preaviso de no
+  renovar, `preaviso_enviado_en`, `preaviso_enviado_por`, `preaviso_vencimiento` y
+  `preaviso_causal` (`docs/adr/0026`). Con ella el contrato deja de prorrogarse; la
+  escribe sólo `POST /api/contratos/:id/preaviso`.
 - **El saldo de una cuenta de cobro NO es una columna.** Es `valor` menos la suma de sus
   transacciones `CONFIRMADA` (`services/ms-financiero/src/services/saldos.ts`), expuesto
   como `saldo_pendiente`. Anular una transacción no «devuelve» nada.
@@ -282,6 +286,8 @@ Tipos en `packages/shared/src/eventos.ts`.
 | `CuentaCobroEnMora` | ídem | ídem + `dias_de_mora` | `ms-notificaciones` → aviso a los dos. |
 | `AjusteCanonProximo` | ídem (motor) | `id_contrato`, `id_propietario`, `direccion_inmueble`, `canon_actual`, `canon_sugerido`, `ipc`, `anio_ipc`, `fecha_ajuste` | `ms-notificaciones` → alerta al propietario. Una vez por ajuste. |
 | `CanonAjustado` | `ms-contratos` | `id_contrato`, `id_inquilino`, `id_propietario`, `direccion_inmueble`, `canon_anterior`, `canon_nuevo`, `ipc`, `anio_ipc`, `rige_desde` | `ms-notificaciones` → aviso formal al inquilino. |
+| `PreavisoProximo` | `ms-financiero` (motor) | `id_contrato`, `id_inquilino`, `id_propietario`, `direccion_inmueble`, `vencimiento`, `fecha_limite` | `ms-notificaciones` → recordatorio a las dos partes. Una vez por vencimiento. |
+| `PreavisoEnviado` | `ms-contratos` | `id_contrato`, `id_inquilino`, `id_propietario`, `parte`, `direccion_inmueble`, `vencimiento`, `causal`, `enviado_en` | `ms-notificaciones` → aviso formal a la otra parte. |
 
 - **NINGÚN EVENTO LLEVA UNA DIRECCIÓN DE CORREO.** Llevan `id_usuario` y Notificaciones
   resuelve el correo contra ms-identidad al manejar el evento. Sí viaja el asunto

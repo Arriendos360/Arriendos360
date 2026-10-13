@@ -14,6 +14,8 @@ export const TIPO_CUENTA_COBRO_POR_VENCER = 'CuentaCobroPorVencer';
 export const TIPO_CUENTA_COBRO_EN_MORA = 'CuentaCobroEnMora';
 export const TIPO_AJUSTE_CANON_PROXIMO = 'AjusteCanonProximo';
 export const TIPO_CANON_AJUSTADO = 'CanonAjustado';
+export const TIPO_PREAVISO_PROXIMO = 'PreavisoProximo';
+export const TIPO_PREAVISO_ENVIADO = 'PreavisoEnviado';
 
 /*
  * Ningún evento lleva una dirección de correo: llevan `id_usuario` y
@@ -129,6 +131,35 @@ export interface CanonAjustado {
   rige_desde: string;
 }
 
+/** Se abrió la ventana del recordatorio del preaviso de no renovar. Avisa a las dos partes. */
+export interface PreavisoProximo {
+  id_contrato: string;
+  id_inquilino: string;
+  /** Dueño del inmueble en el momento del hecho. */
+  id_propietario: string;
+  direccion_inmueble: string;
+  /** `YYYY-MM-DD`. El vencimiento vigente del contrato. */
+  vencimiento: string;
+  /** `YYYY-MM-DD`. El último día para enviar el preaviso. */
+  fecha_limite: string;
+}
+
+/** Una parte registró el preaviso de no renovar. Lleva el aviso formal a la otra. */
+export interface PreavisoEnviado {
+  id_contrato: string;
+  id_inquilino: string;
+  id_propietario: string;
+  /** Quién lo envió. El aviso va a la otra parte. */
+  parte: 'PROPIETARIO' | 'INQUILINO';
+  direccion_inmueble: string;
+  /** `YYYY-MM-DD`. El vencimiento al que se refiere. */
+  vencimiento: string;
+  /** Clave de `CAUSALES_PREAVISO_ARRENDADOR`; `null` si lo envió el inquilino. */
+  causal: string | null;
+  /** ISO 8601 en UTC. */
+  enviado_en: string;
+}
+
 /** Carga que corresponde a cada tipo. Es lo que ata el nombre con su forma. */
 export interface CargaPorTipo {
   [TIPO_CONTRATO_FORMALIZADO]: ContratoFormalizado;
@@ -140,6 +171,8 @@ export interface CargaPorTipo {
   [TIPO_CUENTA_COBRO_EN_MORA]: CuentaCobroEnMora;
   [TIPO_AJUSTE_CANON_PROXIMO]: AjusteCanonProximo;
   [TIPO_CANON_AJUSTADO]: CanonAjustado;
+  [TIPO_PREAVISO_PROXIMO]: PreavisoProximo;
+  [TIPO_PREAVISO_ENVIADO]: PreavisoEnviado;
 }
 
 export type TipoEvento = keyof CargaPorTipo;
@@ -180,6 +213,8 @@ export const VERSION_EVENTO: Record<TipoEvento, number> = {
   [TIPO_CUENTA_COBRO_EN_MORA]: 1,
   [TIPO_AJUSTE_CANON_PROXIMO]: 1,
   [TIPO_CANON_AJUSTADO]: 1,
+  [TIPO_PREAVISO_PROXIMO]: 1,
+  [TIPO_PREAVISO_ENVIADO]: 1,
 };
 
 /** Mete una carga en su sobre, con un `id_evento` nuevo si no se da uno. */

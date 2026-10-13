@@ -23,6 +23,11 @@ export class Contrato extends Model {
   declare documento_deudor_solidario: string | null;
   /** `YYYY-MM-DD`. Desde aquí corren los 12 meses del siguiente ajuste por IPC. */
   declare fecha_ultimo_ajuste: string | null;
+  /** Constancia del preaviso de no renovar; todas `null` mientras no se envíe. */
+  declare preaviso_enviado_en: Date | null;
+  declare preaviso_enviado_por: string | null;
+  declare preaviso_vencimiento: string | null;
+  declare preaviso_causal: string | null;
   declare id_inmueble: string;
   declare id_inquilino: string;
   declare creado_por: string;
@@ -69,6 +74,11 @@ Contrato.init(
     documento_deudor_solidario: { type: DataTypes.STRING(20), allowNull: true },
 
     fecha_ultimo_ajuste: { type: DataTypes.DATEONLY, allowNull: true },
+
+    preaviso_enviado_en: { type: DataTypes.DATE, allowNull: true },
+    preaviso_enviado_por: { type: DataTypes.UUID, allowNull: true },
+    preaviso_vencimiento: { type: DataTypes.DATEONLY, allowNull: true },
+    preaviso_causal: { type: DataTypes.STRING(30), allowNull: true },
 
     id_inmueble: { type: DataTypes.UUID, allowNull: false },
     id_inquilino: { type: DataTypes.UUID, allowNull: false },

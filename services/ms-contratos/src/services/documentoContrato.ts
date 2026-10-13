@@ -41,7 +41,7 @@ const ORDINALES = [
 ];
 
 /** En UTC: con la zona local, una fecha a medianoche caería el día anterior. */
-const fecha = (valor: Date | string): string =>
+export const fecha = (valor: Date | string): string =>
   new Date(valor).toLocaleDateString('es-CO', {
     day: 'numeric',
     month: 'long',
@@ -56,7 +56,7 @@ const dinero = (valor: number | string): string =>
     maximumFractionDigits: 0,
   }).format(Number(valor));
 
-const nombre = (persona: Persona): string =>
+export const nombre = (persona: Persona): string =>
   `${persona.nombres ?? ''} ${persona.apellidos ?? ''}`.trim();
 
 const vacio = (valor: unknown): boolean => valor === null || valor === undefined || valor === '';

@@ -8,8 +8,10 @@ import {
 } from '../controllers/anexo.controller';
 import {
   actualizar,
+  cartaPreaviso,
   crear,
   documento,
+  enviarPreaviso,
   finalizar,
   obtenerPorId,
   obtenerTodos,
@@ -39,6 +41,10 @@ router.get('/:id/documento', documento);
 
 // GET /api/contratos/:id
 router.get('/:id', obtenerPorId);
+
+// El preaviso de no renovar: lo envía cualquiera de las dos partes, y las dos descargan la carta.
+router.post('/:id/preaviso', enviarPreaviso);
+router.get('/:id/preaviso', cartaPreaviso);
 
 // Rutas exclusivas para propietarios.
 router.post('/', esPropietario, crear);

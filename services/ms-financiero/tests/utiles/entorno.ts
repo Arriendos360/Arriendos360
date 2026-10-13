@@ -174,6 +174,9 @@ export const contratoEnElDoble = (
     inicio?: string;
     fecha_inicio_corte?: string;
     fecha_ultimo_ajuste?: string | null;
+    fin?: string;
+    preaviso_enviado_en?: string | null;
+    preaviso_vencimiento?: string | null;
     estado?: string;
   },
 ): string => {

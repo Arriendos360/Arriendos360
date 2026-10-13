@@ -237,6 +237,34 @@ describe('Finalizar y actualizar', () => {
     expect(parseFloat(respuesta.body.contrato.canon)).toBe(1600000);
   });
 
+  test('ni el alta ni la edición guardan el ajuste ni la constancia del preaviso del cuerpo', async () => {
+    const delSistema = {
+      fecha_ultimo_ajuste: '2030-01-01',
+      preaviso_enviado_en: '2026-09-01T00:00:00Z',
+      preaviso_enviado_por: duenio.sub,
+      preaviso_vencimiento: '2026-12-31',
+      preaviso_causal: 'compraventa',
+    };
+    const vacias = {
+      fecha_ultimo_ajuste: null,
+      preaviso_enviado_en: null,
+      preaviso_enviado_por: null,
+      preaviso_vencimiento: null,
+      preaviso_causal: null,
+    };
+
+    const { respuesta, id } = await crearContrato(duenio.token, inmuebleDe(duenio.sub), idInquilino, delSistema);
+    expect(respuesta.statusCode).toBe(201);
+    expect(respuesta.body.contrato).toMatchObject(vacias);
+
+    const edicion = await request(app)
+      .put(`/api/contratos/${id}`)
+      .set(...conToken(duenio.token))
+      .send({ ...delSistema, info_contrato: 'Sin cambios de canon' });
+    expect(edicion.statusCode).toBe(200);
+    expect(edicion.body.contrato).toMatchObject(vacias);
+  });
+
   test('un `id` que no es UUID responde 404, no 500', async () => {
     const respuesta = await request(app)
       .get('/api/contratos/no-soy-un-uuid')
