@@ -1,13 +1,40 @@
 import {
     aDecimal,
+    diaEnZona,
     dineroParaEditar,
     formatearDinero,
     formatearFecha,
     formatearFechaHora,
     formatearMes,
     hoyEnBogota,
-    leerDinero
+    leerDinero,
+    restarDinero,
+    sumarDinero
 } from './formato';
+
+describe('sumar y restar dinero', () => {
+    test('al centavo, sin error de flotante', () => {
+        expect(sumarDinero('0.10', '0.20')).toBe('0.3');
+        expect(sumarDinero(1500000, '1500000.00', '2000000')).toBe('5000000');
+        expect(restarDinero('5000000', '2500000.00')).toBe('2500000');
+        expect(restarDinero('100', '-50')).toBe('150');
+    });
+
+    test('un negativo, y nada que sumar es cero', () => {
+        expect(sumarDinero('-1500000', '500000.5')).toBe('-999999.5');
+        expect(sumarDinero()).toBe('0');
+    });
+
+    test('un valor ilegible da null', () => {
+        expect(sumarDinero('1500000', null)).toBeNull();
+        expect(restarDinero('1500000', 'abc')).toBeNull();
+    });
+
+    test('el día en Bogotá de un instante', () => {
+        expect(diaEnZona('2026-04-01T03:00:00Z')).toBe('2026-03-31');
+        expect(diaEnZona(null)).toBeNull();
+    });
+});
 
 describe('dinero', () => {
     test('normaliza números y cadenas NUMERIC sin pasar por float', () => {

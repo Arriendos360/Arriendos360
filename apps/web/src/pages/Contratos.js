@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { FileText, Plus, Search, UserPlus } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { crearContrato, finalizarContrato, listarContratos } from '../features/contratos/api';
+import { etiquetaDeEstado, filtrarContratos } from '../features/contratos/filtros';
 import {
     AlertaMora, AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
@@ -11,7 +12,7 @@ import { errorDeDocumento, validarAlta, validarFormularioContrato } from '../fea
 import { listarInmuebles } from '../features/inmuebles/api';
 import { buscarPorDocumento, crearInquilino } from '../features/usuarios/api';
 import {
-    Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table, formatearDinero
+    Badge, Button, DateField, ESTADOS, EmptyState, FormError, Input, Modal, MoneyField, Select, Table, formatearDinero
 } from '../ui';
 import { useValidacion } from '../ui/validacion';
 
@@ -299,6 +300,30 @@ export default function Contratos() {
 
     const algunoPropio = contratos.some((c) => actuaComoPropietario(c, sesion));
 
+    // Los filtros viven en la URL: sobreviven a ir al detalle y volver, y a «atrás».
+    const location = useLocation();
+    const [params, setParams] = useSearchParams();
+    const opcionesInmueble = [...new Map(contratos.map((c) => [c.id_inmueble, nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos']))]
+        .map(([valor, texto]) => ({ valor, texto }));
+    const opcionesEstado = [...new Set(contratos.map(etiquetaDeEstado))]
+        .map((valor) => ({ valor, texto: ESTADOS[valor]?.texto ?? valor }));
+    // Un parámetro que no es ninguna opción (un id viejo) se ignora.
+    const elegido = (clave, opciones) => (opciones.some((o) => o.valor === params.get(clave)) ? params.get(clave) : '');
+    const filtros = {
+        inmueble: elegido('inmueble', opcionesInmueble),
+        estado: elegido('estado', opcionesEstado),
+        desde: params.get('desde') ?? '',
+        hasta: params.get('hasta') ?? ''
+    };
+    const filtrados = filtrarContratos(contratos, filtros);
+    const conFiltros = Object.values(filtros).some(Boolean);
+    const filtrar = (clave, valor) => setParams((actuales) => {
+        const nuevos = new URLSearchParams(actuales);
+        if (valor) nuevos.set(clave, valor); else nuevos.delete(clave);
+        return nuevos;
+    }, { replace: true });
+    const limpiar = () => setParams({}, { replace: true });
+
     const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
     const cerrar = () => { if (!enviando) setDialogo(null); };
     const abrirAlta = () => { setContrasenaNueva(null); abrir({ modo: 'crear' }); };
@@ -340,7 +365,8 @@ export default function Contratos() {
             clave: 'inmueble', titulo: 'Inmueble',
             render: (c) => (
                 <div className="min-w-[10rem]">
-                    <Link to={`/contratos/${c.id_contrato}`} className="text-sm font-medium text-texto no-underline hover:underline">
+                    <Link to={`/contratos/${c.id_contrato}`} state={{ busqueda: location.search }}
+                        className="text-sm font-medium text-texto no-underline hover:underline">
                         {nombreDeInmueble(c.Inmueble) || 'Inmueble sin datos'}
                     </Link>
                     {ubicacionDe(c.Inmueble) && <p className="m-0 mt-0.5 text-xs text-texto-suave">{ubicacionDe(c.Inmueble)}</p>}
@@ -358,7 +384,7 @@ export default function Contratos() {
             clave: 'acciones', titulo: 'Acciones', alinear: 'derecha',
             render: (c) => (
                 <div className="flex justify-end gap-1">
-                    <Link to={`/contratos/${c.id_contrato}`}
+                    <Link to={`/contratos/${c.id_contrato}`} state={{ busqueda: location.search }}
                         className="inline-flex items-center h-8 px-3 text-xs font-medium text-indigo-medio no-underline rounded-control hover:bg-lavanda">
                         Ver
                     </Link>
@@ -397,12 +423,28 @@ export default function Contratos() {
                 </div>
             ) : (
                 <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
+                    {contratos.length > 0 && (
+                        <div className="flex flex-wrap items-end gap-3 p-4 border-0 border-b border-solid border-borde">
+                            <Select etiqueta="Inmueble" vacio="Todos" opciones={opcionesInmueble} value={filtros.inmueble}
+                                className="w-full sm:w-56" onChange={(evento) => filtrar('inmueble', evento.target.value)} />
+                            <Select etiqueta="Estado" vacio="Todos" opciones={opcionesEstado} value={filtros.estado}
+                                className="w-full sm:w-44" onChange={(evento) => filtrar('estado', evento.target.value)} />
+                            <DateField etiqueta="Vigente desde" value={filtros.desde} max={filtros.hasta || undefined}
+                                onChange={(valor) => filtrar('desde', valor)} />
+                            <DateField etiqueta="Hasta" value={filtros.hasta} min={filtros.desde || undefined}
+                                onChange={(valor) => filtrar('hasta', valor)} />
+                            <Button variante="secundario" onClick={limpiar} disabled={!conFiltros}>Limpiar</Button>
+                        </div>
+                    )}
                     <Table
                         columnas={columnas}
-                        filas={contratos}
+                        filas={filtrados}
                         claveFila="id_contrato"
                         cargando={cargando}
-                        vacio={
+                        vacio={contratos.length > 0 ? (
+                            <EmptyState icono={Search} titulo="Ningún contrato cumple los filtros"
+                                accion={<Button variante="secundario" onClick={limpiar}>Limpiar filtros</Button>} />
+                        ) : (
                             <EmptyState
                                 icono={FileText}
                                 titulo={esPropietario ? 'Aún no tienes contratos' : 'No tienes contratos'}
@@ -411,7 +453,7 @@ export default function Contratos() {
                                     : 'Cuando un propietario firme un contrato contigo, aparecerá aquí.'}
                                 accion={esPropietario && <Button icono={Plus} onClick={() => abrirAlta()}>Nuevo contrato</Button>}
                             />
-                        }
+                        )}
                     />
                 </div>
             )}

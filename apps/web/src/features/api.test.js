@@ -9,7 +9,7 @@ import {
     actualizarContrato, cancelarContrato, crearContrato, descargarCartaPreaviso, descargarContratoGenerado, enviarPreaviso,
     fechaDeContrato, listarHistorial, subirAnexo
 } from './contratos/api';
-import { anularTransaccion, crearCuentaCobro, cuentasDeContrato, registrarPago } from './pagos/api';
+import { anularTransaccion, crearCuentaCobro, cuentasDeContrato, listarMovimientos, registrarPago } from './pagos/api';
 import { buscarPorDocumento, crearInquilino } from './usuarios/api';
 import { montoParaEnviar, soloCampos } from './comun';
 import api from '../services/api';
@@ -125,6 +125,11 @@ test('cancelar lleva el motivo y la indemnización como número; quién la paga,
         motivo: 'unilateral_inquilino', indemnizacion: 4500000, indemnizacion_a_cargo_de: 'INQUILINO'
     });
     expect(api.put).toHaveBeenNthCalledWith(2, '/contratos/c2/cancelar', { motivo: 'mutuo_acuerdo', indemnizacion: 0 });
+});
+
+test('los movimientos salen del libro de transacciones', async () => {
+    await listarMovimientos();
+    expect(api.get).toHaveBeenCalledWith('/pagos/historial-transacciones');
 });
 
 test('el historial y las cuentas de un contrato', async () => {

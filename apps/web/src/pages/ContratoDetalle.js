@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, FileText, KeyRound, Pencil, Send, Trash2, TrendingUp, Upload } from 'lucide-react';
 import { MOTIVOS_CANCELACION, TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-contracts';
 
@@ -257,6 +257,8 @@ function SubirAnexo({ idContrato, onSubido }) {
 export default function ContratoDetalle() {
     const { id } = useParams();
     const sesion = useSesion();
+    // La búsqueda del listado, para volver a él con sus filtros.
+    const location = useLocation();
     const [contrato, setContrato] = useState(null);
     // `null` = no se pudieron cargar; se dice aparte, el contrato sigue en pie.
     const [anexos, setAnexos] = useState([]);
@@ -408,7 +410,7 @@ export default function ContratoDetalle() {
     };
 
     const volver = (
-        <Link to="/contratos" className="inline-flex items-center gap-1 text-sm text-indigo-medio no-underline hover:underline">
+        <Link to={`/contratos${location.state?.busqueda ?? ''}`} className="inline-flex items-center gap-1 text-sm text-indigo-medio no-underline hover:underline">
             <ArrowLeft size={16} aria-hidden="true" /> {sesion.esPropietario ? 'Contratos' : 'Mi contrato'}
         </Link>
     );
