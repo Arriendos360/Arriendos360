@@ -170,6 +170,7 @@ describe('Cada política, con el rol correcto y con el equivocado', () => {
         ['GET', '/api/contratos', INQUILINO, SIN_ROLES],
         ['POST', '/api/contratos', PROPIETARIO, INQUILINO],
         ['PUT', '/api/contratos/abc/finalizar', PROPIETARIO, INQUILINO],
+        ['PUT', '/api/contratos/abc/cancelar', PROPIETARIO, INQUILINO],
         ['POST', '/api/contratos/abc/contrasena-inquilino', PROPIETARIO, INQUILINO],
         // El preaviso es de las dos partes; el comodín sigue cerrando lo demás.
         ['POST', '/api/contratos/abc/preaviso', INQUILINO, SIN_ROLES],

@@ -5,7 +5,7 @@ import { FileText, Plus, Search, UserPlus } from 'lucide-react';
 import { useSesion } from '../auth/sesion';
 import { crearContrato, finalizarContrato, listarContratos } from '../features/contratos/api';
 import {
-    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
+    AlertaMora, AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
 import { errorDeDocumento, validarAlta, validarFormularioContrato } from '../features/contratos/reglas';
 import { listarInmuebles } from '../features/inmuebles/api';
@@ -353,7 +353,7 @@ export default function Contratos() {
         },
         { clave: 'vigencia', titulo: 'Vigencia', render: (c) => <span className="whitespace-nowrap">{vigencia(c)}</span> },
         { clave: 'canon', titulo: 'Canon', alinear: 'derecha', render: (c) => formatearDinero(c.canon) },
-        { clave: 'estado', titulo: 'Estado', render: (c) => <Badge estado={c.estado} /> },
+        { clave: 'estado', titulo: 'Estado', render: (c) => <Badge estado={c.situacion ?? c.estado} /> },
         {
             clave: 'acciones', titulo: 'Acciones', alinear: 'derecha',
             render: (c) => (
@@ -362,7 +362,7 @@ export default function Contratos() {
                         className="inline-flex items-center h-8 px-3 text-xs font-medium text-indigo-medio no-underline rounded-control hover:bg-lavanda">
                         Ver
                     </Link>
-                    {actuaComoPropietario(c, sesion) && c.estado === 'activo' && (
+                    {actuaComoPropietario(c, sesion) && c.situacion === 'vencido_con_preaviso' && (
                         <Button variante="fantasma" tamano="pequeno" onClick={() => abrir({ modo: 'finalizar', contrato: c })}>
                             Finalizar
                         </Button>
@@ -453,13 +453,16 @@ export default function Contratos() {
                     </>
                 }
             >
-                <div className="flex flex-col gap-3">
-                    <FormError error={errorDialogo} />
-                    <p className="m-0 text-sm text-texto">
-                        ¿Finalizar el contrato de <span className="font-medium">{nombreDeInmueble(dialogo?.contrato?.Inmueble) || 'este inmueble'}</span>?
-                        El inmueble quedará disponible. Lo que se deba sigue pendiente de cobro.
-                    </p>
-                </div>
+                {dialogo?.modo === 'finalizar' && (
+                    <div className="flex flex-col gap-3">
+                        <FormError error={errorDialogo} />
+                        <p className="m-0 text-sm text-texto">
+                            ¿Seguro que quieres finalizar el contrato de <span className="font-medium">{nombreDeInmueble(dialogo.contrato.Inmueble) || 'este inmueble'}</span>?
+                            No se puede deshacer. El inmueble quedará disponible.
+                        </p>
+                        <AlertaMora idContrato={dialogo.contrato.id_contrato} />
+                    </div>
+                )}
             </Modal>
 
             <Modal

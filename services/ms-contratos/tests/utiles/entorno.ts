@@ -189,3 +189,10 @@ export const crearContrato = async (
 
   return { respuesta, id: respuesta.body.contrato?.id_contrato };
 };
+
+/** Cancela un contrato por mutuo acuerdo, para las pruebas que sólo necesitan uno terminado. */
+export const cancelarContrato = (token: string, id: string): request.Test =>
+  request(app)
+    .put(`/api/contratos/${id}/cancelar`)
+    .set(...conToken(token))
+    .send({ motivo: 'mutuo_acuerdo', indemnizacion: 0 });

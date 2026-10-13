@@ -3,6 +3,7 @@ import crypto from 'crypto';
 
 import {
   app,
+  cancelarContrato,
   cerrarEntorno,
   firmarToken,
   conServicio,
@@ -176,10 +177,8 @@ describe('/interno resuelve la pertenencia para el gateway', () => {
 
     expect(respuesta.body.contratos).toHaveLength(1);
 
-    // Y despues de finalizarlo, ya no bloquea el borrado.
-    await request(app)
-      .put(`/api/contratos/${idContrato}/finalizar`)
-      .set(...conToken(duenio.token));
+    // Y despues de terminarlo, ya no bloquea el borrado.
+    await cancelarContrato(duenio.token, idContrato);
 
     const despues = await request(app)
       .get(`/interno/contratos?inmueble=${idInmueble}&estado=activo`)

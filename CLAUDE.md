@@ -34,7 +34,7 @@ Azure**, con su despliegue automatizado. Ver «Despliegue en Azure» y `docs/des
 |---|---|---|---|---|
 | `ms-identidad` | Soporte | 3011 | `identidad`: Usuarios, Roles, RolesUsuario, TokensRevocados | `/api/auth`, `/api/usuarios`. Productor. |
 | `ms-inmuebles` | Soporte | 3012 | `inmuebles`: Inmuebles | `/api/inmuebles`. Consume los eventos de contrato → estado. |
-| `ms-contratos` | Core | 3013 | `contratos`: Contratos, Anexos | `/api/contratos` (anexos, contrato generado en PDF, preaviso de terminación y su carta, reemisión de contraseña temporal). Productor. |
+| `ms-contratos` | Core | 3013 | `contratos`: Contratos, Anexos, historial_contratos | `/api/contratos` (anexos, contrato generado en PDF, preaviso de terminación y su carta, finalizar y cancelar, historial, reemisión de contraseña temporal). Productor. |
 | `ms-financiero` | Core | 3014 | `financiero`: Cuentas_cobro, Transacciones | `/api/pagos` (comprobantes, anulación) y el motor. Consume y produce. |
 | `ms-notificaciones` | Genérico | 3015 | `notificaciones`: ninguna (sólo `envios`, outbox de correos) | Sin API pública: sólo `POST /interno/eventos`. **Único que habla SMTP.** |
 | `gateway` | — | 3001 | **ninguna** | Todo `/api/*`; atiende él mismo `/api/dashboard`. |
@@ -67,8 +67,9 @@ propietario; `0007` contraseña temporal; `0010` recuperación (endpoints, tabla
 `ContratoFinalizado`; `0015` `observaciones`; `0016` anulación de transacciones; `0019`
 el alta manual de un cobro notifica; `0023` Inmuebles conserva `departamento`, `barrio` y la
 ficha física; `0025` ajuste de canon por IPC (`fecha_ultimo_ajuste` y dos eventos); `0026`
-preaviso de terminación (cuatro columnas `preaviso_*` y dos eventos). Los demás ADR no se
-apartan del documento.
+preaviso de terminación (cuatro columnas `preaviso_*` y dos eventos); `0027` estado del contrato
+(tabla `historial_contratos`, situación del contrato activo, cancelar y día de corte fijo). Los
+demás ADR no se apartan del documento.
 
 ---
 
@@ -103,6 +104,12 @@ seguridad (`TokensRevocados`, ver módulo de seguridad).
   `INGRESO`.
 - **Estados:** Contratos `activo`/`finalizado`/`cancelado`; Cuentas_cobro
   `PENDIENTE`/`PAGADA`/`PARCIAL`/`EN_MORA`; Transacciones `CONFIRMADA`/`ANULADA`.
+- **Los estados del contrato que nombra el SRS no se guardan** (`docs/adr/0027`): un `activo`
+  lleva `situacion` —`vigente`, `renovado` (prorrogado sin preaviso) o `vencido_con_preaviso`—,
+  deducida de las fechas. `finalizado` (sólo con el preaviso vencido) y `cancelado` (antes de
+  tiempo, con motivo e indemnización) son terminales y emiten el mismo `ContratoFinalizado`.
+  Cada cambio de un campo editable o del estado deja una fila en `historial_contratos`, que sólo
+  se agrega. El día de corte no se edita, y `fin` sólo durante el término inicial y sin preaviso.
 - **Propietario e inquilino son roles** en `RolesUsuario`, no tablas; un usuario puede
   ser los dos.
 - **Toda tabla de dominio lleva auditoría:** `creado_por`, `fecha_creacion`,
@@ -544,7 +551,8 @@ un despliegue completo, con pruebas e imágenes, ~18 min.
 **Datos de prueba en Azure:** los tres usuarios del seed (`propietario@`, `inquilino@` y
 `ambos@arriendos360.test`, contraseña `Prueba123`), la cartera de demostración que siembra
 `infra/demo/sembrar-demo.js` sobre la propietaria —cinco inmuebles, cuatro contratos y su
-historial de cobros, con un caso de cada estado— y un propietario con el correo real del
+historial de cobros, con un caso de cada estado salvo Finalizado: el contrato terminado sale
+Cancelado, porque por la API no se siembra un preaviso vencido— y un propietario con el correo real del
 usuario, creado para probar la recuperación. El sembrador entra por el gateway como una
 persona más: no escribe en ninguna base, así que los eventos y las cuentas de cobro los
 genera el sistema. **Ninguna dirección personal va en el repositorio**; el remitente vive en

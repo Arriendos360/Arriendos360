@@ -2,3 +2,4 @@
 
 export { Anexo } from './Anexo';
 export { Contrato } from './Contrato';
+export { HistorialContrato } from './HistorialContrato';

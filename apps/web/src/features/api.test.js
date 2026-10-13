@@ -6,9 +6,10 @@
 
 import { actualizarInmueble, crearInmueble, eliminarInmueble } from './inmuebles/api';
 import {
-    actualizarContrato, crearContrato, descargarCartaPreaviso, descargarContratoGenerado, enviarPreaviso, fechaDeContrato, subirAnexo
+    actualizarContrato, cancelarContrato, crearContrato, descargarCartaPreaviso, descargarContratoGenerado, enviarPreaviso,
+    fechaDeContrato, listarHistorial, subirAnexo
 } from './contratos/api';
-import { anularTransaccion, crearCuentaCobro, registrarPago } from './pagos/api';
+import { anularTransaccion, crearCuentaCobro, cuentasDeContrato, registrarPago } from './pagos/api';
 import { buscarPorDocumento, crearInquilino } from './usuarios/api';
 import { montoParaEnviar, soloCampos } from './comun';
 import api from '../services/api';
@@ -115,6 +116,22 @@ test('el anexo va en multipart con `file` y `tipo`', async () => {
 test('el contrato generado se descarga por la API autenticada', async () => {
     await descargarContratoGenerado('c1');
     expect(descargarPdf).toHaveBeenCalledWith('/contratos/c1/documento', 'Contrato_c1.pdf');
+});
+
+test('cancelar lleva el motivo y la indemnización como número; quién la paga, sólo si la hay', async () => {
+    await cancelarContrato('c1', { motivo: 'unilateral_inquilino', indemnizacion: '4500000', indemnizacion_a_cargo_de: 'INQUILINO' });
+    await cancelarContrato('c2', { motivo: 'mutuo_acuerdo', indemnizacion: '0', indemnizacion_a_cargo_de: 'INQUILINO' });
+    expect(api.put).toHaveBeenNthCalledWith(1, '/contratos/c1/cancelar', {
+        motivo: 'unilateral_inquilino', indemnizacion: 4500000, indemnizacion_a_cargo_de: 'INQUILINO'
+    });
+    expect(api.put).toHaveBeenNthCalledWith(2, '/contratos/c2/cancelar', { motivo: 'mutuo_acuerdo', indemnizacion: 0 });
+});
+
+test('el historial y las cuentas de un contrato', async () => {
+    await listarHistorial('c1');
+    await cuentasDeContrato('c1');
+    expect(api.get).toHaveBeenNthCalledWith(1, '/contratos/c1/historial');
+    expect(api.get).toHaveBeenNthCalledWith(2, '/pagos/contrato/c1');
 });
 
 test('el preaviso lleva la causal sólo si la hay', async () => {

@@ -72,8 +72,11 @@ export const DIAS_RECORDATORIO_PREAVISO = 30;
 /** Años de ejecución que exige la causal de plena voluntad del arrendador. */
 export const ANIOS_PLENA_VOLUNTAD = 4;
 
-/** Quién envía el preaviso: el rol con que actúa en el contrato. */
-export type PartePreaviso = 'PROPIETARIO' | 'INQUILINO';
+/** Una de las dos partes de un contrato, por el rol con que actúa en él. */
+export type ParteContrato = 'PROPIETARIO' | 'INQUILINO';
+
+/** Quién envía el preaviso. */
+export type PartePreaviso = ParteContrato;
 
 /** El fundamento legal del preaviso según quién lo envía. */
 export const FUNDAMENTO_PREAVISO: Readonly<Record<PartePreaviso, string>> = {
@@ -95,3 +98,79 @@ export const CAUSALES_PREAVISO_ARRENDADOR = {
 } as const;
 
 export type CausalPreaviso = keyof typeof CAUSALES_PREAVISO_ARRENDADOR;
+
+/** Lo que se puede cambiar de un contrato activo: nunca sus partes, su inicio, su corte ni su estado. */
+export const CAMPOS_CONTRATO_EDITABLES = [
+  'fin',
+  'fecha_limite_pago',
+  'canon',
+  'info_contrato',
+  'nombre_deudor_solidario',
+  'documento_deudor_solidario',
+] as const;
+
+/** Cómo se presenta un contrato activo: la prórroga y el vencimiento se deducen de las fechas. */
+export type SituacionContrato = 'vigente' | 'renovado' | 'vencido_con_preaviso';
+
+export interface MotivoCancelacion {
+  etiqueta: string;
+  referencia: string;
+  /** Indemnización sugerida, en cánones. Es pactable: se sugiere, no se impone. */
+  canones_sugeridos: number;
+  a_cargo_de: ParteContrato | null;
+  /** Sólo se admite con el contrato prorrogado (`renovado`). */
+  solo_en_prorroga: boolean;
+}
+
+/**
+ * Motivos para terminar un contrato antes de tiempo (Ley 820 de 2003, arts. 21, 22 y 24).
+ * Catálogo cerrado, espejo del `CHECK` de `historial_contratos`.
+ */
+export const MOTIVOS_CANCELACION = {
+  mutuo_acuerdo: {
+    etiqueta: 'Mutuo acuerdo',
+    referencia: 'artículo 21 de la Ley 820 de 2003',
+    canones_sugeridos: 0,
+    a_cargo_de: null,
+    solo_en_prorroga: false,
+  },
+  incumplimiento_inquilino: {
+    etiqueta: 'Incumplimiento del arrendatario',
+    referencia: 'artículo 22, numerales 1 a 6, de la Ley 820 de 2003',
+    canones_sugeridos: 0,
+    a_cargo_de: 'INQUILINO',
+    solo_en_prorroga: false,
+  },
+  incumplimiento_propietario: {
+    etiqueta: 'Incumplimiento del arrendador',
+    referencia: 'artículo 24, numerales 1 a 3, de la Ley 820 de 2003',
+    canones_sugeridos: 0,
+    a_cargo_de: 'PROPIETARIO',
+    solo_en_prorroga: false,
+  },
+  unilateral_inquilino: {
+    etiqueta: 'Terminación unilateral del arrendatario',
+    referencia: 'artículo 24, numeral 4, de la Ley 820 de 2003',
+    canones_sugeridos: 3,
+    a_cargo_de: 'INQUILINO',
+    solo_en_prorroga: false,
+  },
+  unilateral_propietario: {
+    etiqueta: 'Terminación unilateral del arrendador durante la prórroga',
+    referencia: 'artículo 22, numeral 7, de la Ley 820 de 2003',
+    canones_sugeridos: 3,
+    a_cargo_de: 'PROPIETARIO',
+    solo_en_prorroga: true,
+  },
+} as const satisfies Record<string, MotivoCancelacion>;
+
+export type ClaveMotivoCancelacion = keyof typeof MOTIVOS_CANCELACION;
+
+/** Cuerpo de `PUT /api/contratos/{id}/cancelar`. */
+export interface CancelarContratoRequest {
+  motivo: ClaveMotivoCancelacion;
+  /** Pesos colombianos. Mayor o igual a 0. */
+  indemnizacion: MontoCOP;
+  /** Obligatorio si `indemnizacion` es mayor que 0. */
+  indemnizacion_a_cargo_de?: ParteContrato;
+}

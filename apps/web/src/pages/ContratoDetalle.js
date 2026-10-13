@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, FileText, KeyRound, Pencil, Send, Trash2, TrendingUp, Upload } from 'lucide-react';
-import { TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-contracts';
+import { MOTIVOS_CANCELACION, TAMANO_MAXIMO_ANEXO_MB, TIPOS_ANEXO_CONOCIDOS } from 'arriendos360-contracts';
 
 import { useSesion } from '../auth/sesion';
 import {
-    actualizarContrato, descargarAnexo, descargarCartaPreaviso, descargarContratoGenerado, eliminarAnexo, enviarPreaviso,
-    fechaDeContrato, finalizarContrato, listarAnexos, obtenerContrato, reemitirContrasenaInquilino, subirAnexo
+    actualizarContrato, cancelarContrato, descargarAnexo, descargarCartaPreaviso, descargarContratoGenerado, eliminarAnexo,
+    enviarPreaviso, fechaDeContrato, finalizarContrato, listarAnexos, listarHistorial, obtenerContrato,
+    reemitirContrasenaInquilino, subirAnexo
 } from '../features/contratos/api';
+import {
+    OPCIONES_A_CARGO_DE, filaDeHistorial, indemnizacionSugerida, motivosPara, primerInicioLibre
+} from '../features/contratos/estado';
+import { crearCuentaCobro, cuentasDeContrato } from '../features/pagos/api';
 import { resumenDeAjuste } from '../features/contratos/ajuste';
 import { AVISO_SERVICIO_POSTAL, resumenDePreaviso } from '../features/contratos/preaviso';
 import {
-    AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
+    AlertaMora, AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
 import {
-    Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, formatearDinero, formatearFecha,
-    formatearFechaHora
+    Badge, Button, Card, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, aDecimal, formatearDinero,
+    formatearFecha, formatearFechaHora, hoyEnBogota
 } from '../ui';
 import { erroresDelServidor } from '../ui/validacion';
 
@@ -68,6 +73,7 @@ function validarEdicion(form, contrato) {
     const ajuste = contrato.ajuste_canon;
     if (!form.fin) errores.fin = 'Indica la fecha de fin.';
     else if (inicio && form.fin <= inicio) errores.fin = 'Debe ser posterior al inicio.';
+    else if (form.fin !== fechaDeContrato(contrato.fin) && form.fin <= hoyEnBogota()) errores.fin = 'Debe ser posterior a hoy.';
     if (form.canon === null || !(Number(form.canon) > 0)) errores.canon = 'Escribe un canon mayor que cero.';
     else if (ajuste?.en_ventana && Number(form.canon) !== Number(contrato.canon) && Number(form.canon) > ajuste.canon_sugerido) {
         errores.canon = `No puede superar ${formatearDinero(ajuste.canon_sugerido)}, el tope del IPC de ${ajuste.anio_ipc}.`;
@@ -89,6 +95,8 @@ function FormularioEdicion({ contrato, canonInicial, error, onEnviar, idFormular
     const inicio = fechaDeContrato(contrato.inicio);
     const servidor = erroresDelServidor(error, Object.keys(form));
     const enVentana = contrato.ajuste_canon?.en_ventana;
+    // El término inicial mide la prórroga: `fin` sólo se corrige mientras corre y sin preaviso.
+    const finEditable = contrato.situacion === 'vigente' && !contrato.preaviso?.enviado;
 
     const poner = (nombre, valor) => {
         setForm((actual) => ({ ...actual, [nombre]: valor }));
@@ -117,6 +125,7 @@ function FormularioEdicion({ contrato, canonInicial, error, onEnviar, idFormular
             )}
             <Fila>
                 <DateField etiqueta="Fin" name="fin" value={form.fin} error={errorDe('fin')} min={inicio || undefined}
+                    disabled={!finEditable} ayuda={finEditable ? undefined : 'Sólo se cambia durante el término inicial y sin preaviso.'}
                     onChange={(valor) => poner('fin', valor)} />
                 <MoneyField etiqueta="Canon mensual" value={form.canon} error={errorDe('canon')} onChange={(valor) => poner('canon', valor)} />
             </Fila>
@@ -126,6 +135,63 @@ function FormularioEdicion({ contrato, canonInicial, error, onEnviar, idFormular
                 <Input etiqueta="Deudor solidario" {...campo('nombre_deudor_solidario')} />
                 <Input etiqueta="Documento del deudor" inputMode="numeric" {...campo('documento_deudor_solidario')} />
             </Fila>
+        </form>
+    );
+}
+
+/**
+ * Cancelar: el motivo prellena la indemnización sugerida y quién la paga, los dos editables porque
+ * la indemnización es pactable. La unilateral del arrendador sólo se ofrece en la prórroga.
+ */
+function FormularioCancelacion({ contrato, error, onEnviar, idFormulario }) {
+    const [form, setForm] = useState({ motivo: '', indemnizacion: null, indemnizacion_a_cargo_de: '' });
+    const [errores, setErrores] = useState({});
+    const servidor = erroresDelServidor(error, Object.keys(form));
+    const motivo = MOTIVOS_CANCELACION[form.motivo];
+    const errorDe = (nombre) => errores[nombre] ?? servidor?.errores[nombre];
+
+    const elegirMotivo = (valor) => {
+        const sugerida = indemnizacionSugerida(valor, contrato.canon);
+        setForm({ motivo: valor, indemnizacion: sugerida.valor, indemnizacion_a_cargo_de: sugerida.a_cargo_de });
+        setErrores({});
+    };
+    const poner = (nombre, valor) => {
+        setForm((actual) => ({ ...actual, [nombre]: valor }));
+        setErrores((actuales) => ({ ...actuales, [nombre]: undefined }));
+    };
+
+    const enviar = (evento) => {
+        evento.preventDefault();
+        const encontrados = {};
+        const valor = aDecimal(form.indemnizacion);
+        if (!form.motivo) encontrados.motivo = 'Elige el motivo.';
+        if (valor === null || Number(valor) < 0) encontrados.indemnizacion = 'Escribe un valor de 0 o más.';
+        else if (Number(valor) > 0 && !form.indemnizacion_a_cargo_de) encontrados.indemnizacion_a_cargo_de = 'Indica quién la paga.';
+        setErrores(encontrados);
+        if (Object.keys(encontrados).length === 0) onEnviar(form);
+    };
+
+    return (
+        <form id={idFormulario} onSubmit={enviar} noValidate className="flex flex-col gap-4">
+            <FormError error={servidor ? servidor.general : error} />
+            <p className="m-0 text-sm text-texto">
+                ¿Seguro que quieres cancelar el contrato? No se puede deshacer. El inmueble quedará disponible.
+            </p>
+            <Select etiqueta="Motivo" vacio="Selecciona…" opciones={motivosPara(contrato.situacion)} value={form.motivo}
+                error={errorDe('motivo')} onChange={(evento) => elegirMotivo(evento.target.value)} />
+            {motivo && (
+                <p className="m-0 text-xs text-texto-suave">
+                    Según el {motivo.referencia}, la indemnización sugerida es de {motivo.canones_sugeridos} cánones
+                    ({formatearDinero(indemnizacionSugerida(form.motivo, contrato.canon).valor)}). Es pactable: puedes cambiarla.
+                </p>
+            )}
+            <Fila>
+                <MoneyField etiqueta="Indemnización" value={form.indemnizacion} error={errorDe('indemnizacion')}
+                    onChange={(valor) => poner('indemnizacion', valor)} />
+                <Select etiqueta="A cargo de" vacio="Nadie" opciones={OPCIONES_A_CARGO_DE} value={form.indemnizacion_a_cargo_de}
+                    error={errorDe('indemnizacion_a_cargo_de')} onChange={(evento) => poner('indemnizacion_a_cargo_de', evento.target.value)} />
+            </Fila>
+            <AlertaMora idContrato={contrato.id_contrato} />
         </form>
     );
 }
@@ -195,11 +261,13 @@ export default function ContratoDetalle() {
     // `null` = no se pudieron cargar; se dice aparte, el contrato sigue en pie.
     const [anexos, setAnexos] = useState([]);
     const [errorAnexos, setErrorAnexos] = useState(null);
+    const [historial, setHistorial] = useState([]);
+    const [errorHistorial, setErrorHistorial] = useState(null);
     const [cargando, setCargando] = useState(true);
     const [errorCarga, setErrorCarga] = useState(null);
     const [aviso, setAviso] = useState('');
 
-    // { modo: 'editar' | 'finalizar' | 'reemitir' | 'contrasena' | 'eliminar-anexo' | 'preaviso', ... } | null
+    // { modo: 'editar' | 'finalizar' | 'cancelar' | 'cobrar' | 'reemitir' | 'contrasena' | 'eliminar-anexo' | 'preaviso', ... } | null
     const [dialogo, setDialogo] = useState(null);
     const [enviando, setEnviando] = useState(false);
     const [errorDialogo, setErrorDialogo] = useState(null);
@@ -216,13 +284,22 @@ export default function ContratoDetalle() {
         }
     }, [id]);
 
+    const cargarHistorial = useCallback(async () => {
+        try {
+            setHistorial(await listarHistorial(id));
+            setErrorHistorial(null);
+        } catch (error) {
+            setErrorHistorial(error);
+        }
+    }, [id]);
+
     const cargar = useCallback(async () => {
         setErrorCarga(null);
-        const [con] = await Promise.allSettled([obtenerContrato(id), cargarAnexos()]);
+        const [con] = await Promise.allSettled([obtenerContrato(id), cargarAnexos(), cargarHistorial()]);
         if (con.status === 'fulfilled') setContrato(con.value);
         else setErrorCarga(con.reason);
         setCargando(false);
-    }, [id, cargarAnexos]);
+    }, [id, cargarAnexos, cargarHistorial]);
 
     useEffect(() => { cargar(); }, [cargar]);
 
@@ -256,6 +333,33 @@ export default function ContratoDetalle() {
         setDialogo(null);
         setAviso('Contrato finalizado. El inmueble volverá a «Disponible» en unos segundos.');
         await cargar();
+    });
+
+    /** Si la indemnización la paga el inquilino, ofrece crear su cobro; si la paga el propietario, sólo la informa. */
+    const cancelar = (datos) => ejecutar(async () => {
+        await cancelarContrato(id, datos);
+        await cargar();
+        const valor = Number(aDecimal(datos.indemnizacion));
+        if (valor > 0 && datos.indemnizacion_a_cargo_de === 'INQUILINO') {
+            setDialogo({ modo: 'cobrar', valor: datos.indemnizacion, motivo: datos.motivo });
+            return;
+        }
+        setDialogo(null);
+        setAviso(valor > 0
+            ? `Contrato cancelado. La indemnización de ${formatearDinero(datos.indemnizacion)} queda a cargo del arrendador: el sistema no la cobra.`
+            : 'Contrato cancelado. El inmueble volverá a «Disponible» en unos segundos.');
+    });
+
+    // Sin `fin`: el servicio lo deriva del día de corte, y la tabla exige que sea posterior a `inicio`.
+    const cobrarIndemnizacion = () => ejecutar(async () => {
+        await crearCuentaCobro({
+            id_contrato: id,
+            valor: dialogo.valor,
+            inicio: primerInicioLibre(await cuentasDeContrato(id), hoyEnBogota()),
+            detalle: `Indemnización por terminación del contrato: ${MOTIVOS_CANCELACION[dialogo.motivo].etiqueta}`
+        });
+        setDialogo(null);
+        setAviso('Contrato cancelado y cuenta de cobro de la indemnización creada: el inquilino recibirá el aviso.');
     });
 
     const reemitir = () => ejecutar(async () => {
@@ -337,7 +441,7 @@ export default function ContratoDetalle() {
                 <div>
                     <div className="flex flex-wrap items-center gap-3">
                         <h1 className="m-0 text-2xl font-medium text-texto">{nombreDeInmueble(inmueble) || 'Contrato'}</h1>
-                        <Badge estado={contrato.estado} />
+                        <Badge estado={contrato.situacion ?? contrato.estado} />
                     </div>
                     <p className="m-0 mt-1 text-sm text-texto-suave">
                         {[inmueble?.direccion, ubicacionDe(inmueble), vigencia(contrato)].filter(Boolean).join(' · ')}
@@ -347,7 +451,10 @@ export default function ContratoDetalle() {
                     <div className="flex flex-wrap gap-2">
                         <Button variante="secundario" icono={Pencil} onClick={() => abrir({ modo: 'editar' })}>Editar</Button>
                         <Button variante="secundario" icono={KeyRound} onClick={() => abrir({ modo: 'reemitir' })}>Contraseña del inquilino</Button>
-                        <Button onClick={() => abrir({ modo: 'finalizar' })}>Finalizar</Button>
+                        <Button variante="secundario" onClick={() => abrir({ modo: 'cancelar' })}>Cancelar contrato</Button>
+                        {contrato.situacion === 'vencido_con_preaviso' && (
+                            <Button onClick={() => abrir({ modo: 'finalizar' })}>Finalizar</Button>
+                        )}
                     </div>
                 )}
             </header>
@@ -478,6 +585,28 @@ export default function ContratoDetalle() {
                 {propio && <SubirAnexo idContrato={id} onSubido={async () => { setAviso('Anexo adjuntado.'); await cargarAnexos(); }} />}
             </Card>
 
+            <Card titulo="Historial de cambios">
+                <FormError error={errorHistorial} />
+                {!errorHistorial && historial.length === 0 && (
+                    <p className="m-0 text-sm text-texto-suave">Aún no hay cambios registrados.</p>
+                )}
+                {historial.length > 0 && (
+                    <ul className="flex flex-col list-none m-0 p-0">
+                        {historial.map((fila) => {
+                            const { fecha, campo, anterior, nuevo, detalle } = filaDeHistorial(fila);
+                            return (
+                                <li key={fila.id_historial} className="py-3 border-0 border-b border-solid border-borde last:border-b-0">
+                                    <p className="m-0 text-sm text-texto">
+                                        <span className="font-medium">{campo}:</span> {anterior} → {nuevo}
+                                    </p>
+                                    <p className="m-0 mt-0.5 text-xs text-texto-suave">{fecha}{detalle && ` · ${detalle}`}</p>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </Card>
+
             <Modal
                 abierto={dialogo?.modo === 'editar'}
                 onCerrar={cerrar}
@@ -507,12 +636,57 @@ export default function ContratoDetalle() {
                     </>
                 }
             >
-                <div className="flex flex-col gap-3">
-                    <FormError error={errorDialogo} />
-                    <p className="m-0 text-sm text-texto">
-                        El inmueble quedará disponible. Lo que se deba sigue pendiente de cobro.
-                    </p>
-                </div>
+                {dialogo?.modo === 'finalizar' && (
+                    <div className="flex flex-col gap-3">
+                        <FormError error={errorDialogo} />
+                        <p className="m-0 text-sm text-texto">
+                            ¿Seguro que quieres finalizar el contrato? No se puede deshacer. El inmueble quedará disponible.
+                        </p>
+                        <AlertaMora idContrato={id} />
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'cancelar'}
+                onCerrar={cerrar}
+                titulo="Cancelar contrato"
+                ancho="max-w-2xl"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={cerrar} disabled={enviando}>Volver</Button>
+                        <Button type="submit" form="formulario-cancelacion" cargando={enviando}>Cancelar contrato</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'cancelar' && (
+                    <FormularioCancelacion idFormulario="formulario-cancelacion" contrato={contrato} error={errorDialogo}
+                        onEnviar={cancelar} />
+                )}
+            </Modal>
+
+            <Modal
+                abierto={dialogo?.modo === 'cobrar'}
+                onCerrar={cerrar}
+                titulo="Cobrar la indemnización"
+                acciones={
+                    <>
+                        <Button variante="secundario" onClick={() => { setDialogo(null); setAviso('Contrato cancelado.'); }}
+                            disabled={enviando}>Ahora no</Button>
+                        <Button onClick={cobrarIndemnizacion} cargando={enviando}>Crear cuenta de cobro de la indemnización</Button>
+                    </>
+                }
+            >
+                {dialogo?.modo === 'cobrar' && (
+                    <div className="flex flex-col gap-3">
+                        <FormError error={errorDialogo} />
+                        <p className="m-0 text-sm text-texto">
+                            El contrato quedó cancelado. La indemnización de <span className="font-medium">{formatearDinero(dialogo.valor)}</span> queda
+                            a cargo del arrendatario: ¿creas su cuenta de cobro? Se le avisará como a cualquier cobro, y también puedes crearla
+                            después desde Pagos.
+                        </p>
+                    </div>
+                )}
             </Modal>
 
             <Modal

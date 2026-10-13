@@ -3,7 +3,8 @@
  * `errores`, todos a la vez y en el orden del formulario.
  */
 
-import type { CrearContratoRequest } from '../contratos';
+import type { CancelarContratoRequest, CrearContratoRequest } from '../contratos';
+import { MOTIVOS_CANCELACION } from '../contratos';
 import type { CrearCuentaCobroRequest, RegistrarPagoRequest } from '../financiero';
 import { TIPOS_TRANSACCION } from '../financiero';
 import type { RegistroUsuarioRequest } from '../identidad';
@@ -167,6 +168,44 @@ export const validarPago = (cuerpo: unknown, hoy: string): Validacion<RegistrarP
   campo('fecha_pago', 'La fecha del pago', fechaNoFutura(hoy), true);
   campo('medio_pago', 'El medio de pago', textoMax(50), true);
   campo('tipo', 'El tipo de transacción', catalogo(TIPOS_TRANSACCION), true);
+
+  return revision.resultado();
+};
+
+/** Decimal mayor o igual a cero, en centavos, que cabe en `NUMERIC(12,2)`. */
+const decimalNoNegativo: Regla<number> = (valor, etiqueta) => {
+  const numero =
+    typeof valor === 'number' ? valor : typeof valor === 'string' && /^\d+(\.\d+)?$/.test(valor.trim()) ? Number(valor) : NaN;
+
+  if (!Number.isFinite(numero) || numero < 0) {
+    return { error: `${etiqueta} debe ser un número mayor o igual a 0` };
+  }
+  return Math.round(numero * 100) / 100 >= TOPE_NUMERIC_12_2
+    ? { error: `${etiqueta} es demasiado grande` }
+    : { valor: numero };
+};
+
+/**
+ * `PUT /api/contratos/{id}/cancelar`. La indemnización es pactable: se valida la forma, no el
+ * sugerido. `situacion` es la del contrato, que decide si admite la unilateral del arrendador.
+ */
+export const validarCancelacion = (
+  cuerpo: unknown,
+  { situacion }: { situacion: string | null },
+): Validacion<CancelarContratoRequest> => {
+  const revision = revisor<CancelarContratoRequest>(cuerpo);
+  const { campo, datos, errores } = revision;
+  const motivos = Object.keys(MOTIVOS_CANCELACION);
+
+  campo('motivo', 'El motivo', catalogo(motivos));
+  const motivo = MOTIVOS_CANCELACION[datos['motivo'] as keyof typeof MOTIVOS_CANCELACION];
+  if (motivo?.solo_en_prorroga && situacion !== 'renovado') {
+    errores.push({ campo: 'motivo', mensaje: `${motivo.etiqueta} sólo se admite con el contrato prorrogado` });
+  }
+
+  campo('indemnizacion', 'La indemnización', decimalNoNegativo);
+  const conIndemnizacion = typeof datos['indemnizacion'] === 'number' && datos['indemnizacion'] > 0;
+  campo('indemnizacion_a_cargo_de', 'Quién paga la indemnización', catalogo(['INQUILINO', 'PROPIETARIO']), !conIndemnizacion);
 
   return revision.resultado();
 };
