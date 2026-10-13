@@ -9,6 +9,7 @@ import {
 import {
   actualizar,
   crear,
+  documento,
   finalizar,
   obtenerPorId,
   obtenerTodos,
@@ -32,6 +33,9 @@ router.get('/:id/anexos', listarAnexos);
 router.get('/:id/anexos/:idAnexo', descargarAnexo);
 router.post('/:id/anexos', esPropietario, ...recibirArchivo('file'), subirAnexo);
 router.delete('/:id/anexos/:idAnexo', esPropietario, eliminarAnexo);
+
+// GET /api/contratos/:id/documento — el contrato en PDF, para las dos partes.
+router.get('/:id/documento', documento);
 
 // GET /api/contratos/:id
 router.get('/:id', obtenerPorId);

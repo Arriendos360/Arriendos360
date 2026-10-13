@@ -115,4 +115,8 @@ export const subirAnexo = (idContrato, { archivo, tipo }) => {
 export const descargarAnexo = (idContrato, anexo) =>
     descargarPdf(`/contratos/${idContrato}/anexos/${anexo.id_anexo}`, `${anexo.tipo || 'anexo'}_${anexo.id_anexo}.pdf`);
 
-export const eliminarAnexo = (idContrato, idAnexo) => cuerpo(api.delete(`/contratos/${idContrato}/anexos/${idAnexo}`));
+/** `GET /api/contratos/:id/documento`: el contrato generado con los datos registrados, para firmarlo. */
+export const descargarContratoGenerado = (idContrato) =>
+    descargarPdf(`/contratos/${idContrato}/documento`, `Contrato_${idContrato}.pdf`);
+
+export const eliminarAnexo =(idContrato, idAnexo) => cuerpo(api.delete(`/contratos/${idContrato}/anexos/${idAnexo}`));
