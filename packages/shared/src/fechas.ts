@@ -114,14 +114,17 @@ export const periodoQueEmpiezaEn = (fechaISO: FechaISO, diaCorte: number): Perio
 /** Zona horaria del negocio, independiente de la del servidor. */
 export const ZONA_NEGOCIO = 'America/Bogota';
 
-/** Hoy, en la zona del negocio y como `YYYY-MM-DD`. */
-export const hoyEnZonaNegocio = (): FechaISO =>
+/** El día de un instante en la zona del negocio, como `YYYY-MM-DD`. */
+export const diaEnZonaNegocio = (instante: Date): FechaISO =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: ZONA_NEGOCIO,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(instante);
+
+/** Hoy, en la zona del negocio y como `YYYY-MM-DD`. */
+export const hoyEnZonaNegocio = (): FechaISO => diaEnZonaNegocio(new Date());
 
 /** Días de calendario de `desdeISO` a `hastaISO`. Negativo si `hasta` es anterior. */
 export const diasEntre = (desdeISO: FechaISO, hastaISO: FechaISO): number =>
@@ -139,4 +142,25 @@ export const sumarDias = (fechaISO: FechaISO, dias: number): FechaISO => {
     instante.getUTCMonth(),
     instante.getUTCDate(),
   );
+};
+
+/**
+ * Los periodos sin facturar de un contrato que ya lleva tiempo corriendo: del siguiente a
+ * `ultimoPagado` al último cuyo corte ya llegó o cae dentro de la anticipación de la factura.
+ *
+ * @param diaCorte     día pactado, 1-31, SIN recortar
+ * @param ultimoPagado inicio del último periodo pagado, `YYYY-MM-DD`
+ * @param hoy          `YYYY-MM-DD` en la zona del negocio
+ */
+export const periodosPendientes = (diaCorte: number, ultimoPagado: FechaISO, hoy: FechaISO): Periodo[] => {
+  const tope = sumarDias(hoy, DIAS_ANTICIPACION_FACTURA);
+  const periodos: Periodo[] = [];
+  let { anio, mes } = partesDeISO(ultimoPagado);
+
+  for (;;) {
+    ({ anio, mes } = mesSiguiente(anio, mes));
+    const periodo = periodoDeCorte(diaCorte, anio, mes);
+    if (periodo.inicio > tope) return periodos;
+    periodos.push(periodo);
+  }
 };

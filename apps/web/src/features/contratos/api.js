@@ -34,7 +34,11 @@ export const CAMPOS_CONTRATO = [
     'canon',
     'info_contrato',
     'nombre_deudor_solidario',
-    'documento_deudor_solidario'
+    'documento_deudor_solidario',
+    'ultimo_periodo_pagado',
+    'nunca_pagado',
+    'fecha_ultimo_ajuste',
+    'nunca_ajustado'
 ];
 
 /**

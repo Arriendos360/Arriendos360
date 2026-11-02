@@ -199,8 +199,8 @@ const inmuebleDe = async (token, definicion) => {
   return (await exigir('POST', '/api/inmuebles', { token, cuerpo: definicion }, [201])).inmueble;
 };
 
-/** Firma el contrato si el inmueble no tiene el suyo, y espera a su primera cuenta. */
-const contratoDe = async (token, idInmueble, alias, definicion) => {
+/** Firma el contrato si el inmueble no tiene el suyo y, si le toca alguna cuenta, la espera. */
+const contratoDe = async (token, idInmueble, alias, definicion, conCuentas) => {
   const listado = await exigir('GET', '/api/contratos', { token }, [200]);
   const existente = (Array.isArray(listado) ? listado : []).find(
     (contrato) => contrato.id_inmueble === idInmueble,
@@ -217,13 +217,15 @@ const contratoDe = async (token, idInmueble, alias, definicion) => {
       )
     ).contrato;
 
-  // La primera cuenta de cobro la emite ms-financiero al recibir el evento, no esta
-  // petición: hay que esperarla antes de cobrar nada sobre ella (regla dura 9).
+  if (!conCuentas) return contrato;
+
+  // Las cuentas de cobro las emite ms-financiero al recibir el evento, no esta
+  // petición: hay que esperarlas antes de cobrar nada sobre ellas (regla dura 9).
   await esperarA(
     () => pedir('GET', `/api/pagos/contrato/${contrato.id_contrato}`, { token }),
     (respuesta) => Array.isArray(respuesta.datos) && respuesta.datos.length > 0,
     120000,
-    `la primera cuenta de cobro del contrato de ${alias}`,
+    `las cuentas de cobro del contrato de ${alias}`,
   );
 
   return contrato;
@@ -390,8 +392,8 @@ const CARTERA = [
     // Contrato terminado: al cancelarlo, el inmueble vuelve a `disponible` por evento
     // (`docs/adr/0013`). Se cancela y no se finaliza porque finalizar exige un preaviso
     // vencido, y por la API no se siembra uno en el pasado (`docs/adr/0027`). Su única
-    // cuenta queda pagada para que no aparezca en mora.
-    contrato: { mesesDeAntiguedad: 14, meses: 12, canon: 3100000 },
+    // cuenta queda pagada para que no aparezca en mora: por eso se firma al día, sin cuentas atrasadas.
+    contrato: { mesesDeAntiguedad: 14, meses: 12, canon: 3100000, alDia: true },
     cancelar: true,
     historial: [{ hace: 14, pagos: [{ monto: 3100000, medio_pago: 'Transferencia', enDias: 3 }] }],
   },
@@ -459,13 +461,16 @@ const sembrar = async () => {
       canon: ficha.contrato.canon,
       fecha_inicio_corte: inicio,
       fecha_limite_pago: Math.min(DIA_CORTE + 5, 28),
+      // Pagado sólo el primer mes: el evento emite los siguientes y el historial los cobra.
+      ultimo_periodo_pagado: (ficha.contrato.alDia ? corteHaceMeses(0) : inicio).slice(0, 7),
+      nunca_ajustado: true,
       ...(ficha.contrato.nombre_deudor_solidario
         ? {
             nombre_deudor_solidario: ficha.contrato.nombre_deudor_solidario,
             documento_deudor_solidario: ficha.contrato.documento_deudor_solidario,
           }
         : {}),
-    });
+    }, !ficha.contrato.alDia);
 
     // Un contrato que ya no está activo no factura periodos: su historial se sembró mientras lo estuvo.
     for (const periodo of contrato.estado === 'activo' ? ficha.historial : []) {

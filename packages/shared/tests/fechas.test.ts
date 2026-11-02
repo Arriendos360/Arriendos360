@@ -28,6 +28,7 @@ import {
   fechaInicioCorteDesde,
   periodoDeCorte,
   ultimoDiaDelMes,
+  periodosPendientes,
 } from '../src/fechas';
 
 // Los meses van 0-11, como en `Date`. Se nombran para que las pruebas se lean.
@@ -191,4 +192,38 @@ describe('Conteo de dias de calendario', () => {
         expect(diasEntre('2024-02-27', '2024-03-01')).toBe(3); // bisiesto
         expect(diasEntre('2026-12-31', '2027-01-01')).toBe(1);
     });
+});
+
+describe('Periodos pendientes de un contrato que ya corría', () => {
+  const inicios = (dia: number, ultimo: string, hoy: string): string[] =>
+    periodosPendientes(dia, ultimo, hoy).map((periodo) => periodo.inicio);
+
+  test('del siguiente al último pagado hasta el último corte que ya llegó', () => {
+    expect(inicios(17, '2026-08-17', '2026-11-02')).toEqual(['2026-09-17', '2026-10-17']);
+  });
+
+  test('incluye el corte que está a dos días, no el que está a tres', () => {
+    expect(inicios(17, '2026-10-17', '2026-11-15')).toEqual(['2026-11-17']);
+    expect(inicios(17, '2026-10-17', '2026-11-14')).toEqual([]);
+  });
+
+  test('al día o con un mes adelantado no hay ninguno', () => {
+    expect(inicios(17, '2026-11-17', '2026-11-02')).toEqual([]);
+    expect(inicios(17, '2026-12-17', '2026-11-30')).toEqual([]);
+  });
+
+  test('día 31: recorta en febrero y en los meses de 30', () => {
+    expect(inicios(31, '2026-01-31', '2026-04-30')).toEqual(['2026-02-28', '2026-03-31', '2026-04-30']);
+  });
+
+  test('día 29 y 30 en febrero, con año bisiesto', () => {
+    expect(inicios(29, '2024-01-29', '2024-02-29')).toEqual(['2024-02-29']);
+    expect(inicios(30, '2025-01-30', '2025-02-28')).toEqual(['2025-02-28']);
+  });
+
+  test('cruza el año y sus periodos teselan', () => {
+    const periodos = periodosPendientes(17, '2025-11-17', '2026-02-01');
+    expect(periodos.map((periodo) => periodo.inicio)).toEqual(['2025-12-17', '2026-01-17']);
+    expect(periodos[0]?.fin).toBe('2026-01-16');
+  });
 });

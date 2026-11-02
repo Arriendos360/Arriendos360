@@ -30,6 +30,12 @@ export interface CrearContratoRequest {
   documento_deudor_solidario?: string;
   /** Texto libre con las condiciones particulares. Opcional. */
   info_contrato?: string;
+  /** Último mes pagado, `YYYY-MM`, o `nunca_pagado`. Se pide si el primer corte ya pasó; se guarda como el inicio de ese periodo. */
+  ultimo_periodo_pagado?: string;
+  nunca_pagado?: boolean;
+  /** Último ajuste por IPC. Con 12 meses o más se pide esta fecha o `nunca_ajustado`. */
+  fecha_ultimo_ajuste?: FechaISO;
+  nunca_ajustado?: boolean;
 }
 
 /** Tipos de anexo sugeridos en el formulario. Catálogo abierto: nada valida contra él. */

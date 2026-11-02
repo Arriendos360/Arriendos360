@@ -174,6 +174,8 @@ export const contratoEnElDoble = (
     inicio?: string;
     fecha_inicio_corte?: string;
     fecha_ultimo_ajuste?: string | null;
+    ultimo_periodo_pagado?: string | null;
+    fecha_creacion?: string;
     fin?: string;
     preaviso_enviado_en?: string | null;
     preaviso_vencimiento?: string | null;
@@ -201,7 +203,13 @@ export const contratoEnElDoble = (
  * pertenecer.
  */
 export const escenario = (
-  extra: { canon?: number; fecha_inicio_corte?: string; estado?: string } = {},
+  extra: {
+    canon?: number;
+    fecha_inicio_corte?: string;
+    estado?: string;
+    ultimo_periodo_pagado?: string;
+    fecha_creacion?: string;
+  } = {},
 ): { propietario: Usuario; inquilino: Usuario; idInmueble: string; idContrato: string } => {
   const duenio = propietario();
   const arrendatario = inquilino();

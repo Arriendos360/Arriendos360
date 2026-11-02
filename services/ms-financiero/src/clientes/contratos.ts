@@ -37,6 +37,10 @@ export interface ContratoAjeno {
   fecha_inicio_corte: string;
   /** Para el ajuste por IPC: desde aquí corren sus 12 meses. */
   fecha_ultimo_ajuste?: string | null;
+  /** Inicio del último periodo pagado al registrarlo: el motor no factura hasta ahí. */
+  ultimo_periodo_pagado?: string | null;
+  /** Cuando se formalizó. */
+  fecha_creacion?: string;
   /** Constancia del preaviso de no renovar: con ella no hay recordatorio ni prórroga. */
   preaviso_enviado_en?: string | null;
   preaviso_enviado_por?: string | null;

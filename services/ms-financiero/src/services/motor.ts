@@ -3,8 +3,8 @@
  * y aplica los vencimientos (aviso previo y mora). Los avisos se anotan como
  * eventos en la misma transacción que el cambio.
  *
- * - La primera cuenta de cada contrato la crea el consumidor de
- *   `ContratoFormalizado`; este barrido salta SIEMPRE el primer periodo.
+ * - Lo que toca al formalizar lo crea el consumidor de `ContratoFormalizado`; este
+ *   barrido lo salta SIEMPRE, y nunca cobra lo ya pagado (`noLeToca`).
  * - Las fechas son de `America/Bogota` (`hoyEnZonaNegocio`, `diasEntre`).
  * - Hace un número fijo de peticiones a ms-contratos, sin importar cuántos
  *   contratos haya. No pidas el contrato dentro del bucle.
@@ -18,6 +18,7 @@ import {
   DIAS_ANTICIPACION_FACTURA,
   ajusteDeCanon,
   diaDeCorte,
+  diaEnZonaNegocio,
   diasEntre,
   hoyEnZonaNegocio,
   mesSiguiente,
@@ -36,6 +37,7 @@ import { DIAS_RECORDATORIO_PREAVISO, IPC_ANUAL, MESES_PREAVISO_TERMINACION } fro
 
 import { sequelize } from '../config/database';
 import { contratosConEstado, porIds as contratosPorIds } from '../clientes/contratos';
+import type { ContratoAjeno } from '../clientes/contratos';
 import { CuentaCobro } from '../models/CuentaCobro';
 import {
   ESTADO_CONTRATO_ACTIVO,
@@ -93,6 +95,34 @@ export const primerPeriodoDe = (fechaInicioCorte: unknown): Periodo | null => {
   return fecha === null || dia === null ? null : periodoQueEmpiezaEn(fecha, dia);
 };
 
+/**
+ * ¿Este periodo no le toca al motor? El primero de un contrato nuevo es del consumidor. En uno que
+ * ya corría, lo pagado no se cobra y lo que ya tocaba al formalizar lo emitió el consumidor; lo
+ * posterior es del motor, aunque sea el siguiente al último pagado: nadie más lo facturaría.
+ */
+const noLeToca = (contrato: ContratoAjeno, periodo: Periodo): boolean => {
+  const ultimoPagado = soloFecha(contrato.ultimo_periodo_pagado);
+  if (ultimoPagado === null) {
+    return primerPeriodoDe(contrato.fecha_inicio_corte)?.inicio === periodo.inicio;
+  }
+
+  const formalizado = diaEnZonaNegocio(new Date(contrato.fecha_creacion as string));
+  return periodo.inicio <= ultimoPagado || periodo.inicio <= sumarDias(formalizado, DIAS_ANTICIPACION_FACTURA);
+};
+
+/** ¿Una cuenta con este corte ya había cumplido el plazo de mora ese día? Es atrasada: la anuncia el resumen. */
+export const esAtrasada = (inicio: string, dia: string): boolean => diasEntre(inicio, dia) >= DIAS_PARA_MORA;
+
+/** ¿La creó el consumidor ya atrasada? Una de un periodo ya pagado sólo pudo crearse a mano, y avisa. */
+const vinoAtrasada = (contrato: ContratoAjeno, inicio: string): boolean => {
+  const ultimoPagado = soloFecha(contrato.ultimo_periodo_pagado);
+  return (
+    ultimoPagado !== null &&
+    inicio > ultimoPagado &&
+    esAtrasada(inicio, diaEnZonaNegocio(new Date(contrato.fecha_creacion as string)))
+  );
+};
+
 /** Lo que deja un barrido de generacion. */
 export interface ResultadoGeneracion {
   generadas: number;
@@ -136,9 +166,7 @@ export const procesarContratos = async (): Promise<ResultadoGeneracion> => {
         continue;
       }
 
-      // El primer periodo es del consumidor del evento: se salta siempre.
-      const primero = primerPeriodoDe(fechaInicioCorte);
-      if (primero && primero.inicio === periodo.inicio) {
+      if (noLeToca(contrato, periodo)) {
         continue;
       }
 
@@ -301,7 +329,7 @@ export const procesarPagos = async (): Promise<ResultadoVencimientos> => {
             { transaction: transaccion } as never,
           );
 
-          if (puedeAvisar) {
+          if (puedeAvisar && !vinoAtrasada(contrato, inicio)) {
             await registrarCuentaCobroEnMora(
               { ...partes, dias_de_mora: diasDesdeCorte },
               transaccion,

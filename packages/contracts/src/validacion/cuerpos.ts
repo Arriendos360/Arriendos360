@@ -10,6 +10,7 @@ import { TIPOS_TRANSACCION } from '../financiero';
 import type { RegistroUsuarioRequest } from '../identidad';
 import type { CrearInmuebleRequest } from '../inmuebles';
 import { LONGITUD_MAXIMA_ALIAS, TIPOS_INMUEBLE } from '../inmuebles';
+import { inicioDelPeriodo, mesAnteriorAlPrimero, pideUltimoAjuste, pideUltimoMesPagado, rangoDeMesPagado } from './antiguedad';
 import {
   MAXIMO_INTEGER,
   TOPE_NUMERIC_10_2,
@@ -112,8 +113,36 @@ export const validarAltaInquilino = (cuerpo: unknown): Validacion<Omit<RegistroU
   return revision.resultado();
 };
 
-/** `POST /api/contratos`. El deudor solidario va completo o no va. */
-export const validarContrato = (cuerpo: unknown): Validacion<CrearContratoRequest> => {
+/** Un mes `YYYY-MM` dentro del rango; sale como el inicio de su periodo de corte. */
+const mesPagado =
+  (rango: { desde: string; hasta: string }, diaCorte: number): Regla<string> =>
+  (valor, etiqueta) => {
+    if (typeof valor !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(valor)) {
+      return { error: `${etiqueta} no es válido` };
+    }
+    return valor < rango.desde || valor > rango.hasta
+      ? { error: `${etiqueta} debe estar entre ${rango.desde} y ${rango.hasta}` }
+      : { valor: inicioDelPeriodo(valor, diaCorte) };
+  };
+
+/** Una fecha real entre el inicio y hoy, como `YYYY-MM-DD`. */
+const fechaDeVigencia =
+  (inicio: string, hoy: string): Regla<string> =>
+  (valor, etiqueta) => {
+    const resultado = fechaCalendario(valor, etiqueta);
+    if ('error' in resultado) return resultado;
+
+    const fecha = resultado.valor.slice(0, 10);
+    return fecha < inicio || fecha > hoy
+      ? { error: `${etiqueta} debe estar entre el inicio del contrato y hoy` }
+      : { valor: fecha };
+  };
+
+/**
+ * `POST /api/contratos`. El deudor solidario va completo o no va. `hoy` (`YYYY-MM-DD` en Bogotá)
+ * lo pone quien llama: decide qué se le pide a un contrato que ya lleva tiempo corriendo.
+ */
+export const validarContrato = (cuerpo: unknown, hoy: string): Validacion<CrearContratoRequest> => {
   const revision = revisor<CrearContratoRequest>(cuerpo);
   const { campo, datos, entrada, errores } = revision;
 
@@ -129,6 +158,28 @@ export const validarContrato = (cuerpo: unknown): Validacion<CrearContratoReques
   campo('canon', 'El canon', decimalPositivo(TOPE_NUMERIC_12_2));
   campo('fecha_limite_pago', 'La fecha límite de pago', diaDelMes, true);
   campo('fecha_inicio_corte', 'La fecha de inicio de corte', fechaCalendario, true);
+
+  if (typeof datos['inicio'] === 'string') {
+    const inicio = datos['inicio'].slice(0, 10);
+    const primerCorte = ((datos['fecha_inicio_corte'] as string | undefined) ?? inicio).slice(0, 10);
+
+    const diaCorte = Number(primerCorte.slice(8, 10));
+
+    if (primerCorte < inicio) {
+      errores.push({ campo: 'fecha_inicio_corte', mensaje: 'El primer corte no puede ser anterior al inicio del contrato' });
+    }
+    if (pideUltimoMesPagado(inicio, primerCorte, hoy)) {
+      if (entrada['nunca_pagado'] === true) {
+        // El periodo anterior al primero: motor y consumidor lo tratan como cualquier otro último pagado.
+        datos['ultimo_periodo_pagado'] = inicioDelPeriodo(mesAnteriorAlPrimero(primerCorte), diaCorte);
+      } else {
+        campo('ultimo_periodo_pagado', 'El último mes pagado', mesPagado(rangoDeMesPagado(primerCorte, hoy), diaCorte));
+      }
+    }
+    if (pideUltimoAjuste(inicio, hoy) && entrada['nunca_ajustado'] !== true) {
+      campo('fecha_ultimo_ajuste', 'La fecha del último ajuste', fechaDeVigencia(inicio, hoy));
+    }
+  }
 
   const conNombre = !vacio(entrada['nombre_deudor_solidario']);
   const conDocumento = !vacio(entrada['documento_deudor_solidario']);

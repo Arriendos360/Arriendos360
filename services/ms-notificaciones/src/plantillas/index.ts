@@ -19,6 +19,7 @@ import type {
   CuentaCobroEnMora,
   CuentaCobroGenerada,
   CuentaCobroPorVencer,
+  CuentasAtrasadasRegistradas,
   PreavisoEnviado,
   PreavisoProximo,
   RecuperacionSolicitada,
@@ -572,6 +573,32 @@ export const enMoraPropietario = (
       ],
       bloque,
       boton: { texto: 'Ver pagos', url: enlace(RUTA.pagos) },
+    }),
+  };
+};
+
+/** Las cuentas ya vencidas al registrar un contrato, al INQUILINO: una sola vez y todas juntas. */
+export const cuentasAtrasadasRegistradas = (
+  carga: CuentasAtrasadasRegistradas,
+  destinatario: Destinatario,
+): Mensaje => {
+  const rango = periodo(carga.primer_periodo, carga.ultimo_periodo);
+
+  return {
+    asunto: 'Tienes cobros atrasados de tu arriendo',
+    cuerpoHtml: envolver({
+      preheader: `${pesos(carga.total)} pendientes · ${rango}`,
+      titulo: 'Tus cobros atrasados',
+      destinatario,
+      parrafos: [
+        'Tu arrendador registró tu contrato en Arriendos360 con periodos sin pagar. Este es el resumen de lo que aparece pendiente.',
+      ],
+      bloque: bloqueDeValor('Total pendiente', carga.total, ESTADO.mora, [
+        { etiqueta: 'Cuentas de cobro', valor: String(carga.cantidad) },
+        { etiqueta: 'Periodo', valor: rango },
+      ]),
+      boton: { texto: 'Ver mis pagos', url: enlace(RUTA.pagos) },
+      nota: 'Si ya realizaste alguno de estos pagos, confirma con tu arrendador que haya quedado registrado.',
     }),
   };
 };

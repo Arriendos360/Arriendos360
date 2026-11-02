@@ -8,12 +8,15 @@ import { etiquetaDeEstado, filtrarContratos } from '../features/contratos/filtro
 import {
     AlertaMora, AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
-import { errorDeDocumento, validarAlta, validarFormularioContrato } from '../features/contratos/reglas';
+import {
+    antiguedadDelContrato, avisoDeCuentas, errorDeDocumento, validarAlta, validarFormularioContrato
+} from '../features/contratos/reglas';
 import { listarInmuebles } from '../features/inmuebles/api';
 import { buscarPorDocumento, crearInquilino } from '../features/usuarios/api';
 import {
     Badge, Button, DateField, ESTADOS, EmptyState, FormError, Input, Modal, MoneyField, Select, Table, formatearDinero
 } from '../ui';
+import { hoyEnBogota } from '../ui/formato';
 import { useValidacion } from '../ui/validacion';
 
 /**
@@ -29,11 +32,12 @@ import { useValidacion } from '../ui/validacion';
 
 const FORM_VACIO = {
     id_inmueble: '', documento: '', inicio: '', fin: '', canon: null, fecha_limite_pago: '',
-    fecha_inicio_corte: '', info_contrato: '', nombre_deudor_solidario: '', documento_deudor_solidario: ''
+    fecha_inicio_corte: '', info_contrato: '', nombre_deudor_solidario: '', documento_deudor_solidario: '',
+    ultimo_periodo_pagado: '', nunca_pagado: false, fecha_ultimo_ajuste: '', nunca_ajustado: false
 };
 
 /** Los campos del contrato que pueden traer error; `info_contrato` es texto libre. */
-const CAMPOS_CON_ERROR = Object.keys(FORM_VACIO).filter((campo) => campo !== 'info_contrato');
+const CAMPOS_CON_ERROR = Object.keys(FORM_VACIO).filter((campo) => !['info_contrato', 'nunca_pagado', 'nunca_ajustado'].includes(campo));
 
 const ALTA_VACIA = { nombres: '', apellidos: '', email: '', telefono: '' };
 
@@ -68,7 +72,8 @@ function FormularioContrato({ inmuebles, onEnviar, onContrasena, onErrores, idFo
     const [errorInquilino, setErrorInquilino] = useState(null);
     const [alta, setAlta] = useState(ALTA_VACIA);
     const [contrasena, setContrasena] = useState(null);
-    const validacion = useValidacion((datos) => validarFormularioContrato(datos, inquilino), CAMPOS_CON_ERROR);
+    const hoy = hoyEnBogota();
+    const validacion = useValidacion((datos) => validarFormularioContrato(datos, inquilino, hoy), CAMPOS_CON_ERROR);
     const validacionAlta = useValidacion((datos) => validarAlta({ ...datos, documento: form.documento }), CAMPOS_ALTA);
 
     useEffect(() => { onErrores(validacion.hayErrores); }, [validacion.hayErrores, onErrores]);
@@ -94,6 +99,24 @@ function FormularioContrato({ inmuebles, onEnviar, onContrasena, onErrores, idFo
         });
         validacion.limpiar('inicio');
         validacion.limpiar('fecha_limite_pago');
+        validacion.limpiar('ultimo_periodo_pagado');
+        validacion.limpiar('fecha_ultimo_ajuste');
+    };
+
+    /** El primer corte decide si se pregunta el último mes pagado y cuáles se pueden elegir. */
+    const cambiarCorte = (valor) => {
+        poner('fecha_inicio_corte', valor);
+        validacion.limpiar('ultimo_periodo_pagado');
+    };
+
+    const marcarNuncaPagado = (evento) => {
+        poner('nunca_pagado', evento.target.checked);
+        validacion.limpiar('ultimo_periodo_pagado');
+    };
+
+    const marcarNuncaAjustado = (evento) => {
+        poner('nunca_ajustado', evento.target.checked);
+        validacion.limpiar('fecha_ultimo_ajuste');
     };
 
     const cambiarDocumento = (evento) => {
@@ -167,6 +190,7 @@ function FormularioContrato({ inmuebles, onEnviar, onContrasena, onErrores, idFo
     });
 
     const errorDocumento = validacion.errores.documento ?? validacionAlta.errores.documento;
+    const antiguedad = antiguedadDelContrato(form, hoy);
 
     const opcionesInmueble = inmuebles.map((i) => ({
         valor: i.id_inmueble, texto: [nombreDeInmueble(i), ubicacionDe(i)].filter(Boolean).join(' · ')
@@ -231,6 +255,7 @@ function FormularioContrato({ inmuebles, onEnviar, onContrasena, onErrores, idFo
                 </Fila>
                 <Fila>
                     <MoneyField etiqueta="Canon mensual" value={form.canon} error={validacion.errores.canon}
+                        ayuda={antiguedad.pideMes || antiguedad.pideAjuste ? 'Ingresa el canon vigente hoy, con los incrementos ya aplicados.' : undefined}
                         onChange={(valor) => poner('canon', valor)} onBlur={alSalir('canon')} />
                     <Input etiqueta="Día límite de pago" inputMode="numeric" placeholder="1 a 31"
                         ayuda="Día del mes. Se sugiere el del inicio." {...campo('fecha_limite_pago')} />
@@ -238,7 +263,37 @@ function FormularioContrato({ inmuebles, onEnviar, onContrasena, onErrores, idFo
                 <DateField etiqueta="Primer corte (opcional)" name="fecha_inicio_corte" value={form.fecha_inicio_corte}
                     ayuda="Si lo dejas vacío, el ciclo de cobro empieza el día de inicio."
                     error={validacion.errores.fecha_inicio_corte}
-                    onChange={(valor) => poner('fecha_inicio_corte', valor)} onBlur={alSalir('fecha_inicio_corte')} />
+                    onChange={cambiarCorte} onBlur={alSalir('fecha_inicio_corte')} />
+                {antiguedad.pideMes && (
+                    <>
+                        {!form.nunca_pagado && (
+                            <Select etiqueta="Último mes pagado" vacio="Selecciona…" opciones={antiguedad.meses}
+                                ayuda="Se cobra desde el siguiente. Si hubo meses sin pagar en medio, elige el último sin interrupciones y registra los demás como pago."
+                                {...campo('ultimo_periodo_pagado')} />
+                        )}
+                        <label className="flex items-center gap-2 text-sm text-texto">
+                            <input type="checkbox" name="nunca_pagado" checked={form.nunca_pagado} onChange={marcarNuncaPagado} />
+                            No ha pagado ningún mes
+                        </label>
+                    </>
+                )}
+                {antiguedad.pendientes !== null && (
+                    <p role="status" className="m-0 text-sm text-texto">{avisoDeCuentas(antiguedad.pendientes, form.canon)}</p>
+                )}
+                {antiguedad.pideAjuste && (
+                    <>
+                        {!form.nunca_ajustado && (
+                            <DateField etiqueta="Fecha del último ajuste IPC" name="fecha_ultimo_ajuste" value={form.fecha_ultimo_ajuste}
+                                min={form.inicio} max={hoy} error={validacion.errores.fecha_ultimo_ajuste}
+                                ayuda="Si no ajustaste este año, la del último ajuste que hiciste."
+                                onChange={(valor) => poner('fecha_ultimo_ajuste', valor)} onBlur={alSalir('fecha_ultimo_ajuste')} />
+                        )}
+                        <label className="flex items-center gap-2 text-sm text-texto">
+                            <input type="checkbox" name="nunca_ajustado" checked={form.nunca_ajustado} onChange={marcarNuncaAjustado} />
+                            Nunca se ha ajustado el canon
+                        </label>
+                    </>
+                )}
                 <AreaTexto etiqueta="Condiciones particulares (opcional)" {...campo('info_contrato')} />
             </Seccion>
 

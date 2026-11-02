@@ -49,13 +49,14 @@ desde el gateway para que los comprobantes imprimieran exactamente lo mismo; ver
 
 | Evento | Emisor | Consumidores |
 |---|---|---|
-| `ContratoFormalizado` (v2) | `ms-contratos` | `ms-inmuebles` (pone `arrendado`) y `ms-financiero` (crea la primera cuenta de cobro) |
+| `ContratoFormalizado` (v3) | `ms-contratos` | `ms-inmuebles` (pone `arrendado`) y `ms-financiero` (crea la primera cuenta de cobro, o las que falten desde el último pagado) |
 | `ContratoFinalizado` | `ms-contratos` | `ms-inmuebles` (pone `disponible`) |
 | `RecuperacionSolicitada` | `ms-identidad` | `ms-notificaciones` |
 | `ContrasenaTemporalEmitida` | `ms-identidad` | `ms-notificaciones` |
 | `CuentaCobroGenerada` | `ms-financiero` | `ms-notificaciones` |
 | `CuentaCobroPorVencer` | `ms-financiero` | `ms-notificaciones` |
 | `CuentaCobroEnMora` | `ms-financiero` | `ms-notificaciones` |
+| `CuentasAtrasadasRegistradas` | `ms-financiero` | `ms-notificaciones` |
 
 `ContratoFormalizado` tiene **dos** consumidores desde el paso 6e, que es el caso para
 el que se diseno el bus. Consecuencia a tener presente: la fila de la tabla de salida se

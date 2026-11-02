@@ -166,14 +166,21 @@ export const contratoValido = (
   idInmueble: string,
   idInquilino: string,
   extra: Record<string, unknown> = {},
-): Record<string, unknown> => ({
-  id_inmueble: idInmueble,
-  id_inquilino: idInquilino,
-  inicio: '2026-01-01',
-  fin: '2026-12-31',
-  canon: 1500000,
-  ...extra,
-});
+): Record<string, unknown> => {
+  const inicio = String(extra['inicio'] ?? '2026-01-01');
+
+  return {
+    id_inmueble: idInmueble,
+    id_inquilino: idInquilino,
+    inicio,
+    fin: '2026-12-31',
+    canon: 1500000,
+    // Lo que se pide a un contrato que ya corría; a uno reciente se le ignora.
+    ultimo_periodo_pagado: [inicio, String(extra['fecha_inicio_corte'] ?? inicio)].sort()[1]?.slice(0, 7),
+    nunca_ajustado: true,
+    ...extra,
+  };
+};
 
 /** Crea un contrato por la API y devuelve su id. */
 export const crearContrato = async (

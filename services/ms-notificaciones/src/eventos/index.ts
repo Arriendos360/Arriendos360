@@ -15,6 +15,7 @@ import {
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
+  TIPO_CUENTAS_ATRASADAS_REGISTRADAS,
   TIPO_PREAVISO_ENVIADO,
   TIPO_PREAVISO_PROXIMO,
   TIPO_RECUPERACION_SOLICITADA,
@@ -26,6 +27,7 @@ import {
   type CuentaCobroEnMora,
   type CuentaCobroGenerada,
   type CuentaCobroPorVencer,
+  type CuentasAtrasadasRegistradas,
   type Manejador,
   type PreavisoEnviado,
   type PreavisoProximo,
@@ -264,6 +266,31 @@ export const manejadores: Record<string, Manejador> = {
     }
 
     await redactar(contexto, lista);
+  },
+
+  /** Cuentas ya vencidas al registrar un contrato: un solo resumen al inquilino. */
+  [TIPO_CUENTAS_ATRASADAS_REGISTRADAS]: async (payload, contexto) => {
+    const carga = payload as Partial<CuentasAtrasadasRegistradas>;
+    const tipo = TIPO_CUENTAS_ATRASADAS_REGISTRADAS;
+
+    exigirUuid(carga?.id_contrato, 'id_contrato', tipo);
+    const idInquilino = exigirUuid(carga?.id_inquilino, 'id_inquilino', tipo);
+    exigirTexto(carga.primer_periodo, 'primer_periodo', tipo);
+    exigirTexto(carga.ultimo_periodo, 'ultimo_periodo', tipo);
+
+    const inquilino = (await destinatariosDe([idInquilino])).get(idInquilino);
+
+    await redactar(
+      contexto,
+      inquilino
+        ? [
+            {
+              destinatario: inquilino,
+              mensaje: plantillas.cuentasAtrasadasRegistradas(carga as CuentasAtrasadasRegistradas, inquilino),
+            },
+          ]
+        : [],
+    );
   },
 
   /** Ajuste de canon próximo: la alerta al propietario. */

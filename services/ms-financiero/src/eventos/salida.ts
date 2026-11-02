@@ -1,6 +1,7 @@
 /**
  * MS-Financiero como productor: `CuentaCobroGenerada`, `CuentaCobroPorVencer`,
- * `CuentaCobroEnMora`, `AjusteCanonProximo` y `PreavisoProximo`, anotados en su tabla de salida.
+ * `CuentaCobroEnMora`, `CuentasAtrasadasRegistradas`, `AjusteCanonProximo` y `PreavisoProximo`,
+ * anotados en su tabla de salida.
  */
 
 import {
@@ -17,12 +18,14 @@ import {
   TIPO_CUENTA_COBRO_EN_MORA,
   TIPO_CUENTA_COBRO_GENERADA,
   TIPO_CUENTA_COBRO_POR_VENCER,
+  TIPO_CUENTAS_ATRASADAS_REGISTRADAS,
   TIPO_PREAVISO_PROXIMO,
   type AjusteCanonProximo,
   type AlmacenSalida,
   type CuentaCobroEnMora,
   type CuentaCobroGenerada,
   type CuentaCobroPorVencer,
+  type CuentasAtrasadasRegistradas,
   type PreavisoProximo,
   type Publicador,
 } from 'arriendos360-shared';
@@ -46,6 +49,9 @@ const SUSCRIPCIONES: Record<string, Array<{ nombre: string; variable: string }>>
     { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
   ],
   [TIPO_CUENTA_COBRO_EN_MORA]: [
+    { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
+  ],
+  [TIPO_CUENTAS_ATRASADAS_REGISTRADAS]: [
     { nombre: 'ms-notificaciones', variable: 'MS_NOTIFICACIONES_URL' },
   ],
   [TIPO_AJUSTE_CANON_PROXIMO]: [
@@ -121,6 +127,16 @@ export const registrarCuentaCobroEnMora = (
   almacen.registrar(crearSobre(TIPO_CUENTA_COBRO_EN_MORA, carga), {
     transaccion: transaccion as never,
     ...claveDe(carga.id_cuenta_cobro),
+  });
+
+/** Anota `CuentasAtrasadasRegistradas`. Debe ir en la transacción que crea las cuentas. */
+export const registrarCuentasAtrasadasRegistradas = (
+  carga: CuentasAtrasadasRegistradas,
+  transaccion: unknown,
+): Promise<void> =>
+  almacen.registrar(crearSobre(TIPO_CUENTAS_ATRASADAS_REGISTRADAS, carga), {
+    transaccion: transaccion as never,
+    claveOrden: carga.id_contrato,
   });
 
 /**
