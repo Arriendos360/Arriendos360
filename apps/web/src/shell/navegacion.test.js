@@ -1,4 +1,4 @@
-import { enlacesPara, etiquetaDeRoles } from './navegacion';
+import { enlacesPara, etiquetaDeRoles, guardarModoNavegacion, leerModoNavegacion } from './navegacion';
 
 const rutas = (usuario) => enlacesPara(usuario).map((enlace) => enlace.to);
 const etiquetas = (usuario) => enlacesPara(usuario).map((enlace) => enlace.etiqueta);
@@ -32,4 +32,35 @@ test('la etiqueta de roles sigue un orden fijo', () => {
     expect(etiquetaDeRoles(INQUILINO)).toBe('Inquilino');
     expect(etiquetaDeRoles(AMBOS)).toBe('Propietario · Inquilino');
     expect(etiquetaDeRoles(null)).toBe('');
+});
+
+describe('preferencia de modo', () => {
+    beforeEach(() => window.localStorage.clear());
+    afterEach(() => jest.restoreAllMocks());
+
+    test('sin valor usa la barra lateral', () => {
+        expect(leerModoNavegacion()).toBe('sidebar');
+    });
+
+    test.each(['dock', 'sidebar'])('lee %s tal como se guardó', (modo) => {
+        guardarModoNavegacion(modo);
+        expect(window.localStorage.getItem('app_nav_mode')).toBe(modo);
+        expect(leerModoNavegacion()).toBe(modo);
+    });
+
+    test('un valor desconocido usa la barra lateral', () => {
+        window.localStorage.setItem('app_nav_mode', 'flotante');
+        expect(leerModoNavegacion()).toBe('sidebar');
+    });
+
+    test('un almacenamiento bloqueado no rompe ni la lectura ni la escritura', () => {
+        const bloqueado = () => {
+            throw new Error('SecurityError');
+        };
+        jest.spyOn(Storage.prototype, 'getItem').mockImplementation(bloqueado);
+        jest.spyOn(Storage.prototype, 'setItem').mockImplementation(bloqueado);
+
+        expect(leerModoNavegacion()).toBe('sidebar');
+        expect(() => guardarModoNavegacion('dock')).not.toThrow();
+    });
 });

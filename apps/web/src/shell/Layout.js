@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Building2, LogOut, Menu, X } from 'lucide-react';
+import { ArrowRightToLine, Building2, LogOut } from 'lucide-react';
 
 import { limpiarSesion, useSesion } from '../auth/sesion';
 import { cerrarSesion } from '../features/auth/api';
 import { FOCO, unir } from '../ui/clases';
-import { enlacesPara, etiquetaDeRoles } from './navegacion';
+import Dock from './Dock';
+import { enlacesPara, etiquetaDeRoles, MODO_DOCK } from './navegacion';
+import useModoNavegacion, { estaOculto } from './useModoNavegacion';
 
 // Ítems de la barra: sólido `indigo-medio` el activo, lavanda clara el resto (marca.md).
 const ITEM = unir(
@@ -26,17 +28,33 @@ const Logo = () => (
 );
 
 /**
- * Armazón de las pantallas autenticadas: barra lateral y contenido.
+ * Armazón de las pantallas autenticadas: navegación y contenido.
  *
- * La barra se arma con `roles` del claim (ver `navegacion.js`). En pantallas
- * angostas se pliega bajo un botón de menú. En las anchas la barra es `sticky` y
- * el contenedor no recorta (`overflow-hidden`): lo ancho se desplaza dentro de `main`.
+ * La navegación se arma con `roles` del claim (ver `navegacion.js`). En pantallas
+ * angostas es siempre el dock flotante. En las anchas se elige entre el dock y la
+ * barra, que es `sticky`. El contenedor no recorta (`overflow-hidden`): lo ancho se
+ * desplaza dentro de `main`.
  */
 export default function Layout({ children }) {
     const navigate = useNavigate();
     const { usuario } = useSesion();
-    const [menuAbierto, setMenuAbierto] = useState(false);
     const [saliendo, setSaliendo] = useState(false);
+    const { modo, fase, alternar } = useModoNavegacion();
+    const enDock = modo === MODO_DOCK;
+
+    // El botón pulsado desaparece con su modo: sin esto, el foco caería en `body`.
+    const botonDeCambio = useRef(null);
+    const moverFoco = useRef(false);
+    useEffect(() => {
+        if (!moverFoco.current) return;
+        moverFoco.current = false;
+        botonDeCambio.current?.focus({ preventScroll: true });
+    }, [modo]);
+
+    const cambiarModo = () => {
+        moverFoco.current = true;
+        alternar();
+    };
 
     const enlaces = enlacesPara(usuario);
     const nombre = [usuario?.nombres, usuario?.apellidos].filter(Boolean).join(' ');
@@ -62,25 +80,32 @@ export default function Layout({ children }) {
     return (
         <div className="box-border min-h-screen bg-lavanda font-sans text-texto md:p-4">
             <div className="flex flex-col md:flex-row min-h-screen md:min-h-[calc(100vh-2rem)] bg-lavanda md:border md:border-solid md:border-borde md:rounded-app">
-                <aside className="flex flex-col shrink-0 md:w-60 bg-indigo-profundo px-4 py-4 md:py-6 md:sticky md:top-4 md:self-start md:h-[calc(100vh-2rem)] md:box-border md:overflow-y-auto md:rounded-l-app">
+                <aside
+                    className={unir(
+                        enDock ? 'hidden' : 'hidden md:flex',
+                        'flex-col shrink-0 w-60 bg-indigo-profundo px-4 py-6 sticky top-4 self-start h-[calc(100vh-2rem)] box-border overflow-y-auto rounded-l-app',
+                        'transition-[transform,opacity] duration-300 ease-in-out',
+                        estaOculto(fase) && '-translate-x-full opacity-0 pointer-events-none'
+                    )}
+                >
                     <div className="flex items-center justify-between">
                         <Logo />
-                        <button
-                            type="button"
-                            className={unir('md:hidden flex items-center justify-center w-9 h-9 m-0 p-0 rounded-control border-0 bg-transparent text-white cursor-pointer', FOCO)}
-                            aria-label={menuAbierto ? 'Cerrar menú' : 'Abrir menú'}
-                            aria-expanded={menuAbierto}
-                            aria-controls="menu-principal"
-                            onClick={() => setMenuAbierto((abierto) => !abierto)}
-                        >
-                            {menuAbierto ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
-                        </button>
+                        {!enDock && (
+                            <button
+                                id="btn-to-dock"
+                                ref={botonDeCambio}
+                                type="button"
+                                className={unir('flex items-center justify-center w-8 h-8 m-0 p-0 rounded-control border-0 bg-white/10 text-white cursor-pointer hover:bg-white/25 transition-colors', FOCO)}
+                                aria-label="Cambiar a menú flotante"
+                                title="Cambiar a menú flotante"
+                                onClick={cambiarModo}
+                            >
+                                <ArrowRightToLine size={16} aria-hidden="true" />
+                            </button>
+                        )}
                     </div>
 
-                    <div
-                        id="menu-principal"
-                        className={unir(menuAbierto ? 'flex' : 'hidden', 'md:flex flex-col flex-1 mt-4 md:mt-0')}
-                    >
+                    <div className="flex flex-col flex-1">
                         <p className="m-0 mt-3 mb-6 text-xs font-medium uppercase tracking-label text-chip">
                             {etiquetaDeRoles(usuario)}
                         </p>
@@ -91,7 +116,6 @@ export default function Layout({ children }) {
                                     key={to}
                                     to={to}
                                     end={exacto}
-                                    onClick={() => setMenuAbierto(false)}
                                     className={({ isActive }) => unir(ITEM, isActive ? ITEM_ACTIVO : ITEM_INACTIVO)}
                                 >
                                     <Icono size={18} aria-hidden="true" />
@@ -100,7 +124,7 @@ export default function Layout({ children }) {
                             ))}
                         </nav>
 
-                        <div className="mt-6 md:mt-auto pt-4 border-0 border-t border-solid border-white/15">
+                        <div className="mt-auto pt-4 border-0 border-t border-solid border-white/15">
                             <p className="m-0 text-sm font-medium text-white truncate">{nombre}</p>
                             <p className="m-0 mb-3 text-xs text-chip truncate">{usuario?.email}</p>
                             <button type="button" className={unir(ITEM, ITEM_INACTIVO)} onClick={salir} disabled={saliendo}>
@@ -111,8 +135,18 @@ export default function Layout({ children }) {
                     </div>
                 </aside>
 
-                <main className="flex-1 min-w-0 overflow-x-auto p-4 md:p-8">{children}</main>
+                <main className={unir('flex-1 min-w-0 overflow-x-auto p-4 pb-28 md:p-8', enDock && 'md:pb-28')}>{children}</main>
             </div>
+
+            <Dock
+                enDock={enDock}
+                enlaces={enlaces}
+                fase={fase}
+                alternar={cambiarModo}
+                salir={salir}
+                saliendo={saliendo}
+                refCambio={botonDeCambio}
+            />
         </div>
     );
 }

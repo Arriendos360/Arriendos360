@@ -74,6 +74,7 @@ Inter. **Peso máximo 500** en toda la aplicación.
 | **Botón primario** | Fondo `--indigo-medio`, texto blanco, `--radio-control`, hover `--indigo-hover` |
 | **Badge** | Fondo `-tenue` + texto `-texto`. Nunca texto negro sobre color. |
 | **Sidebar** | Fondo sólido `--indigo-profundo`; ítem activo con fondo sólido `--indigo-medio` y `--radio-control`; texto inactivo en lavanda clara |
+| **Dock** | Flota sobre el contenido: blanco al 70 %, desenfoque de 12px, borde blanco al 40 %, radio de 1rem; ítem activo como en el sidebar. Únicas excepciones de la marca: sombra `shadow-dock`, escala en hover e icono de «Cerrar sesión» en `--rojo-texto` |
 | **Contenedor app** | `--radio-app` con margen sobre fondo `--lavanda`: tarjeta flotante |
 | **Inputs** | `--radio-control`, borde `--borde`, foco `--indigo-medio` |
 | **Logo** | Icono en cuadrado de radio 9px + "Arriendos360" peso 500. Claro: icono `--indigo-medio` sobre blanco, texto `--texto`. Oscuro: icono blanco sobre fondo semitransparente. Nunca sobre color semántico. |
