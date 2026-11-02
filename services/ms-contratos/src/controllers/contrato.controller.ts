@@ -57,11 +57,12 @@ import {
 /** El rol que tiene que tener el inquilino de un contrato. */
 const ROL_INQUILINO = 'INQUILINO';
 
-/** Columnas que pone el servidor, nunca el cliente: la auditoría, el ajuste y la constancia del preaviso. */
+/** Columnas que no se toman crudas del cuerpo: la auditoría, las que normaliza `validarContrato` y la constancia del preaviso. */
 const COLUMNAS_DEL_SISTEMA = new Set([
   'creado_por',
   'actualizado_por',
   'fecha_ultimo_ajuste',
+  'ultimo_periodo_pagado',
   'preaviso_enviado_en',
   'preaviso_enviado_por',
   'preaviso_vencimiento',
@@ -234,7 +235,7 @@ export const crear = async (req: Request, res: Response): Promise<Response> => {
     const { id_inmueble, id_inquilino } = cuerpo;
 
     // 0. La forma, antes de consultar a ms-inmuebles.
-    const { datos, errores } = validarContrato(cuerpo);
+    const { datos, errores } = validarContrato(cuerpo, hoyEnZonaNegocio());
     if (errores.length) {
       return res.status(400).json(errorDeValidacion(errores));
     }

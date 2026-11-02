@@ -20,6 +20,8 @@ export interface DatosEmision {
    * cuenta se crea sin aviso.
    */
   id_inquilino?: string | undefined;
+  /** Una cuenta atrasada: la anuncia el resumen de su contrato, no su propio recibo. */
+  sinAviso?: boolean;
   valor: number | string;
   /** `null` los dos en un cobro sin periodo. */
   inicio: string | null;
@@ -63,6 +65,10 @@ export const emitirCuentaCobro = async (
       // Sin `auditor`, la auditoría queda a nombre de USUARIO_SISTEMA.
       { transaction: tx, ...(datos.auditor ? { usuarioAuditor: datos.auditor } : {}) } as never,
     );
+
+    if (datos.sinAviso) {
+      return { cuenta, anunciada: false };
+    }
 
     if (!datos.id_inquilino) {
       console.warn(

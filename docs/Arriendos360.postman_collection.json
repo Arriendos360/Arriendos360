@@ -420,8 +420,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n    \"id_inmueble\": \"{{id_inmueble}}\",\n    \"id_inquilino\": \"{{id_inquilino}}\",\n    \"inicio\": \"2026-01-01\",\n    \"fin\": \"2026-12-31\",\n    \"canon\": 1500000,\n    \"fecha_limite_pago\": 5,\n    \"nombre_deudor_solidario\": \"Ana Fiadora\",\n    \"documento_deudor_solidario\": \"10203040\"\n}"
+              "raw": "{\n    \"id_inmueble\": \"{{id_inmueble}}\",\n    \"id_inquilino\": \"{{id_inquilino}}\",\n    \"inicio\": \"2026-01-01\",\n    \"fin\": \"2026-12-31\",\n    \"canon\": 1500000,\n    \"fecha_limite_pago\": 5,\n    \"ultimo_periodo_pagado\": \"2026-10\",\n    \"nunca_ajustado\": true,\n    \"nombre_deudor_solidario\": \"Ana Fiadora\",\n    \"documento_deudor_solidario\": \"10203040\"\n}"
             },
+            "description": "Con el primer corte anterior a hoy exige `ultimo_periodo_pagado` (YYYY-MM) o `nunca_pagado: true`, y se crean las cuentas desde el mes siguiente. Con 12 meses o mas desde `inicio` exige `fecha_ultimo_ajuste` o `nunca_ajustado: true`. Un primer corte anterior a `inicio` responde 400.",
             "url": {
               "raw": "{{baseUrl}}/api/contratos",
               "host": [
@@ -787,7 +788,7 @@
                 }
               }
             },
-            "description": "Alta manual. El camino normal es que las genere el motor financiero a partir del contrato; esto existe para la demostracion. El periodo es siempre el de corte del mes de `inicio` (sin `inicio`, el que toca hoy) y `fin` se deriva; si ese periodo ya tiene cuenta, 409. En un contrato terminado la cuenta no tiene periodo (la indemnizacion) y enviar `inicio` responde 409."
+            "description": "Alta manual. El camino normal es que las genere el motor financiero a partir del contrato; esto existe para la demostracion. El periodo es siempre el de corte del mes de `inicio` (sin `inicio`, el que toca hoy) y `fin` se deriva; si ese periodo ya tiene cuenta, 409. Sin `inicio`, 409 si el que toca hoy ya estaba pagado al registrar el contrato. En un contrato terminado la cuenta no tiene periodo (la indemnizacion) y enviar `inicio` responde 409."
           },
           "event": [
             {

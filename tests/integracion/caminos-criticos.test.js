@@ -235,6 +235,15 @@ let idInmueble;
 let idContrato;
 let idCuentaCobro;
 
+// Un contrato que empieza hoy: el flujo de uno nuevo, que no pregunta por pagos anteriores.
+const HOY = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+const [ANIO, MES, DIA] = HOY.split('-').map(Number);
+// `MES` va de 1 a 12: como índice de `Date.UTC` ya es el mes siguiente, y `MES + 1, 0` su último día.
+const SIGUIENTE_CORTE = Date.UTC(ANIO, MES, Math.min(DIA, new Date(Date.UTC(ANIO, MES + 1, 0)).getUTCDate()));
+const FIN_DEL_PERIODO = new Date(SIGUIENTE_CORTE - 86400000).toISOString().slice(0, 10);
+const MES_EN_LETRAS = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${HOY}T00:00:00Z`));
+
 describe('Caminos críticos', () => {
     before(async () => {
         // Falla pronto y con un mensaje útil si el stack no está en pie: es el
@@ -328,8 +337,8 @@ describe('Caminos críticos', () => {
             cuerpo: {
                 id_inmueble: idInmueble,
                 id_inquilino: idInquilino,
-                inicio: '2026-01-01',
-                fin: '2026-12-31',
+                inicio: HOY,
+                fin: `${ANIO + 1}-12-31`,
                 canon: 1500000
             }
         });
@@ -459,7 +468,9 @@ describe('Caminos críticos', () => {
                 fin: '2027-05-09',
                 canon: 1800000,
                 fecha_inicio_corte: corte,
-                fecha_limite_pago: 1
+                fecha_limite_pago: 1,
+                ultimo_periodo_pagado: HOY.slice(0, 7),
+                nunca_ajustado: true
             }
         });
         assert.equal(contrato.estado, 201, JSON.stringify(contrato.datos));
@@ -471,15 +482,18 @@ describe('Caminos críticos', () => {
 
         assert.ok(sobre, 'el contrato debería haber dejado su evento en la tabla de salida');
 
-        // VERSION 2 desde el paso 7, cuando el sobre ganó `id_inquilino` para que la
-        // cuenta de cobro que nace del evento pueda anunciarse. Es la primera vez que
-        // este número cambia, y comprobarlo aquí es lo que hace que el campo sirva de
-        // algo: un consumidor que reciba un sobre viejo tiene que poder distinguirlo.
-        assert.equal(sobre.version, 2);
+        // Comprobar la versión es lo que hace que el campo sirva de algo: un consumidor
+        // que reciba un sobre viejo tiene que poder distinguirlo.
+        assert.equal(sobre.version, 3);
         assert.equal(
             sobre.payload.id_inquilino,
             idInquilino,
-            'la versión 2 lleva el inquilino, que es a quien se le factura'
+            'desde la versión 2 lleva el inquilino, que es a quien se le factura'
+        );
+        assert.equal(
+            sobre.payload.ultimo_periodo_pagado,
+            `${HOY.slice(0, 7)}-01`,
+            'la versión 3 lleva el último periodo pagado, ya como el inicio de su corte'
         );
 
         // LA aserción del paso 6a: el evento dice lo que dice la fila.
@@ -597,11 +611,11 @@ describe('Caminos críticos', () => {
 
         // Los tres campos que el evento transporta, tal cual.
         assert.equal(Number(primera.valor), 1500000, 'el canon viaja en el evento');
-        assert.equal(primera.inicio, '2026-01-01', 'la fecha de corte también');
+        assert.equal(primera.inicio, HOY, 'la fecha de corte también');
         assert.equal(primera.estado, 'PENDIENTE');
 
         // El periodo tesela: `fin` es la víspera del siguiente corte.
-        assert.equal(primera.fin, '2026-01-31');
+        assert.equal(primera.fin, FIN_DEL_PERIODO);
 
         // El saldo se deriva y llega con el nombre de siempre.
         assert.equal(primera.saldo_pendiente, 1500000);
@@ -750,7 +764,7 @@ describe('Caminos críticos', () => {
 
         assert.match(texto, /ARRIENDOS 360 S\.A\.S/);
         assert.match(texto, /Inqui Lino/);
-        assert.match(texto, /Enero de 2026/, 'el periodo, formateado en UTC');
+        assert.match(texto, new RegExp(MES_EN_LETRAS, 'i'), 'el periodo, formateado en UTC');
 
         // El recibo mensual SI refleja el estado de HOY, al reves que el
         // comprobante: con la unica transaccion anulada, la cuenta volvio a

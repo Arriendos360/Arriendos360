@@ -82,6 +82,14 @@ export type {
 export { LONGITUD_MINIMA_CONTRASENA } from './validacion/reglas';
 
 export {
+  cuentasPendientes,
+  mesAnteriorAlPrimero,
+  mesesElegibles,
+  pideUltimoAjuste,
+  pideUltimoMesPagado,
+} from './validacion/antiguedad';
+
+export {
   errorDeValidacion,
   validarAltaInquilino,
   validarCancelacion,

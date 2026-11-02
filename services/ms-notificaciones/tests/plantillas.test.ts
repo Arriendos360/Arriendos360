@@ -17,6 +17,7 @@
 import {
   contrasenaTemporalEmitida,
   cuentaCobroGenerada,
+  cuentasAtrasadasRegistradas,
   enMoraInquilino,
   enMoraPropietario,
   porVencerInquilino,
@@ -100,6 +101,13 @@ const cadaPlantilla = (
     [contrasenaTemporalEmitida({ id_usuario: destinatario.id_usuario, motivo: 'ALTA' }, destinatario), '/login'],
     [contrasenaTemporalEmitida({ id_usuario: destinatario.id_usuario, motivo: 'REEMISION' }, destinatario), '/login'],
     [cuentaCobroGenerada(generada, destinatario), '/pagos'],
+    [
+      cuentasAtrasadasRegistradas(
+        { id_contrato: base.id_contrato, id_inquilino: base.id_inquilino, cantidad: 2, total: 3000000, primer_periodo: base.inicio, ultimo_periodo: '2026-07-31' },
+        destinatario,
+      ),
+      '/pagos',
+    ],
     [porVencerInquilino(porVencer, destinatario), '/pagos'],
     [porVencerPropietario(porVencer, destinatario), '/pagos'],
     [enMoraInquilino(enMora, destinatario), '/pagos'],

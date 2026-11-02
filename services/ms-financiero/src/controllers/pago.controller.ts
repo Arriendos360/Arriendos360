@@ -204,8 +204,9 @@ export const obtenerTransacciones = async (
 /**
  * Alta manual de una cuenta de cobro — `POST /api/pagos/cuentas-cobro`. En un
  * contrato activo cobra el periodo de corte del mes de `inicio` (sin él, el que le
- * toca hoy, como el motor), y 409 si ya tiene cuenta. En uno terminado, la cuenta
- * no tiene periodo, y pedirle uno con `inicio` es 409. Anota `CuentaCobroGenerada`.
+ * toca hoy, como el motor), y 409 si ya tiene cuenta o si, sin `inicio`, el que toca
+ * hoy ya estaba pagado al registrar el contrato. En uno terminado, la cuenta no tiene
+ * periodo, y pedirle uno con `inicio` es 409. Anota `CuentaCobroGenerada`.
  */
 export const crearCuentaCobro = async (req: Request, res: Response): Promise<Response | void> => {
   try {
@@ -245,6 +246,14 @@ export const crearCuentaCobro = async (req: Request, res: Response): Promise<Res
       : inicioPedido && diaCorte !== null
         ? periodoQueEmpiezaEn(inicioPedido, diaCorte)
         : periodoAFacturar(diaCorte ?? 1, hoyEnZonaNegocio());
+
+    // Ninguna cuenta chocaría con el índice: lo pagado al registrar el contrato no tiene cuenta.
+    const ultimoPagado = soloFecha(contrato.ultimo_periodo_pagado);
+    if (periodo && !inicioPedido && ultimoPagado && periodo.inicio <= ultimoPagado) {
+      return res
+        .status(409)
+        .json(crearError('Ese periodo ya está pagado. Para cobrarlo de todos modos, indica el periodo'));
+    }
 
     // El inquilino, para el evento, sale del contrato ya pedido.
     const { cuenta } = await emitirCuentaCobro({

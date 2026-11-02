@@ -12,6 +12,7 @@ export const TIPO_CONTRASENA_TEMPORAL_EMITIDA = 'ContrasenaTemporalEmitida';
 export const TIPO_CUENTA_COBRO_GENERADA = 'CuentaCobroGenerada';
 export const TIPO_CUENTA_COBRO_POR_VENCER = 'CuentaCobroPorVencer';
 export const TIPO_CUENTA_COBRO_EN_MORA = 'CuentaCobroEnMora';
+export const TIPO_CUENTAS_ATRASADAS_REGISTRADAS = 'CuentasAtrasadasRegistradas';
 export const TIPO_AJUSTE_CANON_PROXIMO = 'AjusteCanonProximo';
 export const TIPO_CANON_AJUSTADO = 'CanonAjustado';
 export const TIPO_PREAVISO_PROXIMO = 'PreavisoProximo';
@@ -22,7 +23,10 @@ export const TIPO_PREAVISO_ENVIADO = 'PreavisoEnviado';
  * ms-notificaciones resuelve el destinatario al manejarlo.
  */
 
-/** Se firmó un contrato. v2 añade `id_inquilino`, opcional para aceptar sobres v1. */
+/**
+ * Se firmó un contrato. v2 añade `id_inquilino`, opcional para aceptar sobres v1; v3 añade
+ * `ultimo_periodo_pagado`, opcional para aceptar los anteriores.
+ */
 export interface ContratoFormalizado {
   id_contrato: string;
   id_inmueble: string;
@@ -32,6 +36,8 @@ export interface ContratoFormalizado {
   fecha_inicio_corte: string;
   /** Versión 2. Sin él, la cuenta de cobro se crea sin notificar. */
   id_inquilino?: string;
+  /** Versión 3. `YYYY-MM-DD`. Con él se factura desde el periodo siguiente, no desde el primero. */
+  ultimo_periodo_pagado?: string;
 }
 
 /** Un contrato dejó de estar vigente. */
@@ -99,6 +105,22 @@ export interface CuentaCobroEnMora {
   /** Dias de calendario en `America/Bogota` desde el corte. */
   dias_de_mora: number;
   direccion_inmueble: string;
+}
+
+/**
+ * Un contrato que ya corría se registró con cuentas ya vencidas: las resume en un solo aviso al
+ * inquilino, en lugar de un recibo y una mora por cada una.
+ */
+export interface CuentasAtrasadasRegistradas {
+  id_contrato: string;
+  id_inquilino: string;
+  cantidad: number;
+  /** Pesos colombianos, como numero. */
+  total: number;
+  /** `YYYY-MM-DD`. Inicio del primer periodo atrasado. */
+  primer_periodo: string;
+  /** `YYYY-MM-DD`. Fin del último periodo atrasado. */
+  ultimo_periodo: string;
 }
 
 /** Se abrió la ventana de ajuste anual del canon. Avisa al propietario. */
@@ -169,6 +191,7 @@ export interface CargaPorTipo {
   [TIPO_CUENTA_COBRO_GENERADA]: CuentaCobroGenerada;
   [TIPO_CUENTA_COBRO_POR_VENCER]: CuentaCobroPorVencer;
   [TIPO_CUENTA_COBRO_EN_MORA]: CuentaCobroEnMora;
+  [TIPO_CUENTAS_ATRASADAS_REGISTRADAS]: CuentasAtrasadasRegistradas;
   [TIPO_AJUSTE_CANON_PROXIMO]: AjusteCanonProximo;
   [TIPO_CANON_AJUSTADO]: CanonAjustado;
   [TIPO_PREAVISO_PROXIMO]: PreavisoProximo;
@@ -204,13 +227,14 @@ export type SobreDesconocido = SobreOpaco;
 
 /** Versión vigente de cada tipo. Sube cuando cambia la forma de su carga. */
 export const VERSION_EVENTO: Record<TipoEvento, number> = {
-  [TIPO_CONTRATO_FORMALIZADO]: 2,
+  [TIPO_CONTRATO_FORMALIZADO]: 3,
   [TIPO_CONTRATO_FINALIZADO]: 1,
   [TIPO_RECUPERACION_SOLICITADA]: 1,
   [TIPO_CONTRASENA_TEMPORAL_EMITIDA]: 1,
   [TIPO_CUENTA_COBRO_GENERADA]: 1,
   [TIPO_CUENTA_COBRO_POR_VENCER]: 1,
   [TIPO_CUENTA_COBRO_EN_MORA]: 1,
+  [TIPO_CUENTAS_ATRASADAS_REGISTRADAS]: 1,
   [TIPO_AJUSTE_CANON_PROXIMO]: 1,
   [TIPO_CANON_AJUSTADO]: 1,
   [TIPO_PREAVISO_PROXIMO]: 1,

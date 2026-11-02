@@ -69,8 +69,8 @@ el alta manual de un cobro notifica; `0023` Inmuebles conserva `departamento`, `
 ficha física; `0025` ajuste de canon por IPC (`fecha_ultimo_ajuste` y dos eventos); `0026`
 preaviso de terminación (cuatro columnas `preaviso_*` y dos eventos); `0027` estado del contrato
 (tabla `historial_contratos`, situación del contrato activo, cancelar y día de corte fijo); `0028`
-cobro sin periodo (`inicio`/`fin` nulos en `Cuentas_cobro`). Los demás ADR no se apartan del
-documento.
+cobro sin periodo (`inicio`/`fin` nulos en `Cuentas_cobro`); `0029` contrato que ya corría
+(`ultimo_periodo_pagado`, `ContratoFormalizado` v3 y `CuentasAtrasadasRegistradas`). Los demás ADR no se apartan del documento.
 
 ---
 
@@ -94,7 +94,9 @@ seguridad (`TokensRevocados`, ver módulo de seguridad).
   (`docs/adr/0015`); `saldo_restante_momento`, la foto del saldo impresa en un
   comprobante ya emitido: **no se deriva ni se toca**, ni al anular;
   `fecha_ultimo_ajuste` en `Contratos`, desde la que corren los 12 meses del siguiente
-  ajuste por IPC (`docs/adr/0025`); y en `Contratos` la constancia del preaviso de no
+  ajuste por IPC (`docs/adr/0025`); `ultimo_periodo_pagado` en `Contratos`, el inicio del último
+  periodo ya pagado al registrar uno que ya corría, y `NULL` si no se preguntó (`docs/adr/0029`); y en
+  `Contratos` la constancia del preaviso de no
   renovar, `preaviso_enviado_en`, `preaviso_enviado_por`, `preaviso_vencimiento` y
   `preaviso_causal` (`docs/adr/0026`). Con ella el contrato deja de prorrogarse; la
   escribe sólo `POST /api/contratos/:id/preaviso`.
@@ -290,13 +292,14 @@ Tipos en `packages/shared/src/eventos.ts`.
 
 | Evento | Emisor | Carga | Consumidores |
 |---|---|---|---|
-| `ContratoFormalizado` **v2** | `ms-contratos` | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte`, `id_inquilino` | **DOS:** `ms-inmuebles` → `arrendado`, y `ms-financiero` → primera cuenta de cobro. |
+| `ContratoFormalizado` **v3** | `ms-contratos` | `id_contrato`, `id_inmueble`, `canon`, `fecha_inicio_corte`, `id_inquilino`, `ultimo_periodo_pagado` | **DOS:** `ms-inmuebles` → `arrendado`, y `ms-financiero` → primera cuenta de cobro, o las que falten desde el último pagado. |
 | `ContratoFinalizado` | ídem | `id_contrato`, `id_inmueble` | `ms-inmuebles` → `disponible`. Ver `docs/adr/0013`. |
 | `RecuperacionSolicitada` | `ms-identidad` | `id_usuario`, `token`, `expira_en` | `ms-notificaciones` → correo con el enlace. |
 | `ContrasenaTemporalEmitida` | ídem | `id_usuario`, `motivo` (`ALTA`\|`REEMISION`) | `ms-notificaciones` → aviso de que la cuenta existe. **No lleva la contraseña.** |
 | `CuentaCobroGenerada` | `ms-financiero` | `id_cuenta_cobro`, `id_contrato`, `id_inquilino`, `valor`, `inicio`, `fin` (nulos en un cobro sin periodo) | `ms-notificaciones` → recibo al inquilino. |
 | `CuentaCobroPorVencer` | ídem | ídem + `id_propietario`, `entra_en_mora_el`, `direccion_inmueble` | `ms-notificaciones` → aviso al inquilino **y** al propietario. |
 | `CuentaCobroEnMora` | ídem | ídem + `dias_de_mora` | `ms-notificaciones` → aviso a los dos. |
+| `CuentasAtrasadasRegistradas` | ídem | `id_contrato`, `id_inquilino`, `cantidad`, `total`, `primer_periodo`, `ultimo_periodo` | `ms-notificaciones` → un solo resumen al inquilino. Las cuentas ya vencidas al registrar un contrato no llevan recibo ni aviso de mora (`docs/adr/0029`). |
 | `AjusteCanonProximo` | ídem (motor) | `id_contrato`, `id_propietario`, `direccion_inmueble`, `canon_actual`, `canon_sugerido`, `ipc`, `anio_ipc`, `fecha_ajuste` | `ms-notificaciones` → alerta al propietario. Una vez por ajuste. |
 | `CanonAjustado` | `ms-contratos` | `id_contrato`, `id_inquilino`, `id_propietario`, `direccion_inmueble`, `canon_anterior`, `canon_nuevo`, `ipc`, `anio_ipc`, `rige_desde` | `ms-notificaciones` → aviso formal al inquilino. |
 | `PreavisoProximo` | `ms-financiero` (motor) | `id_contrato`, `id_inquilino`, `id_propietario`, `direccion_inmueble`, `vencimiento`, `fecha_limite` | `ms-notificaciones` → recordatorio a las dos partes. Una vez por vencimiento. |
@@ -306,7 +309,7 @@ Tipos en `packages/shared/src/eventos.ts`.
   resuelve el correo contra ms-identidad al manejar el evento. Sí viaja el asunto
   (dirección, valor, periodo) e `id_propietario` como foto del momento (`docs/adr/0019`).
 - **`id_inquilino` es opcional en la v2** a propósito: un sobre v1 crea la cuenta sin
-  notificar.
+  notificar. **`ultimo_periodo_pagado` es opcional en la v3**: sin él, sólo la primera cuenta.
 - **`ContratoFinalizado` no tiene consumidor en Financiero**, deliberado: finalizar no
   cancela lo que se debe.
 
@@ -325,7 +328,8 @@ publicador: con ms-financiero escalado a cero nadie más lo haría. Por eso exig
 
 **La primera cuenta de cobro es del evento**: `procesarContratos()` hace las siguientes y
 **salta el primer periodo SIEMPRE, exista o no**, para no facturar dos veces dentro de la
-ventana de entrega. Motor y `verificar-mora` comparten `DIAS_PARA_MORA` y
+ventana de entrega. En un contrato con `ultimo_periodo_pagado` no cobra hasta ese periodo y salta
+lo que ya tocaba al formalizar; lo posterior sí es suyo (`docs/adr/0029`). Motor y `verificar-mora` comparten `DIAS_PARA_MORA` y
 `ESTADOS_QUE_ENTRAN_EN_MORA` (`PENDIENTE` y `PARCIAL`): **saldo mayor que cero y corte
 vencido es mora, haya abonos o no** (`docs/adr/0018`).
 
@@ -362,6 +366,11 @@ El `id_propietario` se inyecta desde el `sub` del token.
 ```
 `fecha_limite_pago` es un **día del mes** (entero), no una fecha.
 
+Un contrato que ya corría añade campos (`docs/adr/0029`): con `fecha_inicio_corte` anterior a hoy,
+`ultimo_periodo_pagado` (`YYYY-MM`) o `nunca_pagado: true`; con 12 meses o más desde `inicio`,
+`fecha_ultimo_ajuste` (`YYYY-MM-DD`) o `nunca_ajustado: true`. `fecha_inicio_corte` no puede ser
+anterior a `inicio`.
+
 **MS-Contratos** — `POST /api/contratos/{id_contrato}/anexos`
 `multipart/form-data` con `file` (PDF) y `tipo` (`CONTRATO_FIRMADO`, `OTROSI`, etc.).
 Valida que sea PDF y que el contrato exista, **sube el archivo a almacenamiento en la
@@ -373,7 +382,8 @@ API autenticada, nunca con URL firmada (`docs/adr/0014`).
 { "id_cuenta_cobro": "uuid", "monto": 1500000.00, "tipo": "INGRESO",
   "medio_pago": "TRANSFERENCIA", "fecha_pago": "YYYY-MM-DDTHH:mm:ssZ" }
 ```
-El alta manual de un cobro es `POST /api/pagos/cuentas-cobro`.
+El alta manual de un cobro es `POST /api/pagos/cuentas-cobro`. Sin `inicio`, 409 si el periodo que
+toca hoy ya estaba pagado al registrar el contrato; con `inicio` se permite.
 
 ---
 

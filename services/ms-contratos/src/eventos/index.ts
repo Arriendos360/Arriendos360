@@ -85,6 +85,8 @@ export const registrarContratoFormalizado = (
       fecha_inicio_corte: contrato.fecha_inicio_corte,
       // Versión 2: ms-financiero lo usa para notificar la primera cuenta de cobro.
       id_inquilino: contrato.id_inquilino,
+      // Versión 3: ms-financiero factura desde el periodo siguiente, no desde el primero.
+      ...(contrato.ultimo_periodo_pagado ? { ultimo_periodo_pagado: contrato.ultimo_periodo_pagado } : {}),
     }),
     // Ordenados por inmueble, para que un `Finalizado` no adelante a su `Formalizado`.
     { transaccion: transaccion as never, claveOrden: contrato.id_inmueble },
