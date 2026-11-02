@@ -180,10 +180,11 @@ saber si el login falló, y el gateway reenvía sin leer (`docs/adr/0020`). Tabl
 
 ### Capa 1 — Cliente (SPA)
 
-- El token vive **en memoria**, no en `localStorage` ni en cookies.
+- El token vive **en memoria**, no en `localStorage` ni en cookies. En `localStorage` sólo está
+  `app_nav_mode`, la preferencia de navegación, sin datos de sesión.
 - Interceptor HTTP que adjunta `Authorization: Bearer <token>` a toda petición.
 - Guardianes de ruta que abortan la navegación no autorizada, incluso por URL escrita a
-  mano. La barra lateral se renderiza según los claims de rol.
+  mano. La navegación, barra lateral o dock, se renderiza según los claims de rol.
 - **Descargas:** los PDF se piden con `fetch` por el interceptor, como blob, y se
   disparan con un enlace temporal. Nada de `window.open` ni `?token=`.
 

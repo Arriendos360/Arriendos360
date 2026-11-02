@@ -23,7 +23,7 @@ module.exports = {
         suave: 'var(--texto-suave)',
         label: 'var(--texto-label)',
       },
-      // Semánticos: sólo los usa src/ui/Badge (regla de marca.md).
+      // Semánticos: sólo los usa src/ui/Badge y el «Cerrar sesión» del dock (marca.md).
       verde: { DEFAULT: 'var(--verde)', texto: 'var(--verde-texto)', tenue: 'var(--verde-tenue)' },
       ambar: { DEFAULT: 'var(--ambar)', texto: 'var(--ambar-texto)', tenue: 'var(--ambar-tenue)' },
       rojo: { DEFAULT: 'var(--rojo)', texto: 'var(--rojo-texto)', tenue: 'var(--rojo-tenue)' },
@@ -40,10 +40,11 @@ module.exports = {
       control: 'var(--radio-control)',
       tarjeta: 'var(--radio-tarjeta)',
       app: 'var(--radio-app)',
+      dock: '1rem',
       full: '9999px',
     },
-    // Sin sombras ni degradados.
-    boxShadow: {},
+    // Sin sombras ni degradados, salvo la sombra del dock (marca.md).
+    boxShadow: { dock: '0 8px 30px rgba(0, 0, 0, 0.12)' },
     backgroundImage: {},
     extend: {
       letterSpacing: { label: '0.45px' },

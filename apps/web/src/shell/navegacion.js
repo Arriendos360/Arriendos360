@@ -1,5 +1,6 @@
 /**
- * Qué muestra la barra lateral, según el arreglo `roles` del claim.
+ * Qué muestra la navegación (barra lateral o dock), según el arreglo `roles` del
+ * claim, y qué modo prefiere este navegador.
  *
  * Se lee `roles` y no el `rol` singular: un usuario puede ser propietario e
  * inquilino a la vez, y el singular sólo dice cuál es el principal. Esconder un
@@ -33,6 +34,30 @@ export const enlacesPara = (usuario) => {
             ...enlace,
             etiqueta: soloInquilino && etiquetaInquilino ? etiquetaInquilino : enlace.etiqueta
         }));
+};
+
+export const MODO_BARRA = 'sidebar';
+export const MODO_DOCK = 'dock';
+
+const MODO_POR_DEFECTO = MODO_BARRA;
+const LLAVE_MODO = 'app_nav_mode';
+
+/** El navegador puede bloquear `localStorage` y hacerlo lanzar; el valor guardado puede ser cualquiera. */
+export const leerModoNavegacion = () => {
+    try {
+        const guardado = window.localStorage.getItem(LLAVE_MODO);
+        return guardado === MODO_BARRA || guardado === MODO_DOCK ? guardado : MODO_POR_DEFECTO;
+    } catch (error) {
+        return MODO_POR_DEFECTO;
+    }
+};
+
+export const guardarModoNavegacion = (modo) => {
+    try {
+        window.localStorage.setItem(LLAVE_MODO, modo);
+    } catch (error) {
+        // Sin almacenamiento el modo sólo dura hasta recargar.
+    }
 };
 
 const NOMBRES_ROL = { [ROL_PROPIETARIO]: 'Propietario', [ROL_INQUILINO]: 'Inquilino' };
