@@ -36,7 +36,8 @@ respuesta.
    no cambian.
 5. **El email se recorta y no se pasa a minúsculas**: el login compara el correo exacto.
    Hacerlo insensible a mayúsculas exige tocar el login, la unicidad y las filas
-   existentes.
+   existentes. *Sustituido por `docs/adr/0030`: se sigue sin pasar a minúsculas, pero la
+   comparación ya no las distingue.*
 6. **`fecha_pago` no puede ser futura, comparando el día en `America/Bogota`**, no el
    instante. El «hoy» lo inyecta quien llama, para que el validador sea puro.
 7. **Los números tienen el tope de su columna**: `NUMERIC(12,2)` menor que 10¹⁰,

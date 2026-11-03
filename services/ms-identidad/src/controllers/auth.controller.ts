@@ -6,6 +6,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import type { Request, Response } from 'express';
+import { col, fn, where } from 'sequelize';
 import { crearError } from 'arriendos360-shared';
 import {
   LONGITUD_MINIMA_CONTRASENA,
@@ -59,6 +60,10 @@ let hashFicticio: string | null = null;
 const hashDeComparacion = (): string =>
   (hashFicticio ??= bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 10));
 
+/** La cuenta de ese correo, sin distinguir mayúsculas: `lower` a los dos lados, el del índice único. */
+const buscarPorEmail = (email: unknown): Promise<Usuario | null> =>
+  Usuario.findOne({ where: where(fn('lower', col('email')), fn('lower', String(email).trim())) });
+
 /** Nombres de rol de un usuario, en mayusculas, tal como van en los claims. */
 export const rolesDe = async (idUsuario: string): Promise<string[]> => {
   const filas = await RolUsuario.findAll({
@@ -98,7 +103,7 @@ export const crearUsuarioConRol = async ({
     ? generarContrasenaTemporal()
     : (cuerpo['contrasena'] as string);
 
-  if (await Usuario.findOne({ where: { email } })) {
+  if (await buscarPorEmail(email)) {
     return { error: { campo: 'email', mensaje: 'El email ya está registrado' } };
   }
 
@@ -206,7 +211,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
       return responderLimite(res, fallos);
     }
 
-    const usuario = await Usuario.findOne({ where: { email } });
+    const usuario = await buscarPorEmail(email);
 
     // Siempre se compara con bcrypt y se da la misma respuesta, exista o no la cuenta.
     const coincide = await bcrypt.compare(
@@ -372,7 +377,7 @@ export const recuperar = async (req: Request, res: Response): Promise<Response> 
       return res.json(respuestaUnica);
     }
 
-    const usuario = await Usuario.findOne({ where: { email } });
+    const usuario = await buscarPorEmail(email);
 
     if (usuario) {
       await sequelize.transaction(async (transaccion) => {

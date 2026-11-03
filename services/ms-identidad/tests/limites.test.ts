@@ -138,6 +138,17 @@ describe('Login', () => {
     esBloqueo(await login(atacante), 900);
   });
 
+  test('alternar mayúsculas no esquiva el límite de fallos', async () => {
+    const atacante = '203.0.113.60';
+
+    for (let i = 0; i < LIMITES_POR_DEFECTO.loginFallidosPorCuentaEIp.maximo; i += 1) {
+      const email = i % 2 === 0 ? VICTIMA : VICTIMA.toUpperCase();
+      expect((await login(atacante, email, 'no-es')).status).toBe(401);
+    }
+
+    esBloqueo(await login(atacante, VICTIMA.toUpperCase()), 900);
+  });
+
   test('la víctima sigue entrando desde su propia IP', async () => {
     expect((await login('203.0.113.20')).status).toBe(200);
   });

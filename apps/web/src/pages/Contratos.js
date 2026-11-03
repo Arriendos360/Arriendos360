@@ -4,7 +4,7 @@ import { FileText, Plus, Search, UserPlus } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { crearContrato, finalizarContrato, listarContratos } from '../features/contratos/api';
-import { etiquetaDeEstado, filtrarContratos } from '../features/contratos/filtros';
+import { etiquetaDeEstado, filtrarContratos, ordenarContratos } from '../features/contratos/filtros';
 import {
     AlertaMora, AreaTexto, ContrasenaTemporal, actuaComoPropietario, nombreDe, nombreDeInmueble, ubicacionDe, vigencia
 } from '../features/contratos/piezas';
@@ -14,7 +14,8 @@ import {
 import { listarInmuebles } from '../features/inmuebles/api';
 import { buscarPorDocumento, crearInquilino } from '../features/usuarios/api';
 import {
-    Badge, Button, DateField, ESTADOS, EmptyState, FormError, Input, Modal, MoneyField, Select, Table, formatearDinero
+    Badge, Button, DateField, ESTADOS, EmptyState, FormError, Input, Modal, MoneyField, Paginacion, Select, Table,
+    formatearDinero, paginar
 } from '../ui';
 import { hoyEnBogota } from '../ui/formato';
 import { useValidacion } from '../ui/validacion';
@@ -336,7 +337,7 @@ export default function Contratos() {
             listarContratos(),
             esPropietario ? listarInmuebles() : Promise.resolve([])
         ]);
-        if (con.status === 'fulfilled') setContratos(con.value);
+        if (con.status === 'fulfilled') setContratos(ordenarContratos(con.value));
         else setErrorCarga(con.reason);
         setInmuebles(inm.status === 'fulfilled' ? inm.value : null);
         setCargando(false);
@@ -372,8 +373,11 @@ export default function Contratos() {
     };
     const filtrados = filtrarContratos(contratos, filtros);
     const conFiltros = Object.values(filtros).some(Boolean);
+    const pagina = paginar(filtrados, params.get('pagina'));
+    // Todo cambio vuelve a la primera página; cambiar de página es un cambio más.
     const filtrar = (clave, valor) => setParams((actuales) => {
         const nuevos = new URLSearchParams(actuales);
+        nuevos.delete('pagina');
         if (valor) nuevos.set(clave, valor); else nuevos.delete(clave);
         return nuevos;
     }, { replace: true });
@@ -493,7 +497,7 @@ export default function Contratos() {
                     )}
                     <Table
                         columnas={columnas}
-                        filas={filtrados}
+                        filas={pagina.filas}
                         claveFila="id_contrato"
                         cargando={cargando}
                         vacio={contratos.length > 0 ? (
@@ -510,6 +514,7 @@ export default function Contratos() {
                             />
                         )}
                     />
+                    <Paginacion {...pagina} onCambiar={(numero) => filtrar('pagina', numero > 1 ? numero : '')} />
                 </div>
             )}
 

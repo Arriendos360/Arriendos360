@@ -1,4 +1,4 @@
-import { desglosar, filtrarCuentas, filtrarMovimientos, totalMovimientos, totales } from './desglose';
+import { desglosar, filtrarCuentas, filtrarMovimientos, ordenarCuentas, totalMovimientos, totales } from './desglose';
 
 const apto = { id_contrato: 'c-apto', id_inmueble: 'apto', Inmueble: { id_inmueble: 'apto', alias: 'Apto 301' } };
 const casa = { id_contrato: 'c-casa', id_inmueble: 'casa', Inmueble: { id_inmueble: 'casa', alias: 'Casa Chía' } };
@@ -13,6 +13,32 @@ const cuentas = [
     cuenta('a2', apto, '1500000.00', '500000.00', 'PARCIAL'),
     cuenta('c1', casa, '2000000.00', '2000000.00', 'EN_MORA')
 ];
+
+describe('ordenarCuentas', () => {
+    const orden = (entrada) => ordenarCuentas(entrada).map((c) => c.id_cuenta_cobro);
+
+    test('el periodo más reciente primero', () => {
+        expect(orden([
+            { id_cuenta_cobro: 'septiembre', inicio: '2026-09-01' },
+            { id_cuenta_cobro: 'octubre', inicio: '2026-10-01' }
+        ])).toEqual(['octubre', 'septiembre']);
+    });
+
+    test('con el mismo periodo, el orden no depende de cómo llegaron', () => {
+        const a = { id_cuenta_cobro: 'a', inicio: '2026-10-01' };
+        const b = { id_cuenta_cobro: 'b', inicio: '2026-10-01' };
+        expect(orden([a, b])).toEqual(['a', 'b']);
+        expect(orden([b, a])).toEqual(['a', 'b']);
+    });
+
+    test('un cobro sin periodo se ordena por su creación', () => {
+        expect(orden([
+            { id_cuenta_cobro: 'septiembre', inicio: '2026-09-01' },
+            { id_cuenta_cobro: 'sin-periodo', inicio: null, fecha_creacion: '2026-10-15T12:00:00.000Z' },
+            { id_cuenta_cobro: 'agosto', inicio: '2026-08-01' }
+        ])).toEqual(['sin-periodo', 'septiembre', 'agosto']);
+    });
+});
 
 describe('totales', () => {
     test('sin filtros', () => {

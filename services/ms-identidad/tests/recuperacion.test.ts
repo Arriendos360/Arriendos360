@@ -119,6 +119,32 @@ describe('POST /api/auth/recuperar', () => {
     expect(await recuperacionesEmitidas()).toBe(antes + 1);
   });
 
+  test('encuentra la cuenta aunque el correo llegue con otras mayúsculas', async () => {
+    const antes = await recuperacionesEmitidas();
+
+    const respuesta = await request(app)
+      .post('/api/auth/recuperar')
+      .send({ email: 'OLVIDADIZO@TEST.COM' });
+
+    expect(respuesta.status).toBe(200);
+    const eventos = await eventosDeSalida('RecuperacionSolicitada');
+    expect(eventos).toHaveLength(antes + 1);
+    expect(eventos[eventos.length - 1]!.payload['id_usuario']).toBe(propietario.registro.body.usuario.id);
+  });
+
+  test('un correo inexistente en mayúsculas responde igual y no emite nada', async () => {
+    const antes = await recuperacionesEmitidas();
+    const existe = await request(app).post('/api/auth/recuperar').send({ email: 'OLVIDADIZO@TEST.COM' });
+    const despues = await recuperacionesEmitidas();
+
+    const noExiste = await request(app).post('/api/auth/recuperar').send({ email: 'NADIE@TEST.COM' });
+
+    expect(despues).toBe(antes + 1);
+    expect(noExiste.status).toBe(200);
+    expect(noExiste.body).toEqual(existe.body);
+    expect(await recuperacionesEmitidas()).toBe(despues);
+  });
+
   test('el evento lleva el token en claro, el usuario y la caducidad', async () => {
     // El sobre NO lleva el enlace ni la dirección de correo. El enlace lo arma el canal
     // con su propia URL_APP; la dirección la resuelve ms-notificaciones preguntando,
