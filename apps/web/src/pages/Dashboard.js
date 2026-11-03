@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Building2, FileText, Home, TrendingUp } from 'lucide-react';
 
 import { useSesion } from '../auth/sesion';
 import { listarContratos } from '../features/contratos/api';
+import { ordenarContratos } from '../features/contratos/filtros';
 import { obtenerResumen } from '../features/dashboard/api';
 import { actuaComoPropietario, nombreDeInmueble } from '../features/contratos/piezas';
 import { listarCuentasCobro } from '../features/pagos/api';
-import { Button, Card, EmptyState, FormError, formatearDinero, formatearFecha, formatearMes } from '../ui';
+import { ordenarCuentas } from '../features/pagos/desglose';
+import { Button, Card, EmptyState, FormError, Paginacion, formatearDinero, formatearFecha, formatearMes, paginar } from '../ui';
 import { unir } from '../ui/clases';
 
 /**
@@ -37,10 +39,17 @@ const ESTADOS_PAGO = [
     { estado: 'EN_MORA', texto: 'En mora', punto: 'bg-rojo' }
 ];
 
+/** Es un resumen con tres listas: menos filas que en las pantallas de consulta. */
+const TAMANO_PAGINA_DASHBOARD = 5;
+
+/**
+ * Mide como mínimo lo que ocupa su cifra, y pasa a otra fila si no cabe: una cifra de dinero no se recorta.
+ * `w-0 min-w-full` saca al título de esa medida: él sí puede partirse en dos líneas.
+ */
 function Tarjeta({ titulo, icono: Icono, valor, tono = 'text-texto', alerta = false }) {
     return (
-        <section className="box-border flex-1 min-w-[11rem] bg-superficie border border-solid border-borde rounded-tarjeta p-5">
-            <div className="flex items-start justify-between gap-3">
+        <section className="box-border flex-[1_1_11rem] min-w-fit bg-superficie border border-solid border-borde rounded-tarjeta p-5">
+            <div className="flex items-start justify-between gap-3 w-0 min-w-full">
                 <h2 className="m-0 text-xs font-medium uppercase tracking-label text-texto-label">{titulo}</h2>
                 <span className={unir(
                     'flex items-center justify-center w-8 h-8 rounded-control shrink-0',
@@ -49,7 +58,7 @@ function Tarjeta({ titulo, icono: Icono, valor, tono = 'text-texto', alerta = fa
                     <Icono size={16} aria-hidden="true" />
                 </span>
             </div>
-            <p className={unir('m-0 mt-3 text-3xl font-medium tabular-nums', tono)}>{valor}</p>
+            <p className={unir('m-0 mt-3 text-3xl font-medium tabular-nums [overflow-wrap:anywhere]', tono)}>{valor}</p>
         </section>
     );
 }
@@ -77,8 +86,9 @@ export default function Dashboard() {
         else { setResumen(null); setErrorResumen(res.reason); }
         if (cue.status === 'fulfilled') setCuentas(cue.value.filter((c) => actuaComoPropietario(c.Contrato, sesion)));
         else { setCuentas(null); setErrorCuentas(cue.reason); }
-        setAjustes(con.status === 'fulfilled' ? con.value.filter((c) => c.ajuste_canon?.en_ventana) : null);
-        setPreavisos(con.status === 'fulfilled' ? con.value.filter((c) => c.preaviso?.en_ventana && !c.preaviso.enviado) : null);
+        const contratos = con.status === 'fulfilled' ? ordenarContratos(con.value) : null;
+        setAjustes(contratos && contratos.filter((c) => c.ajuste_canon?.en_ventana));
+        setPreavisos(contratos && contratos.filter((c) => c.preaviso?.en_ventana && !c.preaviso.enviado));
         setCargando(false);
         // `sesion` cambia de identidad en cada render; basta con el usuario.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,9 +97,23 @@ export default function Dashboard() {
     useEffect(() => { cargar(); }, [cargar]);
 
     const contar = (estado) => (cuentas ? cuentas.filter((c) => c.estado === estado).length : null);
-    const enMora = cuentas
-        ? cuentas.filter((c) => c.estado === 'EN_MORA').sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)))
-        : [];
+    // El periodo más antiguo primero.
+    const enMora = cuentas ? ordenarCuentas(cuentas.filter((c) => c.estado === 'EN_MORA')).reverse() : [];
+
+    const [params, setParams] = useSearchParams();
+    /** Cada lista tiene su parámetro: cambiar de página en una no mueve las otras. */
+    const paginaDe = (filas, clave) => ({
+        ...paginar(filas, params.get(clave), TAMANO_PAGINA_DASHBOARD),
+        onCambiar: (numero) => setParams((actuales) => {
+            const nuevos = new URLSearchParams(actuales);
+            if (numero > 1) nuevos.set(clave, numero); else nuevos.delete(clave);
+            return nuevos;
+        }, { replace: true })
+    });
+    const paginaMora = paginaDe(enMora, 'pagina_mora');
+    const paginaAjustes = paginaDe(ajustes ?? [], 'pagina_ajustes');
+    const paginaPreavisos = paginaDe(preavisos ?? [], 'pagina_preavisos');
+
     // «—» mientras carga o si la fuente falló: nunca un cero que no se sabe.
     const cifra = (valor) => (valor === null || valor === undefined ? '—' : valor);
 
@@ -142,8 +166,9 @@ export default function Dashboard() {
                     ) : enMora.length === 0 ? (
                         <p className="m-0 py-6 text-center text-sm text-texto-suave">No tienes cobros en mora.</p>
                     ) : (
+                        <>
                         <ul className="m-0 p-0 list-none flex flex-col">
-                            {enMora.map((c) => (
+                            {paginaMora.filas.map((c) => (
                                 <li key={c.id_cuenta_cobro}
                                     className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
                                     <div className="min-w-0">
@@ -158,13 +183,15 @@ export default function Dashboard() {
                                 </li>
                             ))}
                         </ul>
+                        <Paginacion {...paginaMora} className="pt-3" />
+                        </>
                     )}
                 </Card>
 
                 {ajustes?.length > 0 && (
                     <Card titulo="Ajustes de canon (IPC)" className="flex-1 min-w-[14rem]">
                         <ul className="m-0 p-0 list-none flex flex-col">
-                            {ajustes.map((c) => (
+                            {paginaAjustes.filas.map((c) => (
                                 <li key={c.id_contrato}
                                     className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
                                     <div className="min-w-0">
@@ -180,13 +207,14 @@ export default function Dashboard() {
                                 </li>
                             ))}
                         </ul>
+                        <Paginacion {...paginaAjustes} className="pt-3" />
                     </Card>
                 )}
 
                 {preavisos?.length > 0 && (
                     <Card titulo="Preavisos de terminación" className="flex-1 min-w-[14rem]">
                         <ul className="m-0 p-0 list-none flex flex-col">
-                            {preavisos.map((c) => (
+                            {paginaPreavisos.filas.map((c) => (
                                 <li key={c.id_contrato}
                                     className="flex items-center justify-between gap-4 py-3 border-0 border-b border-solid border-borde last:border-b-0">
                                     <div className="min-w-0">
@@ -202,6 +230,7 @@ export default function Dashboard() {
                                 </li>
                             ))}
                         </ul>
+                        <Paginacion {...paginaPreavisos} className="pt-3" />
                     </Card>
                 )}
 

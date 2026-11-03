@@ -1,4 +1,4 @@
-import { etiquetaDeEstado, filtrarContratos } from './filtros';
+import { etiquetaDeEstado, filtrarContratos, ordenarContratos } from './filtros';
 
 const contrato = (id, extra) => ({
     id_contrato: id, id_inmueble: 'apto', estado: 'activo', inicio: '2025-07-01T00:00:00.000Z', fin: '2026-06-30T00:00:00.000Z', ...extra
@@ -16,6 +16,30 @@ const lista = [
 ];
 
 const ids = (filtros) => filtrarContratos(lista, filtros).map((c) => c.id_contrato);
+
+describe('ordenarContratos', () => {
+    const orden = (entrada) => ordenarContratos(entrada).map((c) => c.id_contrato);
+
+    test('el inicio más reciente primero', () => {
+        expect(orden([
+            contrato('viejo', { inicio: '2025-03-01T00:00:00.000Z' }),
+            contrato('nuevo', { inicio: '2026-03-01T00:00:00.000Z' })
+        ])).toEqual(['nuevo', 'viejo']);
+    });
+
+    test('con el mismo inicio, el orden no depende de cómo llegaron', () => {
+        const a = contrato('a');
+        const b = contrato('b');
+        expect(orden([a, b])).toEqual(['a', 'b']);
+        expect(orden([b, a])).toEqual(['a', 'b']);
+    });
+
+    test('no altera la lista que recibe', () => {
+        const entrada = [contrato('b'), contrato('a')];
+        ordenarContratos(entrada);
+        expect(entrada.map((c) => c.id_contrato)).toEqual(['b', 'a']);
+    });
+});
 
 describe('filtrarContratos', () => {
     test('sin filtros, todos', () => {

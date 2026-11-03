@@ -8,6 +8,11 @@ export const etiquetaDeEstado = (contrato) => contrato.situacion ?? contrato.est
 /** Hasta cuándo está vigente: el de un activo incluye la prórroga en curso; el de uno terminado es su `fin`. */
 const vencimientoDe = (contrato) => contrato.preaviso?.vencimiento ?? fechaDeContrato(contrato.fin);
 
+/** El `inicio` más reciente primero, con desempate fijo: la API no ordena y una fila no debe saltar de página al recargar. */
+export const ordenarContratos = (contratos) => [...contratos].sort((a, b) =>
+    String(fechaDeContrato(b.inicio)).localeCompare(String(fechaDeContrato(a.inicio))) ||
+    a.id_contrato.localeCompare(b.id_contrato));
+
 /**
  * Los contratos que cumplen todos los filtros. El periodo es por traslape (vigentes en algún
  * momento entre `desde` y `hasta`); un extremo vacío no restringe.

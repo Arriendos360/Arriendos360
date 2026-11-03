@@ -7,10 +7,12 @@
  */
 
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 
 import {
+  CONTRASENA_POR_DEFECTO,
   app,
   cerrarBase,
   conServicio,
@@ -24,6 +26,7 @@ import {
 import { ROLES, USUARIO_SISTEMA } from '../src/models/constantes';
 import { RolUsuario } from '../src/models/RolUsuario';
 import { TokenRevocado } from '../src/models/TokenRevocado';
+import { Usuario } from '../src/models/Usuario';
 
 let propietario: Sesion;
 
@@ -148,6 +151,62 @@ describe('Login', () => {
   test('sin email ni contraseña responde 400, no 500', async () => {
     const respuesta = await request(app).post('/api/auth/login').send({});
     expect(respuesta.status).toBe(400);
+  });
+});
+
+describe('Correo sin distinción de mayúsculas', () => {
+  const GUARDADO = 'Mayus@Correo.test';
+
+  beforeAll(async () => {
+    await registrarPropietario({
+      email: GUARDADO,
+      nombres: 'Mayus',
+      apellidos: 'Cula',
+      documento: '400010',
+    });
+  });
+
+  test.each([
+    ['minúsculas contra uno guardado con mayúsculas', 'mayus@correo.test'],
+    ['mayúsculas contra uno guardado con minúsculas', 'LOGOUT@TEST.COM'],
+    ['espacios en los extremos', ' mayus@correo.test '],
+  ])('entra con %s', async (_caso, email) => {
+    expect((await iniciarSesion(email)).status).toBe(200);
+  });
+
+  test('responde el correo como se guardó', async () => {
+    const respuesta = await iniciarSesion('MAYUS@CORREO.TEST');
+    expect(respuesta.body.usuario.email).toBe(GUARDADO);
+  });
+
+  test('la contraseña sí distingue mayúsculas', async () => {
+    const respuesta = await iniciarSesion('mayus@correo.test', CONTRASENA_POR_DEFECTO.toUpperCase());
+    expect(respuesta.status).toBe(401);
+  });
+
+  test('un email que no es texto responde 401, no 500', async () => {
+    const respuesta = await request(app)
+      .post('/api/auth/login')
+      .send({ email: { a: 1 }, contrasena: CONTRASENA_POR_DEFECTO });
+    expect(respuesta.status).toBe(401);
+  });
+
+  test('la base rechaza una cuenta que sólo difiere en mayúsculas', async () => {
+    const autor = crypto.randomUUID();
+    await expect(
+      Usuario.create(
+        {
+          id_usuario: autor,
+          nombres: 'Doble',
+          apellidos: 'Cuenta',
+          email: GUARDADO.toUpperCase(),
+          contrasena: 'x',
+          documento: '400011',
+          creado_por: autor,
+        },
+        { usuarioAuditor: autor } as never,
+      ),
+    ).rejects.toThrow(/validation|unique/i);
   });
 });
 

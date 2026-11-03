@@ -64,7 +64,7 @@ export const celular: Regla<string> = (valor, etiqueta) => {
     : { error: `${etiqueta} debe tener 10 dígitos y empezar por 3` };
 };
 
-/** Una sola `@`, sin espacios y con punto en el dominio. Sin minúsculas: el login compara exacto. */
+/** Una sola `@`, sin espacios y con punto en el dominio. Se guarda con sus mayúsculas: la comparación no las distingue. */
 export const email: Regla<string> = (valor, etiqueta) => {
   const correo = texto(valor) ?? '';
 

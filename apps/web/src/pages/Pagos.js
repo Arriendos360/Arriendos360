@@ -10,12 +10,12 @@ import {
     listarCuentasCobro, listarMovimientos, registrarPago, transaccionesDeCuenta
 } from '../features/pagos/api';
 import {
-    FILTROS, cumple, desglosar, filtrarCuentas, filtrarMovimientos, totalMovimientos, totales
+    FILTROS, cumple, desglosar, filtrarCuentas, filtrarMovimientos, ordenarCuentas, totalMovimientos, totales
 } from '../features/pagos/desglose';
 import { validarFormularioCobro, validarFormularioPago } from '../features/pagos/reglas';
 import {
-    Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Select, Table,
-    aDecimal, formatearDinero, formatearFecha, formatearFechaHora, formatearMes, hoyEnBogota
+    Badge, Button, DateField, EmptyState, FormError, Input, Modal, MoneyField, Paginacion, Select, Table,
+    aDecimal, formatearDinero, formatearFecha, formatearFechaHora, formatearMes, hoyEnBogota, paginar
 } from '../ui';
 import { unir } from '../ui/clases';
 import { useValidacion } from '../ui/validacion';
@@ -253,9 +253,7 @@ export default function Pagos() {
     const cargar = useCallback(async () => {
         setErrorCarga(null);
         try {
-            const lista = await listarCuentasCobro();
-            // El servicio no ordena `GET /api/pagos`: el periodo más reciente primero.
-            setCuentas([...lista].sort((a, b) => String(b.inicio ?? b.fecha_creacion).localeCompare(String(a.inicio ?? a.fecha_creacion))));
+            setCuentas(ordenarCuentas(await listarCuentasCobro()));
         } catch (error) {
             setErrorCarga(error);
         } finally {
@@ -282,8 +280,10 @@ export default function Pagos() {
     const seleccion = { inmueble, contrato: elegido('contrato', opcionesContrato) };
     const estado = FILTROS.find((f) => f.clave === params.get('estado')) ?? FILTROS[0];
     const fechas = { desde: params.get('desde') ?? '', hasta: params.get('hasta') ?? '' };
+    // Todo cambio vuelve a la primera página; cambiar de página es un cambio más.
     const filtrar = (cambios) => setParams((actuales) => {
         const nuevos = new URLSearchParams(actuales);
+        nuevos.delete('pagina');
         for (const [clave, valor] of Object.entries(cambios)) {
             if (valor) nuevos.set(clave, valor); else nuevos.delete(clave);
         }
@@ -308,6 +308,10 @@ export default function Pagos() {
     }, [vista, movimientos, cargarMovimientos]);
 
     const movimientosVisibles = movimientos ? filtrarMovimientos(movimientos, { ...seleccion, ...fechas }) : [];
+
+    // Sólo la tabla usa la página: totales, conteos y desglose siguen sobre todo lo filtrado.
+    const pagina = paginar(vista === 'movimientos' ? movimientosVisibles : visibles, params.get('pagina'));
+    const cambiarPagina = (numero) => filtrar({ pagina: numero > 1 ? numero : '' });
 
     const abrir = (nuevo) => { setErrorDialogo(null); setDialogo(nuevo); };
     const cerrar = () => { if (!enviando) setDialogo(null); };
@@ -563,7 +567,7 @@ export default function Pagos() {
                     <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
                         <Table
                             columnas={columnas}
-                            filas={visibles}
+                            filas={pagina.filas}
                             claveFila="id_cuenta_cobro"
                             cargando={cargando}
                             vacio={
@@ -578,6 +582,7 @@ export default function Pagos() {
                                 />
                             }
                         />
+                        <Paginacion {...pagina} onCambiar={cambiarPagina} />
                     </div>
                     {filasDesglose.length > 0 && (
                         <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
@@ -606,7 +611,7 @@ export default function Pagos() {
                     <div className="bg-superficie border border-solid border-borde rounded-tarjeta">
                         <Table
                             columnas={columnasMovimientos}
-                            filas={movimientosVisibles}
+                            filas={pagina.filas}
                             claveFila="id_transaccion"
                             cargando={movimientos === null}
                             vacio={
@@ -615,6 +620,7 @@ export default function Pagos() {
                                     descripcion={movimientos?.length ? 'Prueba con otro filtro.' : 'Los pagos registrados aparecerán aquí.'} />
                             }
                         />
+                        <Paginacion {...pagina} onCambiar={cambiarPagina} />
                     </div>
                 </>
             ))}

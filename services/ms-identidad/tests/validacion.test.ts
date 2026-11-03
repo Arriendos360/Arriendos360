@@ -114,6 +114,20 @@ describe('POST /api/auth/registro', () => {
     expect(documento.status).toBe(400);
     expect(documento.body.errores).toEqual([{ campo: 'documento', mensaje: 'El documento ya está registrado' }]);
   });
+
+  test('un email que sólo difiere en mayúsculas cuenta como repetido', async () => {
+    const usuarios = await Usuario.count();
+    const respuesta = await registrar({
+      ...persona,
+      email: propietario.email.toUpperCase(),
+      documento: '20000010',
+      contrasena: 'segura123',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(respuesta.body.errores).toEqual([{ campo: 'email', mensaje: 'El email ya está registrado' }]);
+    expect(await Usuario.count()).toBe(usuarios);
+  });
 });
 
 describe('POST /api/usuarios/inquilinos', () => {
@@ -146,6 +160,16 @@ describe('POST /api/usuarios/inquilinos', () => {
     expect(respuesta.status).toBe(400);
     expect(campos(respuesta)).toEqual(['nombres', 'apellidos', 'documento', 'telefono']);
     expect(respuesta.body.contrasena_temporal).toBeUndefined();
+    expect(await temporalesEmitidas()).toBe(temporales);
+  });
+
+  test('un email que sólo difiere en mayúsculas responde 400, sin usuario ni temporal', async () => {
+    const [usuarios, temporales] = [await Usuario.count(), await temporalesEmitidas()];
+    const respuesta = await darDeAlta({ ...persona, email: propietario.email.toUpperCase(), documento: '20000011' });
+
+    expect(respuesta.status).toBe(400);
+    expect(respuesta.body.errores).toEqual([{ campo: 'email', mensaje: 'El email ya está registrado' }]);
+    expect(await Usuario.count()).toBe(usuarios);
     expect(await temporalesEmitidas()).toBe(temporales);
   });
 

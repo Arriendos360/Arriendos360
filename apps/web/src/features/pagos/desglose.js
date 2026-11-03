@@ -15,6 +15,14 @@ export const FILTROS = [
 
 export const cumple = (filtro, cuenta) => !filtro.estados || filtro.estados.includes(cuenta.estado);
 
+/**
+ * El periodo más reciente primero; un cobro sin periodo, por su creación. El desempate es fijo porque
+ * el servicio no ordena `GET /api/pagos` por completo, y una fila no debe saltar de página al recargar.
+ */
+export const ordenarCuentas = (cuentas) => [...cuentas].sort((a, b) =>
+    String(b.inicio ?? b.fecha_creacion).localeCompare(String(a.inicio ?? a.fecha_creacion)) ||
+    a.id_cuenta_cobro.localeCompare(b.id_cuenta_cobro));
+
 /** ¿Es la cuenta del inmueble y del contrato elegidos? Sin contrato compuesto, no se sabe de qué inmueble es. */
 const deLaSeleccion = (cuenta, { inmueble, contrato }) =>
     (!inmueble || cuenta?.Contrato?.id_inmueble === inmueble) && (!contrato || cuenta?.id_contrato === contrato);
