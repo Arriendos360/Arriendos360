@@ -42,23 +42,25 @@ const ESTADOS_PAGO = [
 /** Es un resumen con tres listas: menos filas que en las pantallas de consulta. */
 const TAMANO_PAGINA_DASHBOARD = 5;
 
-/**
- * Mide como mínimo lo que ocupa su cifra, y pasa a otra fila si no cabe: una cifra de dinero no se recorta.
- * `w-0 min-w-full` saca al título de esa medida: él sí puede partirse en dos líneas.
- */
+/** Ancho medio de un carácter de la cifra, en em. */
+const ANCHO_CARACTER = 0.56;
+
+/** La fuente de la cifra se reduce hasta que quepa en una línea: su ancho sale del de la tarjeta y de sus caracteres. */
 function Tarjeta({ titulo, icono: Icono, valor, tono = 'text-texto', alerta = false }) {
+    const cifra = String(valor);
     return (
-        <section className="box-border flex-[1_1_11rem] min-w-fit bg-superficie border border-solid border-borde rounded-tarjeta p-5">
-            <div className="flex items-start justify-between gap-3 w-0 min-w-full">
+        <section className="box-border flex flex-col min-w-0 [container-type:inline-size] bg-superficie border border-solid border-borde rounded-tarjeta p-5">
+            <div className="flex items-start justify-between gap-3">
                 <h2 className="m-0 text-xs font-medium uppercase tracking-label text-texto-label">{titulo}</h2>
                 <span className={unir(
-                    'flex items-center justify-center w-8 h-8 rounded-control shrink-0',
+                    'flex items-center justify-center w-8 h-8 rounded-control shrink-0 [@container(max-width:8.5rem)]:hidden',
                     alerta ? 'bg-rojo-tenue text-rojo-texto' : 'bg-chip text-indigo-medio'
                 )}>
                     <Icono size={16} aria-hidden="true" />
                 </span>
             </div>
-            <p className={unir('m-0 mt-3 text-3xl font-medium tabular-nums [overflow-wrap:anywhere]', tono)}>{valor}</p>
+            <p className={unir('m-0 mt-auto pt-3 text-3xl font-medium tabular-nums [overflow-wrap:anywhere]', tono)}
+                style={{ fontSize: `min(1.875rem, ${100 / (ANCHO_CARACTER * cifra.length)}cqi)` }}>{cifra}</p>
         </section>
     );
 }
@@ -133,7 +135,7 @@ export default function Dashboard() {
                     <Button variante="secundario" onClick={cargar}>Reintentar</Button>
                 </div>
             ) : (
-                <div className="flex flex-wrap gap-4">
+                <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Tarjeta titulo="Ingresos totales" icono={TrendingUp} tono="text-indigo-medio"
                         valor={cargando || !resumen ? '—' : formatearDinero(resumen.ingresos_totales)} />
                     <Tarjeta titulo="Contratos activos" icono={FileText}
