@@ -1,7 +1,7 @@
 /**
  * Transporte de correo: la única pieza del sistema que habla SMTP. `enviarCorreo`
  * lanza si no pudo enviar. Sin `EMAIL_USER`, el correo no sale de la máquina y se
- * imprime entero en el log.
+ * imprime entero en el log. A un dominio reservado no se envía nunca.
  */
 
 import nodemailer from 'nodemailer';
@@ -35,12 +35,27 @@ export interface ResultadoEnvio {
   simulado?: boolean;
 }
 
+/**
+ * Dominios reservados (RFC 2606 y 6761), como el `@arriendos360.test` de la demostración:
+ * no tienen buzón, y enviarles sólo devuelve un rebote al remitente.
+ */
+const DOMINIO_RESERVADO =
+  /@(?:[^@]+\.)?(?:test|example|invalid|localhost|example\.(?:com|net|org))$/i;
+
+export const esDominioReservado = (destinatario: string): boolean =>
+  DOMINIO_RESERVADO.test(destinatario);
+
 /** Manda un correo. Lanza si no pudo. Con `NODE_ENV=test` sólo lo simula. */
 export const enviarCorreo = async (
   destinatario: string,
   asunto: string,
   html: string,
 ): Promise<ResultadoEnvio> => {
+  if (esDominioReservado(destinatario)) {
+    console.log(`📭 ms-notificaciones: dominio reservado, no se envía a ${destinatario}: ${asunto}`);
+    return { messageId: 'dominio-reservado', simulado: true };
+  }
+
   if (process.env['NODE_ENV'] === 'test') {
     console.log(`🧪 [TEST MODE] Simulación de correo a ${destinatario}: ${asunto}`);
     return { messageId: 'test-id', simulado: true };
