@@ -26,8 +26,9 @@
  * Variables:
  *   URL_GATEWAY     por defecto `http://localhost:3001`.
  *   CORREO_MOROSO   correo real del inquilino moroso, para enseñar en vivo los avisos
- *                   de cobro. Sin ella se usa una dirección `@arriendos360.test`, que
- *                   no existe y rebota. Ninguna dirección personal entra al repositorio.
+ *                   de cobro. Sin ella se usa una dirección `@arriendos360.test`, un
+ *                   dominio reservado al que no se envía correo. Ninguna dirección
+ *                   personal entra al repositorio.
  */
 
 const GATEWAY = (process.env.URL_GATEWAY || 'http://localhost:3001').replace(/\/$/, '');
@@ -525,8 +526,9 @@ const sembrar = async () => {
 
   if (!process.env.CORREO_MOROSO) {
     console.log(
-      '\nAviso: los correos de la demostración van a direcciones @arriendos360.test, que no\n' +
-        'existen y rebotan. Para enseñarlos llegando de verdad, siembra con CORREO_MOROSO=<tu correo>.',
+      '\nAviso: las direcciones de la demostración son @arriendos360.test, un dominio reservado al\n' +
+        'que no se envía correo. Para enseñar los avisos llegando de verdad, siembra con\n' +
+        'CORREO_MOROSO=<tu correo>.',
     );
   }
 };

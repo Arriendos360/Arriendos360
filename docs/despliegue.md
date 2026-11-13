@@ -131,7 +131,8 @@ porque el sembrador entra como su propietaria. Es idempotente: repetirlo no dupl
 completa lo que haya quedado a medias. Contra Azure tarda unos minutos, porque las apps están
 dormidas y él las despierta esperando.
 
-Los correos van a direcciones `@arriendos360.test`, que no existen y rebotan. Con
+Los usuarios usan direcciones `@arriendos360.test`, un dominio reservado: ms-notificaciones no
+les envía nada y sólo lo anota en el log. Con
 `CORREO_MOROSO` el inquilino moroso recibe de verdad los avisos de cobro, que es lo que
 conviene enseñar en vivo. Ninguna dirección personal entra al repositorio.
 

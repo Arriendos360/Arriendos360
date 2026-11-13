@@ -568,12 +568,10 @@ un despliegue completo, con pruebas e imágenes, ~18 min.
 `ambos@arriendos360.test`, contraseña `Prueba123`), la cartera de demostración que siembra
 `infra/demo/sembrar-demo.js` sobre la propietaria —cinco inmuebles, cuatro contratos y su
 historial de cobros, con un caso de cada estado salvo Finalizado: el contrato terminado sale
-Cancelado, porque por la API no se siembra un preaviso vencido— y un propietario con el correo real del
-usuario, creado para probar la recuperación. El sembrador entra por el gateway como una
-persona más: no escribe en ninguna base, así que los eventos y las cuentas de cobro los
-genera el sistema. **Ninguna dirección personal va en el repositorio**; el remitente vive en
-el secreto `email-usuario` y el correo del inquilino moroso se pasa por `CORREO_MOROSO`.
-Borrar esa cuenta al terminar.
+Cancelado, porque por la API no se siembra un preaviso vencido. El sembrador entra por el
+gateway como una persona más: no escribe en ninguna base, así que los eventos y las cuentas de
+cobro los genera el sistema. **Ninguna dirección personal va en el repositorio**; el remitente
+vive en el secreto `email-usuario` y el correo del inquilino moroso se pasa por `CORREO_MOROSO`.
 
 **Riesgos vivos:**
 
@@ -624,6 +622,9 @@ Resuélvelas con un ADR cuando llegue el momento, no antes.
 
 - **En desarrollo el correo no sale de la máquina**: sin `EMAIL_USER` va al log de
   ms-notificaciones, único sitio donde leer el enlace de recuperación.
+- **A un dominio reservado no se envía nunca** (`.test`, `.example`, `.invalid`,
+  `.localhost`, `example.com`), aunque haya `EMAIL_USER`: rebotaría al remitente. El envío
+  queda `enviado` y sólo una línea en el log, sin el cuerpo (`config/mailer.ts`).
 - **La contraseña temporal se entrega en mano** (`docs/adr/0007`): el correo sólo avisa.
 - **Recargar la página cierra la sesión y devuelve al login.** No es un fallo del
   despliegue: el token vive en memoria (Capa 1, `apps/web/src/auth/sesion.js`). Lo que el
